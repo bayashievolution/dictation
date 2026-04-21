@@ -1911,9 +1911,8 @@ html, body {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.72);
-  backdrop-filter: blur(1px);
   animation: fadeIn 0.25s var(--ease-out);
-  z-index: 200;
+  z-index: 1;
 }
 .onboarding-spot {
   position: absolute;
@@ -1939,6 +1938,7 @@ html, body {
   color: var(--text);
   animation: bubbleIn 0.25s var(--ease-out);
   transition: top 0.35s var(--ease-out), left 0.35s var(--ease-out);
+  z-index: 10;
 }
 @keyframes bubbleIn {
   from { opacity: 0; transform: translateY(8px) scale(0.96); }
