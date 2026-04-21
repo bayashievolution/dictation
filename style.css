@@ -1299,6 +1299,7 @@ html, body {
 /* チャット入力欄は本文フォント設定の影響を受けず、統一デザイン（質問タブ／クイック両方） */
 .chat-input-area textarea {
   flex: 1;
+  min-width: 0;
   min-height: 38px;
   max-height: 200px;
   padding: 9px 12px;
@@ -1312,8 +1313,8 @@ html, body {
   resize: none;
   outline: none;
   transition: border-color 0.15s;
-  white-space: nowrap;
-  overflow-x: auto;
+  /* NOTE: textarea 本体に white-space: nowrap を付けると IME の変換が壊れる
+     → placeholder にだけ適用し、入力テキストは通常の折返しに任せる */
 }
 .chat-input-area textarea:focus {
   border-color: var(--accent);
