@@ -184,6 +184,32 @@ stopped → (録音開始) → listening
 メリット：サーバに上げれば他端末からも見られる／実装シンプル／Web Speech APIがそのまま使える。
 失うもの：タスクトレイ常駐・常時最前面・半透明・グローバルホットキー（Chromeでは提供不能）。
 
+### 2026-04-21 縮小ズーム(v<100%)の viewport 適合（**未解決・堂々巡り**）
+
+**症状**：zoom 80〜95% で、以下いずれかが必ず発生
+- case A: #app が viewport より右にはみ出し、「待機中」バッジやテキスト右端がクリップ
+- case B: #app が viewport より小さく表示され、周囲に黒い「額縁」が出る
+
+**試したアプローチ**（すべて本質的に同じ壁に当たった）：
+1. `zoom: z` + `width: 10000/v %` → Chrome が layout の 111% を clip、右端切れ
+2. `html, body { overflow: visible }` + 上記 → html スクロールバー発生
+3. `transform: scale(z)` + `transform-origin: 50% 0` + no inverse → 額縁
+4. `transform: scale(z)` + `transform-origin: top left` + 逆スケール → clip 同上
+5. `transform: scale(z) translate(...)` + 明示中央寄せ → 額縁
+6. `#app { width: 100vw; transform-origin: top left }` → 額縁
+
+**根本的に両立不可能な理由**：
+Chrome では `zoom` / `transform: scale` は**視覚のみ**スケールする。overflow clip は常に **layout 座標**で実行される。
+- layout を逆スケールで拡大 → 祖先 (body/html) が overflow:hidden で clip → 視覚的に右端欠落
+- layout をそのまま → 視覚が縮小されて viewport より小さい → 額縁
+
+**実現可能な道**（どれを選ぶか要判断）：
+- **A.** 縮小時に額縁を許容し、`body` の bg を **`--bg-elevated`** に揃えて「額縁のように見せない」
+- **B.** **ズーム下限を 100%** にする（拡大のみ許可、縮小はブラウザの Ctrl+- に任せる）
+- **C.** CSS custom property `--scale` で全要素の font-size / padding / gap を `calc(* var(--scale))` に書き換え。**大規模リファクタ（1–2時間）**だが「縮小でも viewport を自然に満たす」唯一の真の解
+
+現時点では**未解決**。やっさんと相談して選択肢を確定してから着手する。
+
 ### 2026-04-21 Notion風の内側タブ構造を導入
 
 「1セッション＝文字起こし／メモ／要約」の3面構成に変更。
