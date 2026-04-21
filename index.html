@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.9.24" />
+  <link rel="stylesheet" href="style.css?v=0.9.25" />
 </head>
 <body>
   <div id="app">
@@ -23,7 +23,7 @@
 
     <section id="controls">
       <button id="btn-toggle" class="btn btn-primary btn-square" title="録音開始（クリックで開始/停止）">
-        <span class="btn-icon" data-icon="play" data-icon-size="18"></span>
+        <span class="btn-icon" data-icon="record" data-icon-size="18"></span>
       </button>
       <span class="controls-sep"></span>
       <button id="btn-copy-all-plain" class="btn btn-secondary btn-square" disabled title="全タブをプレーンテキストでコピー">
@@ -43,6 +43,9 @@
       </button>
       <button id="btn-settings" class="btn btn-ghost btn-square" title="設定">
         <span class="btn-icon" data-icon="settings"></span>
+      </button>
+      <button id="btn-onboarding" class="btn btn-ghost btn-square" title="使い方ガイド">
+        <span class="btn-icon" data-icon="help-circle"></span>
       </button>
       <input type="file" id="file-load" accept=".html,.htm,.json" style="display:none" />
     </section>
@@ -102,10 +105,7 @@
         <div class="pane-body">
           <div id="confirmed" contenteditable="true" spellcheck="false"></div>
           <div id="interim"></div>
-          <div id="empty-hint" class="empty-hint">
-            録音開始を押すと文字起こしが始まります<br />
-            <small>※ 認識中も本文を直接編集できます。新しい認識結果は末尾に追加されます。</small>
-          </div>
+          <div id="empty-hint" class="empty-hint" hidden></div>
         </div>
         <button id="btn-scroll-bottom" class="scroll-bottom hidden" style="display:none" aria-hidden="true">
           <span data-icon="chevron-down"></span>
@@ -132,6 +132,9 @@
                 <button class="number-stepper-btn" data-pane-size-step="pane-memo:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
               </div>
             </div>
+            <button id="btn-memo-help" class="pane-btn pane-btn-icon" title="Markdownショートカット一覧を表示/非表示">
+              <span data-icon="help-circle"></span>
+            </button>
           </div>
         </div>
         <div class="pane-body">
@@ -194,10 +197,7 @@
         </div>
         <div class="pane-body">
           <div id="summary" contenteditable="true" spellcheck="false"></div>
-          <div id="summary-empty" class="empty-hint">
-            要約はまだ生成されていません。<br />
-            <small>録音停止後に自動生成、または「要約を生成」ボタンで即生成できます。</small>
-          </div>
+          <div id="summary-empty" class="empty-hint" hidden></div>
         </div>
       </div>
 
@@ -222,11 +222,7 @@
         </div>
         <div class="pane-body chat-body">
           <div id="chat-messages"></div>
-          <div id="chat-empty" class="empty-hint">
-            資料（文字起こし・メモ・要約）について質問できます<br />
-            <small>※ Geminiが資料を参照して回答します。推測はせず、分からない場合はそう答えます。</small><br />
-            <small>例: 「この会議で決まったことは？」「次のアクションは？」「◯◯について言及は？」</small>
-          </div>
+          <div id="chat-empty" class="empty-hint" hidden></div>
         </div>
         <div class="chat-input-area">
           <textarea id="chat-input" placeholder="資料について質問（Enter送信）" rows="1"></textarea>
@@ -412,6 +408,21 @@
     </div>
   </div>
 
+  <!-- 使い方ガイド オーバーレイ -->
+  <div id="onboarding" class="onboarding hidden">
+    <div class="onboarding-overlay"></div>
+    <div id="onboarding-spot" class="onboarding-spot"></div>
+    <div id="onboarding-bubble" class="onboarding-bubble">
+      <h3 id="onboarding-title"></h3>
+      <p id="onboarding-text"></p>
+      <div class="onboarding-actions">
+        <button class="onboarding-skip" type="button">スキップ</button>
+        <span class="onboarding-step" id="onboarding-step"></span>
+        <button class="onboarding-next" type="button" id="onboarding-next-btn">次へ</button>
+      </div>
+    </div>
+  </div>
+
   <!-- クイック質問モーダル（下からスライドアップ） -->
   <div id="quick-chat-modal" class="modal quick-chat hidden">
     <div class="modal-backdrop" data-dismiss></div>
@@ -459,8 +470,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.9.23"></script>
-  <script src="gemini.js?v=0.9.23"></script>
-  <script src="app.js?v=0.9.23"></script>
+  <script src="icons.js?v=0.9.25"></script>
+  <script src="gemini.js?v=0.9.25"></script>
+  <script src="app.js?v=0.9.25"></script>
 </body>
 </html>

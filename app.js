@@ -268,7 +268,7 @@ function setStatus(mode, label) {
 function setRecordingUI(isRec) {
   els.btnToggle.classList.toggle('recording', isRec);
   const iconEl = els.btnToggle.querySelector('[data-icon]');
-  if (iconEl && typeof setIcon === 'function') setIcon(iconEl, isRec ? 'stop' : 'play', 18);
+  if (iconEl && typeof setIcon === 'function') setIcon(iconEl, isRec ? 'record-stop' : 'record', 18);
   els.btnToggle.title = isRec ? '停止' : '録音開始';
   renderTabs();
 }
@@ -2586,6 +2586,110 @@ els.fileLoad.addEventListener('change', (e) => {
 });
 els.btnClearAll.addEventListener('click', clearAllPanes);
 els.btnSettings.addEventListener('click', openSettings);
+
+/* ───────── Onboarding ───────── */
+const ONBOARDING_STEPS = [
+  {
+    target: '#btn-toggle',
+    title: '録音開始',
+    text: 'ここを押すと文字起こしが始まります。認識中も本文を直接編集できます。新しい認識結果は末尾に自動追加されます。',
+  },
+  {
+    target: '.inner-tab[data-pane="pane-transcript"]',
+    title: '文字起こし',
+    text: 'リアルタイムで音声がテキスト化されます。「文字起こし整形」をONにすると Gemini が段落分け・句読点を自動調整します。',
+  },
+  {
+    target: '.inner-tab[data-pane="pane-memo"]',
+    title: 'メモ',
+    text: 'Markdown ショートカット対応（# 見出し / - 箇条書き / [] チェック等）。講義・会議中の気づきを自由に書けます。',
+  },
+  {
+    target: '.inner-tab[data-pane="pane-summary"]',
+    title: '要約',
+    text: '録音停止後に自動生成されます。「要約を生成」ボタンで手動生成も可能。詳細度は低/中/高から選択できます。',
+  },
+  {
+    target: '.inner-tab[data-pane="pane-chat"]',
+    title: '質問',
+    text: '資料（文字起こし・メモ・要約）について Gemini に質問できます。「この会議で決まったことは？」「◯◯について言及は？」など。推測はせず、資料に無いことは「分かりません」と答えます。',
+  },
+  {
+    target: '#btn-quick-chat',
+    title: 'クイック質問',
+    text: '文字起こしを見ながらすぐに質問したい時はこのボタン。下からモーダルが出て、タブを切替えずに問えます。',
+  },
+  {
+    target: '#btn-settings',
+    title: '設定',
+    text: 'Gemini API キー、フォント・サイズ、要約の詳細度、音声入力モード（Web Speech / Gemini Audio）などをここで調整します。',
+  },
+];
+
+let onboardingIdx = 0;
+function onboardingPosition() {
+  const step = ONBOARDING_STEPS[onboardingIdx];
+  if (!step) { closeOnboarding(); return; }
+  const target = document.querySelector(step.target);
+  const spot = document.getElementById('onboarding-spot');
+  const bubble = document.getElementById('onboarding-bubble');
+  document.getElementById('onboarding-title').textContent = step.title;
+  document.getElementById('onboarding-text').textContent = step.text;
+  document.getElementById('onboarding-step').textContent = `${onboardingIdx + 1} / ${ONBOARDING_STEPS.length}`;
+  document.getElementById('onboarding-next-btn').textContent =
+    onboardingIdx === ONBOARDING_STEPS.length - 1 ? '完了' : '次へ';
+
+  if (!target) { spot.style.display = 'none'; return; }
+  spot.style.display = '';
+  const rect = target.getBoundingClientRect();
+  const pad = 6;
+  spot.style.top = (rect.top - pad) + 'px';
+  spot.style.left = (rect.left - pad) + 'px';
+  spot.style.width = (rect.width + pad * 2) + 'px';
+  spot.style.height = (rect.height + pad * 2) + 'px';
+
+  // bubble positioning: 下方に出す、はみ出すなら上方
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const bubbleW = Math.min(320, vw - 24);
+  bubble.style.maxWidth = bubbleW + 'px';
+  const rectBottom = rect.bottom + pad;
+  const bubbleHEst = 180;
+  let top, left;
+  if (rectBottom + bubbleHEst + 12 < vh) {
+    top = rectBottom + 12;
+  } else {
+    top = Math.max(12, rect.top - pad - bubbleHEst - 12);
+  }
+  left = Math.max(12, Math.min(vw - bubbleW - 12, rect.left + rect.width / 2 - bubbleW / 2));
+  bubble.style.top = top + 'px';
+  bubble.style.left = left + 'px';
+}
+
+function startOnboarding() {
+  onboardingIdx = 0;
+  document.getElementById('onboarding').classList.remove('hidden');
+  onboardingPosition();
+}
+function nextOnboarding() {
+  onboardingIdx++;
+  if (onboardingIdx >= ONBOARDING_STEPS.length) {
+    closeOnboarding();
+    return;
+  }
+  onboardingPosition();
+}
+function closeOnboarding() {
+  document.getElementById('onboarding').classList.add('hidden');
+}
+const btnOnboarding = document.getElementById('btn-onboarding');
+if (btnOnboarding) btnOnboarding.addEventListener('click', startOnboarding);
+document.getElementById('onboarding-next-btn')?.addEventListener('click', nextOnboarding);
+document.querySelector('#onboarding .onboarding-skip')?.addEventListener('click', closeOnboarding);
+document.querySelector('#onboarding .onboarding-overlay')?.addEventListener('click', closeOnboarding);
+window.addEventListener('resize', () => {
+  if (!document.getElementById('onboarding').classList.contains('hidden')) onboardingPosition();
+});
 if (els.btnSummaryCombo) {
   els.btnSummaryCombo.addEventListener('click', async (e) => {
     // あたり判定: ノブ(track)=自動ON/OFFトグル、それ以外=今すぐ生成
@@ -2815,11 +2919,34 @@ function checkMemoMarkdown() {
   }
 }
 
+// state.cheatsheetForced: null=auto, 'shown'=常時表示, 'hidden'=常時非表示
 function updateMemoCheatsheetVisibility() {
   const sheet = document.getElementById('memo-cheatsheet');
   if (!sheet) return;
-  const empty = !els.memo.textContent.trim() && !els.memo.querySelector('*:not(br)');
-  sheet.classList.toggle('hidden', !empty);
+  const helpBtn = document.getElementById('btn-memo-help');
+  let show;
+  if (state.cheatsheetForced === 'shown') show = true;
+  else if (state.cheatsheetForced === 'hidden') show = false;
+  else {
+    // auto: メモが空の時だけ表示
+    show = !els.memo.textContent.trim() && !els.memo.querySelector('*:not(br)');
+  }
+  sheet.classList.toggle('hidden', !show);
+  if (helpBtn) helpBtn.classList.toggle('active', show);
+}
+
+function toggleMemoCheatsheet() {
+  const sheet = document.getElementById('memo-cheatsheet');
+  if (!sheet) return;
+  const currentlyShown = !sheet.classList.contains('hidden');
+  state.cheatsheetForced = currentlyShown ? 'hidden' : 'shown';
+  updateMemoCheatsheetVisibility();
+}
+
+// ? ヘルプボタン: チートシートを手動トグル
+const btnMemoHelp = document.getElementById('btn-memo-help');
+if (btnMemoHelp) {
+  btnMemoHelp.addEventListener('click', toggleMemoCheatsheet);
 }
 
 let memoIsComposing = false;
