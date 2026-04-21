@@ -1374,9 +1374,10 @@ html, body {
   font-size: 13px;
   color: var(--text);
 }
+/* font-row の select / stepper を同じ高さで揃える */
 .font-row select,
-.font-row input[type="number"] {
-  padding: 6px 8px;
+.font-row .number-stepper {
+  height: 30px;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
@@ -1385,16 +1386,47 @@ html, body {
   font-size: 13px;
   outline: none;
   transition: border-color 0.15s;
+  box-sizing: border-box;
 }
-.font-row select { cursor: pointer; }
-.font-row input[type="number"] { width: 100%; }
+.font-row select {
+  padding: 0 28px 0 8px;
+  cursor: pointer;
+}
 .font-row select:hover,
-.font-row input:hover {
+.font-row .number-stepper:hover {
   border-color: #4a4a54;
 }
 .font-row select:focus,
-.font-row input:focus {
+.font-row .number-stepper:focus-within {
   border-color: var(--accent);
+}
+
+/* font-row 内のステッパーは親 border を使うので、stepper 自身の border は消す */
+.font-row .number-stepper {
+  display: flex;
+  overflow: hidden;
+}
+.font-row .number-stepper input[type="number"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 6px;
+  font-size: 13px;
+  text-align: center;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  outline: none;
+  height: 100%;
+  -moz-appearance: textfield;
+}
+.font-row .number-stepper input[type="number"]::-webkit-inner-spin-button,
+.font-row .number-stepper input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.font-row .number-stepper .number-stepper-btns {
+  width: 22px;
+  border-left: 1px solid var(--border);
 }
 .font-row .unit {
   font-size: 11px;
@@ -1594,12 +1626,26 @@ html, body {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+.field-row span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.field-row strong {
+  font-weight: 600;
 }
 
-.field-row input[type="checkbox"] {
+.field-row input[type="checkbox"],
+.field-row input[type="radio"],
+.field input[type="checkbox"],
+.field input[type="radio"] {
   width: 16px;
   height: 16px;
   accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .field-label {

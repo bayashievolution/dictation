@@ -1516,9 +1516,16 @@ function applyAppZoom(v) {
   if (!app) return;
   const z = v / 100;
   app.style.zoom = z;
-  // ビューポートをカバーするために逆スケール（浮き・はみ出し防止）
-  app.style.height = (10000 / v) + 'vh';
-  app.style.width  = (10000 / v) + '%';
+  // zoom > 100% のとき：ビューポート内に収めるため逆スケールで #app を小さく
+  // zoom < 100% のとき：逆スケールすると body を横にはみ出し clip されるため
+  //                     #app は 100% のまま（背景色は body と揃ってるので隙間は不可視）
+  if (v > 100) {
+    app.style.height = (10000 / v) + 'vh';
+    app.style.width  = (10000 / v) + '%';
+  } else {
+    app.style.height = '100vh';
+    app.style.width  = '';
+  }
 }
 
 function applyPaneOrder() {
@@ -1792,7 +1799,6 @@ function renderPaneOrderList() {
     const meta = PANE_META[id];
     const item = document.createElement('div');
     item.className = 'pane-order-item';
-    item.draggable = true;
     item.dataset.paneId = id;
     item.innerHTML = `
       <span class="pane-order-grip" aria-hidden="true">
