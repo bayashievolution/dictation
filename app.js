@@ -10,6 +10,8 @@
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 const SETTINGS_KEY = 'dictation:settings';
+const SESSIONS_KEY = 'dictation:sessions';
+const ACTIVE_TAB_KEY = 'dictation:activeTab';
 const DEFAULT_SETTINGS = {
   apiKey: '',
   silenceSec: 3,
@@ -17,6 +19,8 @@ const DEFAULT_SETTINGS = {
   autoStopSec: 120,
   autoStopEnabled: true,
 };
+
+const AUTOSAVE_INTERVAL_MS = 15000;
 
 const state = {
   recognition: null,
@@ -32,6 +36,11 @@ const state = {
   longSilenceTimer: null,
   silenceCountdownTimer: null,
   silenceCountdownLeft: 0,
+  autoSaveTimer: null,
+
+  sessions: [],
+  activeId: null,
+  isSwitching: false,
 };
 
 const els = {
@@ -62,6 +71,8 @@ const els = {
   inputAiEnabled: document.getElementById('input-ai-enabled'),
   inputAutoStop: document.getElementById('input-auto-stop'),
   inputAutoStopSec: document.getElementById('input-auto-stop-sec'),
+  tabsList: document.getElementById('tabs-list'),
+  btnTabNew: document.getElementById('btn-tab-new'),
 };
 
 /* ───────── Settings ───────── */
@@ -97,6 +108,7 @@ function setRecordingUI(isRec) {
   els.btnToggle.classList.toggle('recording', isRec);
   els.btnToggle.querySelector('.btn-icon').textContent = isRec ? '⏹' : '▶';
   els.btnToggle.querySelector('.btn-label').textContent = isRec ? '停止' : '録音開始';
+  if (typeof renderTabs === 'function') renderTabs();
 }
 
 function hideEmptyHint() {
@@ -224,6 +236,10 @@ async function flushPendingToGemini() {
     targetEl.className = 'paragraph refined';
     setParagraphContent(targetEl, refined || rawText);
     updateActionButtons();
+    if (typeof snapshotActiveToSession === 'function') {
+      snapshotActiveToSession();
+      persistSessions();
+    }
   } catch (e) {
     console.error('Gemini refinement failed:', e);
     targetEl.className = 'paragraph';
@@ -323,6 +339,9 @@ function buildRecognition() {
     if (gotFinal || interim) {
       resetSilenceTimer();
       resetLongSilenceTimer();
+      if (els.silenceDialog && !els.silenceDialog.classList.contains('hidden')) {
+        hideSilenceDialog();
+      }
     }
     autoScroll();
   };
@@ -382,7 +401,10 @@ function stopRecording() {
   setRecordingUI(false);
   els.interim.textContent = '';
   clearAllTimers();
-  flushPendingToGemini();
+  flushPendingToGemini().finally(() => {
+    snapshotActiveToSession();
+    persistSessions();
+  });
 }
 
 /* ───────── Actions ───────── */
@@ -404,12 +426,14 @@ function exportMarkdown() {
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
   const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
-  const header = `# dictation ${stamp}\n\n`;
+  const session = getActiveSession();
+  const safeTitle = (session?.title || 'dictation').replace(/[\\/:*?"<>|]/g, '_');
+  const header = `# ${session?.title || 'dictation'} (${stamp})\n\n`;
   const blob = new Blob([header + text], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `dictation-${stamp}.md`;
+  a.download = `${safeTitle}-${stamp}.md`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -418,13 +442,15 @@ function exportMarkdown() {
 
 function clearAll() {
   if (!getConfirmedText() && !els.interim.textContent && !state.pendingChunkEl) return;
-  if (!confirm('書き起こしをすべてクリアしますか？')) return;
+  if (!confirm('このタブの書き起こしをすべてクリアしますか？')) return;
   els.confirmed.innerHTML = '';
   els.interim.textContent = '';
   state.pendingChunkEl = null;
   state.pendingChunkText = '';
   updateActionButtons();
   if (els.emptyHint) els.emptyHint.hidden = false;
+  snapshotActiveToSession();
+  persistSessions();
 }
 
 function toggleAi() {
@@ -485,7 +511,15 @@ els.btnSilenceContinue.addEventListener('click', () => {
   resetLongSilenceTimer();
 });
 
-els.confirmed.addEventListener('input', updateActionButtons);
+let editSaveTimer = null;
+els.confirmed.addEventListener('input', () => {
+  updateActionButtons();
+  if (editSaveTimer) clearTimeout(editSaveTimer);
+  editSaveTimer = setTimeout(() => {
+    snapshotActiveToSession();
+    persistSessions();
+  }, 800);
+});
 
 els.transcript.addEventListener('scroll', () => {
   state.userScrolledUp = !isPinnedToBottom();
@@ -514,7 +548,204 @@ if (!SpeechRecognition) {
 }
 
 loadSettings();
+initSessions();
+renderTabs();
+loadActiveSessionIntoDOM();
 updateActionButtons();
+startAutoSave();
+
+/* ───────── Sessions (tabs) ───────── */
+
+function initSessions() {
+  try {
+    const raw = localStorage.getItem(SESSIONS_KEY);
+    if (raw) state.sessions = JSON.parse(raw);
+  } catch (e) {
+    console.warn('loadSessions failed', e);
+    state.sessions = [];
+  }
+  state.activeId = localStorage.getItem(ACTIVE_TAB_KEY);
+  if (!Array.isArray(state.sessions) || state.sessions.length === 0) {
+    createSession({ activate: true, skipSave: false });
+    return;
+  }
+  if (!state.sessions.find(s => s.id === state.activeId)) {
+    state.activeId = state.sessions[0].id;
+  }
+}
+
+function persistSessions() {
+  try {
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify(state.sessions));
+    if (state.activeId) localStorage.setItem(ACTIVE_TAB_KEY, state.activeId);
+  } catch (e) {
+    console.error('persistSessions failed', e);
+  }
+}
+
+function defaultTitle() {
+  const n = new Date();
+  const pad = x => String(x).padStart(2, '0');
+  return `${pad(n.getMonth()+1)}/${pad(n.getDate())} ${pad(n.getHours())}:${pad(n.getMinutes())}`;
+}
+
+function createSession({ activate = true, title = null, skipSave = false } = {}) {
+  const id = 's_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+  const session = {
+    id,
+    title: title || defaultTitle(),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    html: '',
+  };
+  state.sessions.push(session);
+  if (activate) state.activeId = id;
+  if (!skipSave) persistSessions();
+  renderTabs();
+  if (activate) loadActiveSessionIntoDOM();
+  return session;
+}
+
+function getActiveSession() {
+  return state.sessions.find(s => s.id === state.activeId);
+}
+
+function snapshotActiveToSession() {
+  const s = getActiveSession();
+  if (!s) return;
+  s.html = els.confirmed.innerHTML;
+  s.updatedAt = Date.now();
+}
+
+function loadActiveSessionIntoDOM() {
+  const s = getActiveSession();
+  els.confirmed.innerHTML = s?.html || '';
+  els.interim.textContent = '';
+  state.pendingChunkEl = null;
+  state.pendingChunkText = '';
+  if (els.emptyHint) els.emptyHint.hidden = !!els.confirmed.innerHTML;
+  updateActionButtons();
+  state.userScrolledUp = false;
+  requestAnimationFrame(() => autoScroll(true));
+}
+
+function switchSession(id) {
+  if (id === state.activeId) return;
+  state.isSwitching = true;
+  if (state.isRecording) stopRecording();
+  snapshotActiveToSession();
+  persistSessions();
+  state.activeId = id;
+  persistSessions();
+  renderTabs();
+  loadActiveSessionIntoDOM();
+  state.isSwitching = false;
+}
+
+function closeSession(id) {
+  const idx = state.sessions.findIndex(s => s.id === id);
+  if (idx < 0) return;
+  const session = state.sessions[idx];
+  if (session.html && !confirm(`「${session.title}」を閉じます。この内容は削除されます。よろしいですか？`)) return;
+  const wasActive = state.activeId === id;
+  if (wasActive && state.isRecording) stopRecording();
+  state.sessions.splice(idx, 1);
+  if (state.sessions.length === 0) {
+    createSession({ activate: true, skipSave: true });
+  } else if (wasActive) {
+    state.activeId = state.sessions[Math.max(0, idx - 1)].id;
+    loadActiveSessionIntoDOM();
+  }
+  persistSessions();
+  renderTabs();
+}
+
+function renameSession(id, title) {
+  const s = state.sessions.find(x => x.id === id);
+  if (!s) return;
+  s.title = title.trim() || defaultTitle();
+  s.updatedAt = Date.now();
+  persistSessions();
+  renderTabs();
+}
+
+function renderTabs() {
+  els.tabsList.innerHTML = '';
+  for (const session of state.sessions) {
+    const tab = document.createElement('div');
+    tab.className = 'tab' + (session.id === state.activeId ? ' active' : '');
+    if (state.isRecording && session.id === state.activeId) tab.classList.add('recording');
+    tab.dataset.id = session.id;
+
+    const title = document.createElement('span');
+    title.className = 'tab-title';
+    title.textContent = session.title;
+    title.title = session.title;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'tab-close';
+    closeBtn.textContent = '✕';
+    closeBtn.title = '閉じる';
+
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeSession(session.id);
+    });
+
+    tab.addEventListener('click', () => {
+      if (title.getAttribute('contenteditable') === 'true') return;
+      switchSession(session.id);
+    });
+
+    title.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      title.setAttribute('contenteditable', 'true');
+      title.focus();
+      document.getSelection().selectAllChildren(title);
+    });
+
+    title.addEventListener('blur', () => {
+      if (title.getAttribute('contenteditable') === 'true') {
+        title.removeAttribute('contenteditable');
+        renameSession(session.id, title.textContent);
+      }
+    });
+
+    title.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        title.blur();
+      } else if (e.key === 'Escape') {
+        title.textContent = session.title;
+        title.blur();
+      }
+    });
+
+    tab.appendChild(title);
+    tab.appendChild(closeBtn);
+    els.tabsList.appendChild(tab);
+  }
+}
+
+function startAutoSave() {
+  if (state.autoSaveTimer) clearInterval(state.autoSaveTimer);
+  state.autoSaveTimer = setInterval(() => {
+    snapshotActiveToSession();
+    persistSessions();
+  }, AUTOSAVE_INTERVAL_MS);
+}
+
+window.addEventListener('beforeunload', () => {
+  snapshotActiveToSession();
+  persistSessions();
+});
+
+els.btnTabNew.addEventListener('click', () => {
+  if (state.isRecording) stopRecording();
+  snapshotActiveToSession();
+  persistSessions();
+  createSession({ activate: true });
+});
 
 /* ───────── Electron window controls ───────── */
 

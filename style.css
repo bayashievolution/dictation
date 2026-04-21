@@ -232,6 +232,128 @@ html, body {
   font-size: 14px;
 }
 
+/* ───────── Tabs ───────── */
+#tabs {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  padding: 0 8px;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  flex-shrink: 0;
+}
+
+#tabs::-webkit-scrollbar {
+  height: 4px;
+}
+#tabs::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
+
+#tabs-list {
+  display: flex;
+  gap: 2px;
+  align-items: stretch;
+  min-height: 34px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 6px 12px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  border-radius: 6px 6px 0 0;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  max-width: 180px;
+  transition: background 0.12s var(--ease-snap), color 0.12s;
+  border-top: 2px solid transparent;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.tab:hover {
+  background: #30303a;
+  color: var(--text);
+}
+
+.tab.active {
+  background: var(--bg);
+  color: var(--text);
+  border-top-color: var(--accent);
+}
+
+.tab.recording {
+  border-top-color: var(--danger);
+}
+
+.tab-title {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 12px;
+  padding: 0;
+  outline: none;
+  min-width: 40px;
+  font-family: inherit;
+}
+
+.tab-title[contenteditable="true"] {
+  background: rgba(255,255,255,0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.tab-close {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.tab-close:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.tab-new {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 28px;
+  font-size: 16px;
+  cursor: pointer;
+  margin-top: 4px;
+  border-radius: 4px;
+  transition: all 0.12s var(--ease-snap);
+  flex-shrink: 0;
+}
+
+.tab-new:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
 /* ───────── Transcript ───────── */
 #transcript {
   flex: 1;
