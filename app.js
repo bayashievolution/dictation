@@ -987,12 +987,13 @@ function applyDisplaySettings() {
   const s = state.settings;
   const root = document.documentElement;
   root.style.setProperty('--transcript-font', FONT_FAMILIES[s.transcriptFont] || FONT_FAMILIES.sans);
-  root.style.setProperty('--transcript-size', (s.transcriptSize || 17) + 'px');
+  root.style.setProperty('--transcript-size', (s.transcriptSize || 15) + 'px');
   root.style.setProperty('--memo-font', FONT_FAMILIES[s.memoFont] || FONT_FAMILIES.sans);
   root.style.setProperty('--memo-size', (s.memoSize || 15) + 'px');
   root.style.setProperty('--summary-font', FONT_FAMILIES[s.summaryFont] || FONT_FAMILIES.sans);
   root.style.setProperty('--summary-size', (s.summarySize || 15) + 'px');
-  document.body.style.zoom = ((s.appZoom || 100) / 100);
+  const app = document.getElementById('app');
+  if (app) app.style.zoom = ((s.appZoom || 100) / 100);
 }
 
 function applyPaneOrder() {
@@ -1546,7 +1547,8 @@ els.btnSettingsSave.addEventListener('click', saveSettingsFromForm);
 function setZoom(pct, persist = true) {
   const v = Math.max(75, Math.min(200, Math.round(pct / 5) * 5 || 100));
   state.settings.appZoom = v;
-  document.body.style.zoom = v / 100;
+  const app = document.getElementById('app');
+  if (app) app.style.zoom = v / 100;
   els.zoomRange.value = v;
   els.zoomPercent.textContent = v + '%';
   if (persist) saveSettings();
