@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.9.35" />
+  <link rel="stylesheet" href="style.css?v=0.9.36" />
 </head>
 <body>
   <div id="app">
@@ -116,7 +116,7 @@
         <button id="btn-scroll-bottom" class="scroll-bottom hidden" style="display:none" aria-hidden="true">
           <span data-icon="chevron-down"></span>
         </button>
-        <button id="btn-quick-chat" class="quick-chat-fab" title="今の内容をAIに質問（モーダルが下から出現）">
+        <button id="btn-quick-chat" class="quick-chat-fab" title="今の内容をAIに質問（フロートウィンドウ）">
           <span data-icon="bot" data-icon-size="20"></span>
         </button>
       </div>
@@ -429,30 +429,21 @@
     </div>
   </div>
 
-  <!-- クイック質問モーダル（下からスライドアップ） -->
-  <div id="quick-chat-modal" class="modal quick-chat hidden">
-    <div class="modal-backdrop" data-dismiss></div>
-    <div class="modal-card modal-sheet">
-      <div class="sheet-handle-wrap" role="button" tabindex="0" title="ドラッグで下げて閉じる／クリックでも閉じる">
-        <span class="sheet-handle"></span>
-      </div>
-      <div class="modal-header">
-        <h2><span data-icon="bot"></span> 資料について質問</h2>
-        <button class="modal-close" data-dismiss title="閉じる"><span data-icon="x"></span></button>
-      </div>
-      <div class="modal-body quick-chat-body">
-        <div id="quick-chat-messages"></div>
-        <div id="quick-chat-empty" class="empty-hint">
-          文字起こし・メモ・要約を参照して Gemini が答えます。<br />
-          <small>ここでの会話は「質問」タブにも保存されます。</small>
-        </div>
-      </div>
-      <div class="chat-input-area">
-        <textarea id="quick-chat-input" placeholder="質問を入力（Enter送信）" rows="1"></textarea>
-        <button id="btn-quick-chat-send" class="btn btn-primary btn-square" title="送信">
-          <span data-icon="send"></span>
-        </button>
-      </div>
+  <!-- クイック質問フロートウィンドウ（ヘッダでドラッグ移動） -->
+  <div id="quick-chat-modal" class="float-window quick-chat" role="dialog" aria-label="資料について質問">
+    <div class="float-window-header" title="ドラッグで移動">
+      <h2><span data-icon="bot"></span> 資料について質問</h2>
+      <button class="modal-close" data-dismiss title="閉じる"><span data-icon="x"></span></button>
+    </div>
+    <div class="modal-body quick-chat-body">
+      <div id="quick-chat-messages"></div>
+      <div id="quick-chat-empty" class="empty-hint"></div>
+    </div>
+    <div class="chat-input-area">
+      <textarea id="quick-chat-input" placeholder="質問を入力（Enter送信）" rows="1"></textarea>
+      <button id="btn-quick-chat-send" class="btn btn-primary btn-square" title="送信">
+        <span data-icon="send"></span>
+      </button>
     </div>
   </div>
 
@@ -476,8 +467,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.9.35"></script>
-  <script src="gemini.js?v=0.9.35"></script>
-  <script src="app.js?v=0.9.35"></script>
+  <script src="icons.js?v=0.9.36"></script>
+  <script src="gemini.js?v=0.9.36"></script>
+  <script src="app.js?v=0.9.36"></script>
 </body>
 </html>

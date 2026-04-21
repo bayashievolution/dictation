@@ -3324,77 +3324,116 @@ els.chatInput.addEventListener('keydown', (e) => {
 });
 els.btnChatSend.addEventListener('click', sendChatMessage);
 
-/* ───────── クイック質問モーダル ───────── */
+/* ───────── クイック質問フロートウィンドウ ───────── */
+// ウィンドウの位置は localStorage に保持（開きっぱなしの感覚）
+const FLOAT_POS_KEY = 'dictation:quickChatFloatPos';
+function loadFloatPos() {
+  try { return JSON.parse(localStorage.getItem(FLOAT_POS_KEY) || 'null'); } catch { return null; }
+}
+function saveFloatPos(x, y) {
+  try { localStorage.setItem(FLOAT_POS_KEY, JSON.stringify({ x, y })); } catch {}
+}
+function clampFloatWindow() {
+  // ウィンドウがビューポート外に出ないよう位置をクランプ
+  const win = els.quickChatModal;
+  if (!win || !win.classList.contains('positioned')) return;
+  const rect = win.getBoundingClientRect();
+  const margin = 4;
+  const maxX = window.innerWidth - rect.width - margin;
+  const maxY = window.innerHeight - rect.height - margin;
+  let x = parseFloat(win.style.left) || 0;
+  let y = parseFloat(win.style.top) || 0;
+  x = Math.max(margin, Math.min(x, maxX));
+  y = Math.max(margin, Math.min(y, maxY));
+  win.style.left = `${x}px`;
+  win.style.top = `${y}px`;
+}
+
 function openQuickChat() {
   if (!els.quickChatModal) return;
-  els.quickChatModal.classList.remove('hidden', 'closing');
+  // 保存された位置を復元
+  const pos = loadFloatPos();
+  if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y)) {
+    els.quickChatModal.classList.add('positioned');
+    els.quickChatModal.style.left = `${pos.x}px`;
+    els.quickChatModal.style.top = `${pos.y}px`;
+  }
   renderChatInto(els.quickChatMessages, els.quickChatEmpty, els.quickChatBody);
-  setTimeout(() => els.quickChatInput?.focus(), 60);
+  // 次フレームで .show を付けてフェードイン（visibility の hidden→visible の猶予）
+  requestAnimationFrame(() => {
+    els.quickChatModal.classList.add('show');
+    requestAnimationFrame(() => {
+      clampFloatWindow();
+      setTimeout(() => els.quickChatInput?.focus(), 60);
+    });
+  });
 }
 function closeQuickChat() {
   if (!els.quickChatModal) return;
-  els.quickChatModal.classList.add('closing');
-  setTimeout(() => {
-    els.quickChatModal.classList.remove('closing');
-    els.quickChatModal.classList.add('hidden');
-  }, 240);
+  els.quickChatModal.classList.remove('show');
+  // visibility: hidden は CSS transition の delay で自動的に追いつく
 }
 if (els.btnQuickChat) {
-  els.btnQuickChat.addEventListener('click', openQuickChat);
+  els.btnQuickChat.addEventListener('click', () => {
+    // トグル: 開いていたら閉じる
+    if (els.quickChatModal?.classList.contains('show')) closeQuickChat();
+    else openQuickChat();
+  });
 }
 if (els.quickChatModal) {
   els.quickChatModal.querySelectorAll('[data-dismiss]').forEach(b => {
     b.addEventListener('click', closeQuickChat);
   });
 
-  // シートハンドル: クリックで閉じる＋下ドラッグで閉じる
-  const handle = els.quickChatModal.querySelector('.sheet-handle-wrap');
-  const sheet = els.quickChatModal.querySelector('.modal-sheet');
-  if (handle && sheet) {
-    let startY = 0;
-    let currentY = 0;
+  // ヘッダでウィンドウをドラッグ移動（Photoshop風）
+  const header = els.quickChatModal.querySelector('.float-window-header');
+  const win = els.quickChatModal;
+  if (header && win) {
+    let startX = 0, startY = 0;
+    let originX = 0, originY = 0;
     let dragging = false;
-    let moved = false;
-    handle.addEventListener('pointerdown', (e) => {
+    header.addEventListener('pointerdown', (e) => {
+      // 閉じるボタンはドラッグ開始しない
+      if (e.target.closest('[data-dismiss]')) return;
+      // まだ中央寄せ（translate）の場合は、現在位置を left/top に固定してから移動開始
+      if (!win.classList.contains('positioned')) {
+        const rect = win.getBoundingClientRect();
+        win.classList.add('positioned');
+        win.style.left = `${rect.left}px`;
+        win.style.top = `${rect.top}px`;
+      }
+      startX = e.clientX;
       startY = e.clientY;
-      currentY = 0;
-      moved = false;
+      originX = parseFloat(win.style.left) || 0;
+      originY = parseFloat(win.style.top) || 0;
       dragging = true;
-      sheet.style.transition = 'none';
-      try { handle.setPointerCapture(e.pointerId); } catch {}
+      header.classList.add('dragging');
+      try { header.setPointerCapture(e.pointerId); } catch {}
+      e.preventDefault();
     });
-    handle.addEventListener('pointermove', (e) => {
+    header.addEventListener('pointermove', (e) => {
       if (!dragging) return;
-      currentY = Math.max(0, e.clientY - startY);
-      if (currentY > 3) moved = true;
-      sheet.style.transform = `translateY(${currentY}px)`;
+      const x = originX + (e.clientX - startX);
+      const y = originY + (e.clientY - startY);
+      win.style.left = `${x}px`;
+      win.style.top = `${y}px`;
     });
     const endDrag = (e) => {
       if (!dragging) return;
       dragging = false;
-      try { handle.releasePointerCapture(e.pointerId); } catch {}
-      sheet.style.transition = '';
-      if (!moved) {
-        // タップ/クリック扱い → 閉じる
-        sheet.style.transform = '';
-        closeQuickChat();
-      } else if (currentY > 80) {
-        // 十分に引き下げた → 閉じる
-        sheet.style.transform = '';
-        closeQuickChat();
-      } else {
-        // 戻す
-        sheet.style.transition = 'transform 0.2s var(--ease-out)';
-        sheet.style.transform = '';
-      }
+      header.classList.remove('dragging');
+      try { header.releasePointerCapture(e.pointerId); } catch {}
+      clampFloatWindow();
+      const x = parseFloat(win.style.left) || 0;
+      const y = parseFloat(win.style.top) || 0;
+      saveFloatPos(x, y);
     };
-    handle.addEventListener('pointerup', endDrag);
-    handle.addEventListener('pointercancel', endDrag);
-    handle.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeQuickChat(); }
-    });
+    header.addEventListener('pointerup', endDrag);
+    header.addEventListener('pointercancel', endDrag);
   }
 }
+// リサイズ時もウィンドウがはみ出さないようクランプ
+window.addEventListener('resize', clampFloatWindow);
 if (els.quickChatInput) {
   const resizeQuickInput = () => {
     els.quickChatInput.style.height = 'auto';

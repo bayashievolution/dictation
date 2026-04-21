@@ -1697,71 +1697,103 @@ html, body {
   height: 20px;
 }
 
-/* クイック質問モーダル: 下からスライドアップ */
-.modal.quick-chat {
-  align-items: flex-end;
-  padding: 0;
-}
-.modal.quick-chat .modal-backdrop {
-  background: rgba(0, 0, 0, 0.45);
-}
-.modal.quick-chat .modal-card.modal-sheet {
-  width: 100%;
-  max-width: none;
-  max-height: 72vh;
-  border-radius: 16px 16px 0 0;
+/* ───────── フロートウィンドウ（Photoshop風 自由移動ダイアログ） ───────── */
+.float-window {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translate(-50%, 8px) scale(0.98);
+  width: min(360px, calc(100vw - 20px));
+  max-height: min(560px, calc(100vh - 120px));
+  height: auto;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 -10px 36px rgba(0,0,0,0.55);
-  animation: sheetSlideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 2000;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition:
+    opacity 0.22s ease-out,
+    transform 0.26s cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0s linear 0.22s;
 }
-@keyframes sheetSlideUp {
-  from { transform: translateY(100%); opacity: 0.4; }
-  to   { transform: translateY(0);    opacity: 1; }
+.float-window.show {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+  transform: translate(-50%, 0) scale(1);
+  transition:
+    opacity 0.2s ease-out,
+    transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0s linear 0s;
 }
-.modal.quick-chat.closing .modal-sheet {
-  animation: sheetSlideDown 0.24s ease-in forwards;
+/* ドラッグで移動されたあとは、translateによる中央寄せをやめて left/top 直指定に切り替え */
+.float-window.positioned {
+  left: 0;
+  /* transform はJSで制御（show/hide時の scale のみ） */
+  transform: scale(0.98);
 }
-.modal.quick-chat.closing .modal-backdrop {
-  animation: fadeOut 0.24s ease-in forwards;
-}
-@keyframes sheetSlideDown {
-  from { transform: translateY(0); opacity: 1; }
-  to   { transform: translateY(100%); opacity: 0.3; }
-}
-@keyframes fadeOut {
-  from { opacity: 1; }
-  to   { opacity: 0; }
+.float-window.positioned.show {
+  transform: scale(1);
 }
 
-.sheet-handle-wrap {
-  width: 100%;
-  padding: 6px 0 2px;
-  cursor: grab;
-  touch-action: none;
+.float-window-header {
   display: flex;
-  justify-content: center;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 10px 14px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
   flex-shrink: 0;
 }
-.sheet-handle-wrap:hover .sheet-handle,
-.sheet-handle-wrap:active .sheet-handle {
-  background: var(--text-muted);
-}
-.sheet-handle-wrap:active {
+.float-window-header:active {
   cursor: grabbing;
 }
-.sheet-handle {
-  width: 44px;
-  height: 4px;
-  background: var(--border);
-  border-radius: 2px;
-  transition: background 0.15s;
+.float-window-header.dragging {
+  cursor: grabbing;
 }
-
-.modal-sheet .modal-header h2 {
+.float-window-header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  letter-spacing: 0.02em;
+}
+.float-window-header [data-icon] svg {
+  width: 14px;
+  height: 14px;
+}
+.float-window-header .modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+}
+.float-window-header .modal-close:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+.float-window-header .modal-close svg {
+  width: 14px;
+  height: 14px;
 }
 
 .quick-chat-body {
