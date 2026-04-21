@@ -18,6 +18,10 @@ const els = {
   btnCopy: document.getElementById('btn-copy'),
   btnClear: document.getElementById('btn-clear'),
   btnScrollBottom: document.getElementById('btn-scroll-bottom'),
+  btnPin: document.getElementById('btn-pin'),
+  btnGhost: document.getElementById('btn-ghost'),
+  btnMinimize: document.getElementById('btn-minimize'),
+  btnClose: document.getElementById('btn-close'),
   status: document.getElementById('status-indicator'),
   confirmed: document.getElementById('confirmed'),
   interim: document.getElementById('interim'),
@@ -211,4 +215,26 @@ els.btnScrollBottom.addEventListener('click', () => {
 if (!SpeechRecognition) {
   setStatus('error', '未対応ブラウザ');
   els.btnToggle.disabled = true;
+}
+
+/* ───────── Electron window controls ───────── */
+
+function applyWindowState(s) {
+  els.btnPin.classList.toggle('active', !!s.alwaysOnTop);
+  els.btnGhost.classList.toggle('active', (s.opacity ?? 1.0) < 1.0);
+}
+
+if (window.electronAPI) {
+  els.btnPin.addEventListener('click', () => window.electronAPI.toggleAlwaysOnTop());
+  els.btnGhost.addEventListener('click', () => window.electronAPI.toggleTransparent());
+  els.btnMinimize.addEventListener('click', () => window.electronAPI.hideToTray());
+  els.btnClose.addEventListener('click', () => window.electronAPI.hideToTray());
+
+  window.electronAPI.getState().then(applyWindowState);
+  window.electronAPI.onWindowState(applyWindowState);
+} else {
+  els.btnPin.style.display = 'none';
+  els.btnGhost.style.display = 'none';
+  els.btnMinimize.style.display = 'none';
+  els.btnClose.style.display = 'none';
 }

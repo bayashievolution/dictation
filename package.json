@@ -1,0 +1,16 @@
+{
+  "name": "dictation",
+  "version": "0.1.0",
+  "description": "リアルタイム文字起こし＋AI段落整形のデスクトップアプリ",
+  "main": "main.js",
+  "author": "bayashi",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0"
+  }
+}
