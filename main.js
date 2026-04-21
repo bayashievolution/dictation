@@ -64,6 +64,14 @@ function createWindow() {
     },
   });
 
+  mainWindow.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (permission === 'media' || permission === 'mediaKeySystem' || permission === 'audioCapture') {
+      callback(true);
+    } else {
+      callback(true);
+    }
+  });
+
   mainWindow.loadFile('index.html');
 
   mainWindow.once('ready-to-show', () => {
