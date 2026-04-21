@@ -657,12 +657,6 @@ html, body {
   container-name: pane-header;
 }
 
-/* 狭い幅に折り返された時はフォントコントロールを左寄せに */
-@container pane-header (max-width: 540px) {
-  .pane-font-controls {
-    margin-left: 0;
-  }
-}
 
 .pane-btn {
   display: inline-flex;
@@ -785,22 +779,25 @@ html, body {
 
 /* ───────── Per-pane font controls (Word風) ───────── */
 .pane-font-controls {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  flex-shrink: 0;
+  gap: 6px;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .pane-font-select {
-  padding: 3px 6px;
+  height: 26px;
+  padding: 0 6px;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 12px;
-  max-width: 150px;
+  min-width: 150px;
+  max-width: 260px;
+  flex: 0 1 220px;
   cursor: pointer;
   outline: none;
   transition: border-color 0.12s;
@@ -814,31 +811,82 @@ html, body {
   border-color: var(--accent);
 }
 
-.pane-size-input {
-  width: 52px;
-  padding: 3px 4px;
+/* カスタムスピナー（テーマ統一） */
+.pane-size-stepper {
+  display: inline-flex;
+  align-items: stretch;
+  height: 26px;
   background: var(--bg);
-  color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  overflow: hidden;
+  transition: border-color 0.12s;
+  flex-shrink: 0;
+}
+
+.pane-size-stepper:hover {
+  border-color: #4a4a54;
+}
+
+.pane-size-stepper:focus-within {
+  border-color: var(--accent);
+}
+
+.pane-size-input {
+  width: 46px;
+  padding: 0 6px;
+  background: transparent;
+  color: var(--text);
+  border: none;
   font-family: inherit;
   font-size: 12px;
   text-align: center;
   outline: none;
-  transition: border-color 0.12s;
+  -moz-appearance: textfield;
 }
 
-.pane-size-input:focus {
-  border-color: var(--accent);
-}
-
-/* Chrome の number スピナーを少し調整（ダーク背景に溶け込ませる） */
 .pane-size-input::-webkit-inner-spin-button,
 .pane-size-input::-webkit-outer-spin-button {
-  opacity: 0.5;
+  -webkit-appearance: none;
+  margin: 0;
 }
-.pane-size-input:hover::-webkit-inner-spin-button {
-  opacity: 1;
+
+.size-step-col {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  width: 18px;
+}
+
+.size-step-btn {
+  flex: 1 1 50%;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 8px;
+  line-height: 1;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  transition: background 0.1s, color 0.1s;
+  font-family: inherit;
+}
+
+.size-step-btn:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.size-step-btn:active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.size-step-btn + .size-step-btn {
+  border-top: 1px solid var(--border);
 }
 
 .controls-sep {

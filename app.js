@@ -1450,6 +1450,21 @@ function wirePaneFontControls() {
       applyDisplaySettings();
     });
   });
+  document.querySelectorAll('[data-pane-size-step]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const [paneId, deltaStr] = btn.dataset.paneSizeStep.split(':');
+      const delta = Number(deltaStr) || 0;
+      const keys = PANE_FONT_KEYS[paneId];
+      if (!keys) return;
+      const current = Number(state.settings[keys.size]) || 15;
+      const next = Math.max(10, Math.min(36, current + delta));
+      if (next === current) return;
+      state.settings[keys.size] = next;
+      saveSettings();
+      applyDisplaySettings();
+    });
+  });
 }
 
 function applyAppZoom(v) {
