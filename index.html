@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.6.6" />
+  <link rel="stylesheet" href="style.css?v=0.8.0" />
 </head>
 <body>
   <div id="app">
@@ -175,7 +175,7 @@
     </main>
 
     <footer id="footer">
-      <small id="session-info">ばっさんディクテーション v0.7</small>
+      <small id="session-info">ばっさんディクテーション v0.8</small>
     </footer>
   </div>
 
@@ -213,6 +213,35 @@
           <label class="field field-row">
             <input id="input-auto-summarize" type="checkbox" />
             <span>録音停止時に要約とタイトルを自動生成する</span>
+          </label>
+        </div>
+
+        <div class="field-group">
+          <h3 class="field-group-title">音声入力</h3>
+          <div class="field">
+            <span class="field-label">入力モード</span>
+            <label class="field-row" style="margin-bottom:4px">
+              <input type="radio" name="input-mode" id="mode-webspeech" value="web-speech" />
+              <span><strong>Web Speech</strong> — 速い・無料。システム既定マイクのみ</span>
+            </label>
+            <label class="field-row" style="margin-bottom:0">
+              <input type="radio" name="input-mode" id="mode-gemini" value="gemini-audio" />
+              <span><strong>Gemini Audio</strong> — 10〜15秒遅延。任意のデバイス選択可（Zoom/Meet等）</span>
+            </label>
+          </div>
+          <label class="field">
+            <span class="field-label">音声入力デバイス（Geminiモード時）</span>
+            <select id="input-audio-device"></select>
+            <small class="field-hint">
+              Zoom/Meet の音声を取り込むには
+              <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener">VB-Cable</a>
+              などの仮想オーディオケーブルを入れ、会議アプリの音声出力を仮想入力に回してから、ここで選択。
+            </small>
+          </label>
+          <label class="field">
+            <span class="field-label">Geminiチャンク間隔（秒）</span>
+            <input id="input-chunk-sec" type="number" min="5" max="60" step="1" />
+            <small class="field-hint">この秒数ごとに音声を Gemini へ送信。長いほど精度アップ・遅延増、短いほど反応速い。既定 12 秒。</small>
           </label>
         </div>
 
@@ -288,8 +317,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.6.6"></script>
-  <script src="gemini.js?v=0.6.6"></script>
-  <script src="app.js?v=0.6.6"></script>
+  <script src="icons.js?v=0.8.0"></script>
+  <script src="gemini.js?v=0.8.0"></script>
+  <script src="app.js?v=0.8.0"></script>
 </body>
 </html>

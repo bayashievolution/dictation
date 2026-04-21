@@ -35,6 +35,9 @@ const DEFAULT_SETTINGS = {
   summarySize: 15,
   chatFont: 'sans',
   chatSize: 14,
+  inputMode: 'web-speech',
+  audioDeviceId: '',
+  audioChunkSec: 12,
 };
 
 const PANE_FONT_KEYS = {
@@ -125,6 +128,12 @@ const state = {
   silenceCountdownLeft: 0,
   autoSaveTimer: null,
 
+  mediaRecorder: null,
+  audioStream: null,
+  audioChunks: [],
+  audioChunkTimer: null,
+  audioInFlightCount: 0,
+
   sessions: [],
   activeId: null,
   activePane: 'pane-transcript',
@@ -178,6 +187,10 @@ const els = {
   inputAutoStop: document.getElementById('input-auto-stop'),
   inputAutoStopSec: document.getElementById('input-auto-stop-sec'),
   inputAutoSummarize: document.getElementById('input-auto-summarize'),
+  modeWebSpeech: document.getElementById('mode-webspeech'),
+  modeGemini: document.getElementById('mode-gemini'),
+  inputAudioDevice: document.getElementById('input-audio-device'),
+  inputChunkSec: document.getElementById('input-chunk-sec'),
   zoomBar: document.getElementById('zoom-bar'),
   zoomRange: document.getElementById('zoom-range'),
   zoomPercent: document.getElementById('zoom-percent'),
@@ -600,6 +613,10 @@ function buildRecognition() {
 }
 
 function startRecording() {
+  if (state.settings.inputMode === 'gemini-audio') {
+    return startGeminiAudioRecording();
+  }
+  // Web Speech API モード
   if (state.recognition) {
     state.recognition.onend = null;
     state.recognition.onresult = null;
@@ -627,12 +644,16 @@ function startRecording() {
 function stopRecording() {
   state.isRecording = false;
   state.shouldAutoRestart = false;
-  if (state.recognition) {
-    try { state.recognition.stop(); } catch {}
+  if (state.settings.inputMode === 'gemini-audio') {
+    stopGeminiAudioRecording();
+  } else {
+    if (state.recognition) {
+      try { state.recognition.stop(); } catch {}
+    }
+    els.interim.textContent = '';
   }
   setStatus('idle', '停止');
   setRecordingUI(false);
-  els.interim.textContent = '';
   clearAllTimers();
   flushPendingToGemini().finally(async () => {
     snapshotActiveToSession();
@@ -642,6 +663,167 @@ function stopRecording() {
       await autoGenerateTitle();
     }
   });
+}
+
+/* ───────── Gemini Audio recording mode ───────── */
+
+async function startGeminiAudioRecording() {
+  if (!state.settings.apiKey) {
+    alert('Gemini Audio モードは API キーが必要です');
+    openSettings();
+    return;
+  }
+  const constraints = {
+    audio: state.settings.audioDeviceId
+      ? { deviceId: { exact: state.settings.audioDeviceId } }
+      : true,
+  };
+  try {
+    state.audioStream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (e) {
+    console.error('getUserMedia failed:', e);
+    setStatus('error', 'マイク取得失敗: ' + (e.message || e.name));
+    return;
+  }
+
+  let mimeType = 'audio/webm;codecs=opus';
+  if (!MediaRecorder.isTypeSupported(mimeType)) {
+    mimeType = 'audio/webm';
+    if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = '';
+  }
+
+  state.audioChunks = [];
+  const recorder = new MediaRecorder(state.audioStream, mimeType ? { mimeType } : undefined);
+  state.mediaRecorder = recorder;
+
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) state.audioChunks.push(e.data);
+  };
+  recorder.onstop = () => {
+    const chunks = state.audioChunks;
+    state.audioChunks = [];
+    if (chunks.length > 0) {
+      const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+      if (blob.size > 1200) sendAudioChunkToGemini(blob);
+    }
+    // 録音継続中なら再スタート
+    if (state.isRecording && state.mediaRecorder === recorder) {
+      setTimeout(() => {
+        if (state.isRecording && recorder.state === 'inactive') {
+          try { recorder.start(); } catch (e) { console.warn('restart failed', e); }
+        }
+      }, 40);
+    }
+  };
+  recorder.onerror = (e) => {
+    console.error('MediaRecorder error:', e.error);
+    setStatus('error', '録音エラー: ' + (e.error?.message || 'unknown'));
+  };
+
+  try {
+    recorder.start();
+  } catch (e) {
+    console.error('recorder start failed:', e);
+    setStatus('error', '録音開始失敗: ' + e.message);
+    return;
+  }
+
+  state.isRecording = true;
+  state.shouldAutoRestart = true;
+  setRecordingUI(true);
+  setStatus('listening', '録音中 (Gemini)');
+  resetLongSilenceTimer();
+
+  // チャンク区切り
+  const intervalMs = Math.max(5, Math.min(60, state.settings.audioChunkSec || 12)) * 1000;
+  state.audioChunkTimer = setInterval(() => {
+    if (state.mediaRecorder && state.mediaRecorder.state === 'recording') {
+      state.mediaRecorder.stop(); // onstop で送信＋再スタート
+    }
+  }, intervalMs);
+}
+
+function stopGeminiAudioRecording() {
+  if (state.audioChunkTimer) {
+    clearInterval(state.audioChunkTimer);
+    state.audioChunkTimer = null;
+  }
+  const recorder = state.mediaRecorder;
+  state.mediaRecorder = null; // onstop の再スタートを抑止
+  if (recorder && recorder.state !== 'inactive') {
+    try { recorder.stop(); } catch {}
+  }
+  if (state.audioStream) {
+    state.audioStream.getTracks().forEach(t => t.stop());
+    state.audioStream = null;
+  }
+}
+
+async function sendAudioChunkToGemini(blob) {
+  state.audioInFlightCount++;
+  hideEmptyHint();
+  const targetEl = createParagraphEl('（文字起こし中…）', 'paragraph refining');
+  els.confirmed.appendChild(targetEl);
+  autoScroll();
+
+  try {
+    const text = await transcribeAudioWithGemini({
+      apiKey: state.settings.apiKey,
+      audioBlob: blob,
+      contextHint: getContextForGemini(),
+    });
+    if (text && text.trim()) {
+      targetEl.className = 'paragraph refined';
+      setParagraphContent(targetEl, text);
+      snapshotActiveToSession();
+      persistSessions();
+    } else {
+      targetEl.remove(); // 無音チャンクは捨てる
+    }
+  } catch (e) {
+    console.error('audio transcription failed:', e);
+    targetEl.className = 'paragraph';
+    setParagraphContent(targetEl, '[文字起こし失敗: ' + (e.message || '').slice(0, 60) + ']');
+    setStatus('error', 'Gemini Audio失敗: ' + (e.message || '').slice(0, 60));
+    setTimeout(() => {
+      if (state.isRecording) setStatus('listening', '録音中 (Gemini)');
+      else setStatus('idle', '停止');
+    }, 5000);
+  } finally {
+    state.audioInFlightCount--;
+    updateActionButtons();
+    autoScroll();
+  }
+}
+
+async function listAudioInputDevices() {
+  try {
+    // ラベル取得のため一度許可取得
+    const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+    tmp.getTracks().forEach(t => t.stop());
+  } catch (e) {
+    // 許可拒否でもデバイスID一覧は取れる（ラベル空）
+  }
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return devices.filter(d => d.kind === 'audioinput');
+}
+
+async function populateAudioDevices() {
+  if (!els.inputAudioDevice) return;
+  const sel = els.inputAudioDevice;
+  sel.innerHTML = '<option value="">（システム既定）</option>';
+  try {
+    const devices = await listAudioInputDevices();
+    for (const d of devices) {
+      const o = document.createElement('option');
+      o.value = d.deviceId;
+      o.textContent = d.label || `マイク ${d.deviceId.slice(0, 8)}…`;
+      sel.appendChild(o);
+    }
+  } catch (e) {
+    console.warn('enumerateDevices failed', e);
+  }
+  sel.value = state.settings.audioDeviceId || '';
 }
 
 /* ───────── Actions ───────── */
@@ -1793,6 +1975,14 @@ function openSettings() {
   els.inputAutoStop.checked = state.settings.autoStopEnabled;
   els.inputAutoStopSec.value = state.settings.autoStopSec;
   els.inputAutoSummarize.checked = state.settings.autoSummarize;
+  // 音声入力モード
+  if (state.settings.inputMode === 'gemini-audio') {
+    els.modeGemini.checked = true;
+  } else {
+    els.modeWebSpeech.checked = true;
+  }
+  els.inputChunkSec.value = state.settings.audioChunkSec || 12;
+  populateAudioDevices();
   els.fontTranscript.value = state.settings.transcriptFont;
   els.sizeTranscript.value = state.settings.transcriptSize;
   els.fontMemo.value = state.settings.memoFont;
@@ -1816,6 +2006,9 @@ function saveSettingsFromForm() {
   state.settings.autoStopEnabled = els.inputAutoStop.checked;
   state.settings.autoStopSec = Math.max(30, Math.min(600, Number(els.inputAutoStopSec.value) || 120));
   state.settings.autoSummarize = els.inputAutoSummarize.checked;
+  state.settings.inputMode = els.modeGemini.checked ? 'gemini-audio' : 'web-speech';
+  state.settings.audioDeviceId = els.inputAudioDevice ? els.inputAudioDevice.value : '';
+  state.settings.audioChunkSec = Math.max(5, Math.min(60, Number(els.inputChunkSec.value) || 12));
   state.settings.transcriptFont = els.fontTranscript.value;
   state.settings.transcriptSize = Math.max(10, Math.min(36, Number(els.sizeTranscript.value) || 17));
   state.settings.memoFont = els.fontMemo.value;

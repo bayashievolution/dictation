@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ばっさんディクテーション",
   "short_name": "ばっさんディクテ",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "リアルタイム文字起こし＋Gemini AI整形・要約・質問。Chromeサイドパネルで講義スライドと並べて使える。",
   "author": "bayashi",
   "permissions": [

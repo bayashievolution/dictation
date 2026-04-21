@@ -290,7 +290,81 @@ async function chatWithGemini({ apiKey, contextSources, history, question }) {
   return text.trim();
 }
 
+/**
+ * 音声 Blob（webm）を Gemini で文字起こし＋軽く整形
+ * @param {object} args
+ * @param {string} args.apiKey
+ * @param {Blob} args.audioBlob
+ * @param {string} [args.contextHint]
+ * @returns {Promise<string>}
+ */
+async function transcribeAudioWithGemini({ apiKey, audioBlob, contextHint }) {
+  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  if (!audioBlob || audioBlob.size === 0) return '';
+
+  const base64 = await blobToBase64(audioBlob);
+
+  const instruction = [
+    'あなたは日本語音声認識と整形を同時に行う編集者です。',
+    '以下のルールに従って、入力音声を文字起こしし、読みやすく整形してください。',
+    '- 句読点と改行を適切に補完',
+    '- フィラー（えー、あー、まぁ、んー）を削除',
+    '- 言い直しは自然な文に整える',
+    '- 明らかに不明瞭で推定困難な部分は [不明瞭] と表記',
+    '- 話題の切れ目では段落を分ける',
+    '- 出力は整形済みテキストのみ、前置き・説明は不要',
+    '- 音声が無音・ノイズのみ・意味ある発話ゼロなら、空文字列のみ返す',
+  ].join('\n');
+
+  const userParts = [];
+  if (contextHint) {
+    userParts.push({ text: `【直前の文脈（参考）】\n${contextHint}\n\n【次の音声を文字起こしして】` });
+  } else {
+    userParts.push({ text: '以下の音声を日本語で文字起こしし、整形してください。' });
+  }
+  userParts.push({ inline_data: { mime_type: audioBlob.type || 'audio/webm', data: base64 } });
+
+  const body = {
+    system_instruction: { parts: [{ text: instruction }] },
+    contents: [{ role: 'user', parts: userParts }],
+    generationConfig: {
+      temperature: 0.3,
+      topP: 0.9,
+      maxOutputTokens: 2048,
+      responseMimeType: 'text/plain',
+    },
+  };
+
+  const url = `${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Gemini Audio エラー (${res.status}): ${errText.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  return (text || '').trim();
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 window.refineWithGemini = refineWithGemini;
 window.summarizeWithGemini = summarizeWithGemini;
 window.generateTitleWithGemini = generateTitleWithGemini;
 window.chatWithGemini = chatWithGemini;
+window.transcribeAudioWithGemini = transcribeAudioWithGemini;
