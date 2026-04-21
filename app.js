@@ -3333,18 +3333,32 @@ function loadFloatPos() {
 function saveFloatPos(x, y) {
   try { localStorage.setItem(FLOAT_POS_KEY, JSON.stringify({ x, y })); } catch {}
 }
+/**
+ * html に zoom が掛かっている時の変換ヘルパ。
+ *   - style.left / top : 「ズーム前レイアウト座標」（以下 layout 座標）
+ *   - getBoundingClientRect / clientX / window.innerWidth : 「視覚ビューポート座標」
+ * 両者は layout = visual / z の関係。
+ */
+function getAppZoom() {
+  const z = parseFloat(document.documentElement.style.zoom);
+  return z > 0 ? z : 1;
+}
+
 function clampFloatWindow() {
-  // ウィンドウがビューポート外に出ないよう位置をクランプ
   const win = els.quickChatModal;
   if (!win || !win.classList.contains('positioned')) return;
-  const rect = win.getBoundingClientRect();
+  const z = getAppZoom();
+  const rect = win.getBoundingClientRect(); // visual px
   const margin = 4;
-  const maxX = window.innerWidth - rect.width - margin;
-  const maxY = window.innerHeight - rect.height - margin;
+  // 視覚上の可動域（visual px）→ layout px に変換して style.left/top と突き合わせ
+  const maxX = (window.innerWidth  - rect.width  - margin) / z;
+  const maxY = (window.innerHeight - rect.height - margin) / z;
+  const minX = margin / z;
+  const minY = margin / z;
   let x = parseFloat(win.style.left) || 0;
   let y = parseFloat(win.style.top) || 0;
-  x = Math.max(margin, Math.min(x, maxX));
-  y = Math.max(margin, Math.min(y, maxY));
+  x = Math.max(minX, Math.min(x, maxX));
+  y = Math.max(minY, Math.min(y, maxY));
   win.style.left = `${x}px`;
   win.style.top = `${y}px`;
 }
@@ -3395,17 +3409,18 @@ if (els.quickChatModal) {
     header.addEventListener('pointerdown', (e) => {
       // 閉じるボタンはドラッグ開始しない
       if (e.target.closest('[data-dismiss]')) return;
-      // まだ中央寄せ（translate）の場合は、現在位置を left/top に固定してから移動開始
+      const z = getAppZoom();
+      // まだ中央寄せ（translate）の場合は、現在の視覚位置を layout 座標に変換して固定
       if (!win.classList.contains('positioned')) {
-        const rect = win.getBoundingClientRect();
+        const rect = win.getBoundingClientRect(); // visual
         win.classList.add('positioned');
-        win.style.left = `${rect.left}px`;
-        win.style.top = `${rect.top}px`;
+        win.style.left = `${rect.left / z}px`;    // layout = visual / z
+        win.style.top  = `${rect.top  / z}px`;
       }
-      startX = e.clientX;
+      startX = e.clientX;  // visual
       startY = e.clientY;
-      originX = parseFloat(win.style.left) || 0;
-      originY = parseFloat(win.style.top) || 0;
+      originX = parseFloat(win.style.left) || 0;  // layout
+      originY = parseFloat(win.style.top)  || 0;
       dragging = true;
       header.classList.add('dragging');
       try { header.setPointerCapture(e.pointerId); } catch {}
@@ -3413,10 +3428,12 @@ if (els.quickChatModal) {
     });
     header.addEventListener('pointermove', (e) => {
       if (!dragging) return;
-      const x = originX + (e.clientX - startX);
-      const y = originY + (e.clientY - startY);
-      win.style.left = `${x}px`;
-      win.style.top = `${y}px`;
+      const z = getAppZoom();
+      // マウスデルタは visual px、style.left は layout px なので /z で補正
+      const dx = (e.clientX - startX) / z;
+      const dy = (e.clientY - startY) / z;
+      win.style.left = `${originX + dx}px`;
+      win.style.top  = `${originY + dy}px`;
     });
     const endDrag = (e) => {
       if (!dragging) return;
