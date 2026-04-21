@@ -3,18 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>dictation — リアルタイム文字起こし</title>
+  <title>ばっさんディクテーション — リアルタイム文字起こし</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.5.1" />
+  <link rel="stylesheet" href="style.css?v=0.5.2" />
 </head>
 <body>
   <div id="app">
     <header id="titlebar">
       <div class="titlebar-left">
         <span class="app-icon" data-icon="mic" data-icon-size="18"></span>
-        <span class="app-name">dictation</span>
+        <span class="app-name">ばっさんディクテーション</span>
       </div>
       <div class="titlebar-right">
         <span id="status-indicator" class="status idle">待機中</span>
@@ -56,6 +56,18 @@
         <span data-icon="plus"></span>
       </button>
     </nav>
+
+    <div id="title-bar">
+      <span id="title-display" spellcheck="false"></span>
+      <div class="title-bar-actions">
+        <button id="btn-edit-title" class="title-bar-btn" title="タイトル編集">
+          <span data-icon="pencil"></span>
+        </button>
+        <button id="btn-regen-title" class="title-bar-btn regen" title="AIでタイトル再生成">
+          <span data-icon="sparkles"></span>
+        </button>
+      </div>
+    </div>
 
     <nav id="inner-tabs">
       <!-- populated dynamically based on pane order -->
@@ -121,7 +133,7 @@
     </main>
 
     <footer id="footer">
-      <small id="session-info">dictation v0.5 — Web版</small>
+      <small id="session-info">ばっさんディクテーション v0.5 — Web版</small>
     </footer>
   </div>
 
@@ -234,8 +246,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.5.1"></script>
-  <script src="gemini.js?v=0.5.1"></script>
-  <script src="app.js?v=0.5.1"></script>
+  <script src="icons.js?v=0.5.2"></script>
+  <script src="gemini.js?v=0.5.2"></script>
+  <script src="app.js?v=0.5.2"></script>
 </body>
 </html>

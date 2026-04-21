@@ -153,7 +153,8 @@ async function generateTitleWithGemini({ apiKey, summary, transcript }) {
   const instruction = [
     'あなたは会議・講義の記録に短いタイトルを付ける編集者です。',
     '以下のルールに従い、タイトルを1つだけ返します。',
-    '- 5〜20文字程度の体言止めで、内容を端的に表す',
+    '- 15〜20文字以内の体言止めで、内容を端的に表す',
+    '- 20文字を超えないように要点を絞る（超えたら短く言い換える）',
     '- 装飾（「」、##、** など）や説明・候補列挙は一切付けない',
     '- 日付や時刻は含めない',
     '- 出力はタイトル文字列のみ',
@@ -195,7 +196,7 @@ async function generateTitleWithGemini({ apiKey, summary, transcript }) {
     .split('\n')[0]
     .replace(/^[「『"']|["'」』]$/g, '')
     .replace(/^#+\s*/, '')
-    .slice(0, 40)
+    .slice(0, 60)
     .trim();
 }
 

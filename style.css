@@ -403,6 +403,83 @@ html, body {
   color: var(--text);
 }
 
+/* ───────── Title bar (above inner tabs) ───────── */
+#title-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  min-height: 42px;
+  flex-shrink: 0;
+}
+
+#title-display {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  transition: all 0.15s var(--ease-snap);
+}
+
+#title-display:empty::before {
+  content: '（無題セッション）';
+  color: var(--text-faint);
+  font-weight: normal;
+}
+
+#title-display.editing {
+  overflow: visible;
+  white-space: normal;
+  background: var(--bg);
+  border-color: var(--accent);
+  outline: none;
+  cursor: text;
+}
+
+.title-bar-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.title-bar-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s var(--ease-snap);
+  padding: 0;
+}
+
+.title-bar-btn:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.title-bar-btn.regen:hover {
+  background: #a78bfa22;
+  color: #c4b5fd;
+}
+
+.title-bar-btn.spinning svg {
+  animation: spin 1.2s linear infinite;
+}
+
 /* ───────── Inner tabs ───────── */
 #inner-tabs {
   display: flex;

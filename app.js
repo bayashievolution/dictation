@@ -144,6 +144,10 @@ const els = {
   paneTranscriptBody: document.querySelector('#pane-transcript .pane-body'),
   innerTabsContainer: document.getElementById('inner-tabs'),
   mainArea: document.getElementById('main-area'),
+  titleBar: document.getElementById('title-bar'),
+  titleDisplay: document.getElementById('title-display'),
+  btnEditTitle: document.getElementById('btn-edit-title'),
+  btnRegenTitle: document.getElementById('btn-regen-title'),
   btnRegenSummary: document.getElementById('btn-regenerate-summary'),
   emptyHint: document.getElementById('empty-hint'),
   settingsModal: document.getElementById('settings-modal'),
@@ -1396,6 +1400,7 @@ function loadActiveSessionIntoDOM() {
   if (els.emptyHint) els.emptyHint.hidden = !!els.confirmed.innerHTML;
   if (els.summaryEmpty) els.summaryEmpty.hidden = !!getSummaryText();
   updateActionButtons();
+  renderTitleBar();
   state.userScrolledUp = false;
   requestAnimationFrame(() => autoScroll(true));
 }
@@ -1453,20 +1458,6 @@ function renderTabs() {
     title.textContent = session.title;
     title.title = session.title;
 
-    const regenBtn = document.createElement('button');
-    regenBtn.className = 'tab-regen';
-    regenBtn.title = 'AIでタイトル再生成';
-    regenBtn.innerHTML = '<span data-icon="sparkles"></span>';
-    regenBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (session.id !== state.activeId) switchSession(session.id);
-      session.titleIsManual = false;
-      if (!state.settings.apiKey) { openSettings(); return; }
-      regenBtn.classList.add('spinning');
-      await autoGenerateTitle();
-      regenBtn.classList.remove('spinning');
-    });
-
     const closeBtn = document.createElement('button');
     closeBtn.className = 'tab-close';
     closeBtn.innerHTML = '<span data-icon="x"></span>';
@@ -1502,11 +1493,65 @@ function renderTabs() {
     });
 
     tab.appendChild(title);
-    tab.appendChild(regenBtn);
     tab.appendChild(closeBtn);
     els.tabsList.appendChild(tab);
   }
   renderIcons(els.tabsList);
+  renderTitleBar();
+}
+
+/* ───────── Title bar ───────── */
+
+function renderTitleBar() {
+  const session = getActiveSession();
+  if (!session) { els.titleDisplay.textContent = ''; return; }
+  if (els.titleDisplay.classList.contains('editing')) return;
+  els.titleDisplay.textContent = session.title;
+  els.titleDisplay.title = session.title;
+}
+
+function startTitleEdit() {
+  const session = getActiveSession();
+  if (!session) return;
+  els.titleDisplay.contentEditable = 'true';
+  els.titleDisplay.classList.add('editing');
+  els.titleDisplay.focus();
+  const range = document.createRange();
+  range.selectNodeContents(els.titleDisplay);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function commitTitleEdit() {
+  if (!els.titleDisplay.classList.contains('editing')) return;
+  const session = getActiveSession();
+  els.titleDisplay.contentEditable = 'false';
+  els.titleDisplay.classList.remove('editing');
+  if (!session) return;
+  const next = els.titleDisplay.textContent.trim() || defaultTitle();
+  if (next !== session.title) renameSession(session.id, next);
+  else renderTitleBar();
+}
+
+function cancelTitleEdit() {
+  const session = getActiveSession();
+  els.titleDisplay.contentEditable = 'false';
+  els.titleDisplay.classList.remove('editing');
+  if (session) els.titleDisplay.textContent = session.title;
+}
+
+async function regenTitleFromBar() {
+  if (!state.settings.apiKey) { openSettings(); return; }
+  const session = getActiveSession();
+  if (!session) return;
+  session.titleIsManual = false;
+  els.btnRegenTitle.classList.add('spinning');
+  try {
+    await autoGenerateTitle();
+  } finally {
+    els.btnRegenTitle.classList.remove('spinning');
+  }
 }
 
 function startAutoSave() {
@@ -1600,6 +1645,15 @@ els.btnTabNew.addEventListener('click', () => {
   snapshotActiveToSession();
   persistSessions();
   createSession({ activate: true });
+});
+
+els.btnEditTitle.addEventListener('click', startTitleEdit);
+els.btnRegenTitle.addEventListener('click', regenTitleFromBar);
+els.titleDisplay.addEventListener('blur', commitTitleEdit);
+els.titleDisplay.addEventListener('keydown', (e) => {
+  if (!els.titleDisplay.classList.contains('editing')) return;
+  if (e.key === 'Enter') { e.preventDefault(); commitTitleEdit(); }
+  else if (e.key === 'Escape') { e.preventDefault(); cancelTitleEdit(); }
 });
 
 window.addEventListener('beforeunload', () => {
