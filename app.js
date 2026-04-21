@@ -2611,6 +2611,187 @@ els.confirmed.addEventListener('input', onEdit);
 els.memo.addEventListener('input', onEdit);
 els.summary.addEventListener('input', onEdit);
 
+/* ───────── Memo Notion風 Markdown エディタ ───────── */
+
+function memoGetCurrentBlock() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  let node = sel.getRangeAt(0).startContainer;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+  // 直下の子になるまで遡る
+  while (node && node !== els.memo && node.parentNode !== els.memo) {
+    node = node.parentNode;
+  }
+  return (node && node !== els.memo) ? node : null;
+}
+
+function memoFindAncestor(tagName) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  let node = sel.getRangeAt(0).startContainer;
+  while (node && node !== els.memo) {
+    if (node.nodeType === Node.ELEMENT_NODE && node.tagName === tagName) return node;
+    node = node.parentNode;
+  }
+  return null;
+}
+
+function memoPlaceCaretAtEnd(el) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function memoPlaceCaretAtStart(el) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function memoTransformBlock(block, tagName, content) {
+  const el = document.createElement(tagName);
+  el.textContent = content;
+  block.replaceWith(el);
+  memoPlaceCaretAtEnd(el);
+}
+
+function memoTransformToListItem(block, listTag, content) {
+  const prev = block.previousElementSibling;
+  let list;
+  if (prev && prev.tagName && prev.tagName.toLowerCase() === listTag) {
+    list = prev;
+  } else {
+    list = document.createElement(listTag);
+    block.parentNode.insertBefore(list, block);
+  }
+  const li = document.createElement('li');
+  li.textContent = content;
+  list.appendChild(li);
+  block.remove();
+  memoPlaceCaretAtEnd(li);
+}
+
+function memoTransformToHr(block) {
+  const hr = document.createElement('hr');
+  const next = document.createElement('div');
+  next.innerHTML = '<br>';
+  block.replaceWith(hr);
+  hr.parentNode.insertBefore(next, hr.nextSibling);
+  memoPlaceCaretAtStart(next);
+}
+
+function memoTransformToCheckbox(block, checked, content) {
+  const label = document.createElement('label');
+  label.className = 'task-item' + (checked ? ' done' : '');
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = checked;
+  cb.contentEditable = 'false';
+  const span = document.createElement('span');
+  span.textContent = content;
+  label.appendChild(cb);
+  label.appendChild(span);
+  block.replaceWith(label);
+  memoPlaceCaretAtEnd(span);
+}
+
+els.memo.addEventListener('input', (e) => {
+  const block = memoGetCurrentBlock();
+  if (!block) return;
+  const tag = (block.tagName || '').toLowerCase();
+  // ブロックが既にマークダウン要素の場合は変換しない
+  if (['h1','h2','h3','li','blockquote','hr','label'].includes(tag)) return;
+  const text = block.textContent || '';
+
+  // # 見出し
+  let m = text.match(/^(#{1,3})\s(.*)$/);
+  if (m) { memoTransformBlock(block, `h${m[1].length}`, m[2]); return; }
+  // - or * 箇条書き
+  m = text.match(/^[-*]\s(.*)$/);
+  if (m) { memoTransformToListItem(block, 'ul', m[1]); return; }
+  // 1. 番号リスト
+  m = text.match(/^\d+\.\s(.*)$/);
+  if (m) { memoTransformToListItem(block, 'ol', m[1]); return; }
+  // > 引用
+  m = text.match(/^>\s(.*)$/);
+  if (m) { memoTransformBlock(block, 'blockquote', m[1]); return; }
+  // --- 区切り線
+  if (text === '---') { memoTransformToHr(block); return; }
+  // [ ] / [] / [x] チェックボックス
+  m = text.match(/^\[([ xX])?\]\s(.*)$/);
+  if (m) {
+    const checked = !!(m[1] && m[1].trim());
+    memoTransformToCheckbox(block, checked, m[2]);
+    return;
+  }
+});
+
+els.memo.addEventListener('keydown', (e) => {
+  // Tab / Shift+Tab: リストのネスト増減
+  if (e.key === 'Tab') {
+    const li = memoFindAncestor('LI');
+    if (li) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        // outdent
+        const parentList = li.parentNode;
+        const grandParent = parentList.parentNode;
+        if (grandParent && grandParent.tagName === 'LI') {
+          grandParent.parentNode.insertBefore(li, grandParent.nextSibling);
+          if (parentList.children.length === 0) parentList.remove();
+          memoPlaceCaretAtEnd(li);
+        }
+      } else {
+        // indent
+        const prev = li.previousElementSibling;
+        if (prev && prev.tagName === 'LI') {
+          const parentList = li.parentNode;
+          const listTag = parentList.tagName.toLowerCase();
+          let nested = Array.from(prev.children).find(c => c.tagName.toLowerCase() === listTag);
+          if (!nested) {
+            nested = document.createElement(listTag);
+            prev.appendChild(nested);
+          }
+          nested.appendChild(li);
+          memoPlaceCaretAtEnd(li);
+        }
+      }
+    }
+    return;
+  }
+
+  // Enter on empty li: リストを抜ける
+  if (e.key === 'Enter' && !e.shiftKey) {
+    const li = memoFindAncestor('LI');
+    if (li && li.textContent.trim() === '') {
+      e.preventDefault();
+      const list = li.parentNode;
+      const newBlock = document.createElement('div');
+      newBlock.innerHTML = '<br>';
+      list.parentNode.insertBefore(newBlock, list.nextSibling);
+      li.remove();
+      if (list.children.length === 0) list.remove();
+      memoPlaceCaretAtStart(newBlock);
+    }
+  }
+});
+
+// チェックボックスクリックで .done 切替
+els.memo.addEventListener('change', (e) => {
+  const target = e.target;
+  if (target && target.matches && target.matches('.task-item input[type="checkbox"]')) {
+    target.closest('.task-item').classList.toggle('done', target.checked);
+    snapshotActiveToSession();
+    persistSessions();
+  }
+});
+
 // ペースト時：AI整形ONなら少し待って整形発動
 els.confirmed.addEventListener('paste', () => {
   if (!state.settings.aiEnabled || !state.settings.apiKey) return;
