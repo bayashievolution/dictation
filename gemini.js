@@ -200,6 +200,78 @@ async function generateTitleWithGemini({ apiKey, summary, transcript }) {
     .trim();
 }
 
+/**
+ * 資料（文字起こし・メモ・要約）に基づいて質問に答えるチャット
+ * @param {object} args
+ * @param {string} args.apiKey
+ * @param {object} args.contextSources - { transcript, memo, summary }
+ * @param {Array} args.history - これまでの会話 [{role: 'user'|'assistant', content}]
+ * @param {string} args.question - 新しい質問
+ * @returns {Promise<string>} 回答（Markdown）
+ */
+async function chatWithGemini({ apiKey, contextSources, history, question }) {
+  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  if (!question || !question.trim()) throw new Error('質問が空です');
+
+  const ctx = contextSources || {};
+  const contextText = [
+    ctx.summary    ? '【要約】\n' + ctx.summary         : '',
+    ctx.memo       ? '【メモ】\n' + ctx.memo            : '',
+    ctx.transcript ? '【文字起こし】\n' + ctx.transcript : '',
+  ].filter(Boolean).join('\n\n');
+
+  const instruction = [
+    'あなたは以下の資料（会議/講義の文字起こし、メモ、要約）に基づいて質問に答えるアシスタントです。',
+    '',
+    'ルール：',
+    '- 資料に書かれていることだけに基づいて答える（推測や外部知識は使わない）',
+    '- 資料から答えが導けない場合は「資料からは分かりません」と正直に答える',
+    '- 日本語で、Markdownで簡潔に。長い文より要点を箇条書きで',
+    '- 回答の根拠となる部分を必要に応じて引用してよい',
+    '',
+    '【参照可能な資料】',
+    contextText || '（資料なし。資料がない旨を答える）',
+  ].join('\n');
+
+  const contents = [];
+  for (const msg of (history || [])) {
+    if (msg.thinking) continue;
+    const role = msg.role === 'assistant' ? 'model' : 'user';
+    contents.push({ role, parts: [{ text: msg.content }] });
+  }
+  contents.push({ role: 'user', parts: [{ text: question }] });
+
+  const body = {
+    system_instruction: { parts: [{ text: instruction }] },
+    contents,
+    generationConfig: {
+      temperature: 0.5,
+      topP: 0.9,
+      maxOutputTokens: 2048,
+      responseMimeType: 'text/plain',
+    },
+  };
+
+  const url = `${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Gemini API エラー (${res.status}): ${errText.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    const reason = data?.candidates?.[0]?.finishReason || 'unknown';
+    throw new Error(`Gemini 応答が空です（finishReason: ${reason}）`);
+  }
+  return text.trim();
+}
+
 window.refineWithGemini = refineWithGemini;
 window.summarizeWithGemini = summarizeWithGemini;
 window.generateTitleWithGemini = generateTitleWithGemini;
+window.chatWithGemini = chatWithGemini;

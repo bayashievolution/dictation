@@ -26,7 +26,7 @@ const DEFAULT_SETTINGS = {
   autoStopEnabled: true,
   autoSummarize: true,
   appZoom: 100,
-  paneOrder: ['pane-transcript', 'pane-memo', 'pane-summary'],
+  paneOrder: ['pane-transcript', 'pane-memo', 'pane-summary', 'pane-chat'],
   transcriptFont: 'sans',
   transcriptSize: 15,
   memoFont: 'sans',
@@ -39,6 +39,7 @@ const PANE_META = {
   'pane-transcript': { label: '文字起こし', icon: 'mic' },
   'pane-memo':       { label: 'メモ',       icon: 'pencil' },
   'pane-summary':    { label: '要約',       icon: 'file-text' },
+  'pane-chat':       { label: '質問',       icon: 'message-circle' },
 };
 
 const FONT_FAMILIES = {
@@ -141,7 +142,13 @@ const els = {
   paneTranscript: document.getElementById('pane-transcript'),
   paneMemo: document.getElementById('pane-memo'),
   paneSummary: document.getElementById('pane-summary'),
+  paneChat: document.getElementById('pane-chat'),
   paneTranscriptBody: document.querySelector('#pane-transcript .pane-body'),
+  chatBody: document.querySelector('#pane-chat .pane-body'),
+  chatMessages: document.getElementById('chat-messages'),
+  chatEmpty: document.getElementById('chat-empty'),
+  chatInput: document.getElementById('chat-input'),
+  btnChatSend: document.getElementById('btn-chat-send'),
   innerTabsContainer: document.getElementById('inner-tabs'),
   mainArea: document.getElementById('main-area'),
   titleBar: document.getElementById('title-bar'),
@@ -186,6 +193,10 @@ function loadSettings() {
     if (raw) state.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
   } catch (e) {
     console.warn('loadSettings failed', e);
+  }
+  // Migration: add pane-chat to paneOrder if missing
+  if (Array.isArray(state.settings.paneOrder) && !state.settings.paneOrder.includes('pane-chat')) {
+    state.settings.paneOrder.push('pane-chat');
   }
   applyAiButtonState();
 }
@@ -261,7 +272,7 @@ function getSummaryText() {
 }
 
 function hasAnyContent() {
-  return getConfirmedText() || getMemoText() || getSummaryText();
+  return getConfirmedText() || getMemoText() || getSummaryText() || getChatText();
 }
 
 function updateActionButtons() {
@@ -581,16 +592,38 @@ async function copyPane(paneId, btn) {
   await copyTextOnly(text, btn);
 }
 
+function getChatText() {
+  const chat = getActiveSession()?.chat || [];
+  return chat.filter(m => !m.thinking && !m.error).map(m => {
+    const prefix = m.role === 'user' ? 'Q: ' : 'A: ';
+    return prefix + m.content;
+  }).join('\n\n');
+}
+
+function getChatHtml() {
+  const chat = getActiveSession()?.chat || [];
+  if (chat.length === 0) return '';
+  const parts = chat.filter(m => !m.thinking).map(m => {
+    const who = m.role === 'user' ? 'あなた' : 'Gemini';
+    const body = m.role === 'assistant' ? renderMarkdown(m.content)
+                                        : `<div>${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>`;
+    return `<div class="chat-block"><p><strong>${who}</strong>: ${body}</p></div>`;
+  });
+  return parts.join('\n');
+}
+
 function getPaneText(id) {
   if (id === 'pane-transcript') return getConfirmedText();
   if (id === 'pane-memo') return getMemoText();
   if (id === 'pane-summary') return getSummaryText();
+  if (id === 'pane-chat') return getChatText();
   return '';
 }
 function getPaneHtml(id) {
   if (id === 'pane-transcript') return els.confirmed.innerHTML;
   if (id === 'pane-memo') return els.memo.innerHTML;
   if (id === 'pane-summary') return els.summary.innerHTML;
+  if (id === 'pane-chat') return getChatHtml();
   return '';
 }
 
@@ -695,11 +728,22 @@ function buildExportHtml(session) {
   const sections = [];
   for (const id of state.settings.paneOrder) {
     const meta = PANE_META[id];
-    const html = id === 'pane-transcript' ? session.transcript
-               : id === 'pane-memo' ? session.memo
-               : session.summary;
+    let html = '';
+    if (id === 'pane-transcript') html = session.transcript || '';
+    else if (id === 'pane-memo') html = session.memo || '';
+    else if (id === 'pane-summary') html = session.summary || '';
+    else if (id === 'pane-chat') {
+      const chat = (session.chat || []).filter(m => !m.thinking);
+      if (chat.length === 0) continue;
+      html = chat.map(m => {
+        const who = m.role === 'user' ? 'あなた' : 'Gemini';
+        const body = m.role === 'assistant' ? renderMarkdown(m.content)
+                    : '<p>' + escapeHtml(m.content).replace(/\n/g, '<br>') + '</p>';
+        return `<div class="chat-block ${m.role}"><div class="chat-who">${who}</div>${body}</div>`;
+      }).join('\n');
+    }
     if (!html || !html.trim()) continue;
-    const iconGlyph = id === 'pane-transcript' ? '🎙' : id === 'pane-memo' ? '📝' : '📄';
+    const iconGlyph = id === 'pane-transcript' ? '🎙' : id === 'pane-memo' ? '📝' : id === 'pane-summary' ? '📄' : '💬';
     sections.push(`
 <section class="pane-section">
   <h2><span class="sec-icon">${iconGlyph}</span>${escapeHtml(meta.label)}</h2>
@@ -832,6 +876,28 @@ h1.doc-title {
 .sec-body p { margin: 0.35em 0; }
 .sec-body ul, .sec-body ol { padding-left: 1.3em; margin: 0.35em 0; }
 .sec-body li { margin: 0.15em 0; }
+.chat-block {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.chat-block.user {
+  background: rgba(52, 211, 153, 0.08);
+  border-color: rgba(52, 211, 153, 0.35);
+  margin-left: 24px;
+}
+.chat-block.assistant {
+  background: var(--bg-subtle);
+  margin-right: 24px;
+}
+.chat-who {
+  font-size: 10px;
+  color: var(--text-faint);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
 footer.doc-foot {
   margin-top: 36px;
   text-align: center;
@@ -901,6 +967,7 @@ function importSessionData(s) {
   session.transcript = s.transcript || s.html || '';
   session.memo = s.memo || '';
   session.summary = s.summary || '';
+  session.chat = Array.isArray(s.chat) ? s.chat : [];
   session.aiTitle = s.aiTitle || null;
   session.titleIsManual = !!s.titleIsManual;
   session.createdAt = s.createdAt || Date.now();
@@ -947,10 +1014,12 @@ async function loadFromFile(file) {
 }
 
 function clearPane(paneId, { confirmFirst = true } = {}) {
-  const label = paneId === 'pane-transcript' ? '文字起こし' : paneId === 'pane-memo' ? 'メモ' : '要約';
+  const label = PANE_META[paneId]?.label || paneId;
   const hasContent = paneId === 'pane-transcript' ? !!getConfirmedText()
     : paneId === 'pane-memo' ? !!getMemoText()
-    : !!getSummaryText();
+    : paneId === 'pane-summary' ? !!getSummaryText()
+    : paneId === 'pane-chat' ? !!getChatText()
+    : false;
   if (!hasContent) return;
   if (confirmFirst && !confirm(`「${label}」をクリアしますか？`)) return;
   if (paneId === 'pane-transcript') {
@@ -961,9 +1030,13 @@ function clearPane(paneId, { confirmFirst = true } = {}) {
     if (els.emptyHint) els.emptyHint.hidden = false;
   } else if (paneId === 'pane-memo') {
     els.memo.innerHTML = '';
-  } else {
+  } else if (paneId === 'pane-summary') {
     els.summary.innerHTML = '';
     if (els.summaryEmpty) els.summaryEmpty.hidden = false;
+  } else if (paneId === 'pane-chat') {
+    const session = getActiveSession();
+    if (session) session.chat = [];
+    renderChat();
   }
   updateActionButtons();
   snapshotActiveToSession();
@@ -972,10 +1045,11 @@ function clearPane(paneId, { confirmFirst = true } = {}) {
 
 function clearAllPanes() {
   if (!hasAnyContent()) return;
-  if (!confirm('このセッションの「文字起こし・メモ・要約」をすべてクリアしますか？')) return;
+  if (!confirm('このセッションの4タブ（文字起こし・メモ・要約・質問）をすべてクリアしますか？')) return;
   clearPane('pane-transcript', { confirmFirst: false });
   clearPane('pane-memo', { confirmFirst: false });
   clearPane('pane-summary', { confirmFirst: false });
+  clearPane('pane-chat', { confirmFirst: false });
 }
 
 function toggleAi() {
@@ -1020,6 +1094,94 @@ function renderInnerTabs() {
     els.innerTabsContainer.appendChild(btn);
   }
   renderIcons(els.innerTabsContainer);
+}
+
+/* ───────── Chat (NotebookLM風) ───────── */
+
+function renderChat() {
+  const session = getActiveSession();
+  const chat = session?.chat || [];
+  els.chatMessages.innerHTML = '';
+  if (chat.length === 0) {
+    if (els.chatEmpty) els.chatEmpty.hidden = false;
+    return;
+  }
+  if (els.chatEmpty) els.chatEmpty.hidden = true;
+  for (const msg of chat) {
+    const div = document.createElement('div');
+    div.className = 'chat-msg ' + msg.role + (msg.thinking ? ' thinking' : '') + (msg.error ? ' error' : '');
+    const who = msg.role === 'user' ? 'あなた' : 'Gemini';
+    const body = document.createElement('div');
+    body.className = 'chat-msg-body';
+    if (msg.thinking) {
+      body.textContent = '考え中';
+    } else if (msg.role === 'assistant') {
+      body.innerHTML = renderMarkdown(msg.content);
+    } else {
+      body.innerHTML = escapeHtml(msg.content).replace(/\n/g, '<br>');
+    }
+    const header = document.createElement('div');
+    header.className = 'chat-msg-header';
+    header.textContent = who;
+    div.appendChild(header);
+    div.appendChild(body);
+    els.chatMessages.appendChild(div);
+  }
+  requestAnimationFrame(() => { els.chatBody.scrollTop = els.chatBody.scrollHeight; });
+}
+
+function resizeChatInput() {
+  els.chatInput.style.height = 'auto';
+  els.chatInput.style.height = Math.min(200, els.chatInput.scrollHeight) + 'px';
+}
+
+async function sendChatMessage() {
+  const text = els.chatInput.value.trim();
+  if (!text) return;
+  if (!state.settings.apiKey) {
+    alert('Gemini API キーが未設定です。設定から登録してください。');
+    openSettings();
+    return;
+  }
+  const session = getActiveSession();
+  if (!session) return;
+  if (!Array.isArray(session.chat)) session.chat = [];
+
+  const history = session.chat.slice();
+  session.chat.push({ role: 'user', content: text, ts: Date.now() });
+  els.chatInput.value = '';
+  resizeChatInput();
+  const thinking = { role: 'assistant', content: '', ts: Date.now(), thinking: true };
+  session.chat.push(thinking);
+  renderChat();
+  els.btnChatSend.disabled = true;
+
+  try {
+    const answer = await chatWithGemini({
+      apiKey: state.settings.apiKey,
+      contextSources: {
+        transcript: getConfirmedText(),
+        memo: getMemoText(),
+        summary: getSummaryText(),
+      },
+      history,
+      question: text,
+    });
+    session.chat = session.chat.filter(m => m !== thinking);
+    session.chat.push({ role: 'assistant', content: answer, ts: Date.now() });
+    persistSessions();
+    updateActionButtons();
+    renderChat();
+  } catch (e) {
+    console.error('chat failed:', e);
+    session.chat = session.chat.filter(m => m !== thinking);
+    session.chat.push({ role: 'assistant', content: '⚠️ ' + (e.message || String(e)), ts: Date.now(), error: true });
+    persistSessions();
+    renderChat();
+  } finally {
+    els.btnChatSend.disabled = false;
+    els.chatInput.focus();
+  }
 }
 
 /* ───────── Auto title ───────── */
@@ -1306,9 +1468,12 @@ function saveSettingsFromForm() {
 function switchInnerPane(paneId) {
   state.activePane = paneId;
   els.innerTabsContainer.querySelectorAll('.inner-tab').forEach(t => t.classList.toggle('active', t.dataset.pane === paneId));
-  [els.paneTranscript, els.paneMemo, els.paneSummary].forEach(p => p.classList.toggle('active', p.id === paneId));
+  [els.paneTranscript, els.paneMemo, els.paneSummary, els.paneChat].forEach(p => p.classList.toggle('active', p.id === paneId));
   if (paneId === 'pane-summary') {
     els.summaryEmpty.hidden = !!getSummaryText();
+  }
+  if (paneId === 'pane-chat') {
+    setTimeout(() => { els.chatBody.scrollTop = els.chatBody.scrollHeight; }, 0);
   }
 }
 
@@ -1331,6 +1496,7 @@ function initSessions() {
     if (s.memo === undefined) s.memo = '';
     if (s.summary === undefined) s.summary = '';
     if (s.transcript === undefined) s.transcript = '';
+    if (!Array.isArray(s.chat)) s.chat = [];
   }
   state.activeId = localStorage.getItem(ACTIVE_TAB_KEY);
   if (!Array.isArray(state.sessions) || state.sessions.length === 0) {
@@ -1367,6 +1533,7 @@ function createSession({ activate = true, title = null, skipSave = false } = {})
     transcript: '',
     memo: '',
     summary: '',
+    chat: [],
   };
   state.sessions.push(session);
   if (activate) state.activeId = id;
@@ -1399,6 +1566,7 @@ function loadActiveSessionIntoDOM() {
   state.pendingChunkText = '';
   if (els.emptyHint) els.emptyHint.hidden = !!els.confirmed.innerHTML;
   if (els.summaryEmpty) els.summaryEmpty.hidden = !!getSummaryText();
+  renderChat();
   updateActionButtons();
   renderTitleBar();
   state.userScrolledUp = false;
@@ -1649,6 +1817,15 @@ els.btnTabNew.addEventListener('click', () => {
 
 els.btnEditTitle.addEventListener('click', startTitleEdit);
 els.btnRegenTitle.addEventListener('click', regenTitleFromBar);
+
+els.chatInput.addEventListener('input', resizeChatInput);
+els.chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    sendChatMessage();
+  }
+});
+els.btnChatSend.addEventListener('click', sendChatMessage);
 els.titleDisplay.addEventListener('blur', commitTitleEdit);
 els.titleDisplay.addEventListener('keydown', (e) => {
   if (!els.titleDisplay.classList.contains('editing')) return;

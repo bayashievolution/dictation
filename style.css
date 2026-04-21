@@ -716,6 +716,151 @@ html, body {
   pointer-events: none;
 }
 
+/* ───────── Chat (NotebookLM風) ───────── */
+#pane-chat .pane-body.chat-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 20px 20px 20px;
+}
+
+#chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 86%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.7;
+  word-break: break-word;
+  animation: fadeInUp 0.25s var(--ease-out);
+}
+
+.chat-msg.user {
+  background: var(--accent-dim);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-msg.assistant {
+  background: var(--bg-subtle);
+  color: var(--text);
+  border: 1px solid var(--border);
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+
+.chat-msg.error {
+  background: #f8717122;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.chat-msg-header {
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.chat-msg-body {
+  color: var(--text);
+}
+
+.chat-msg-body h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--heading);
+  margin: 0.6em 0 0.25em;
+  padding: 0;
+  border: none;
+}
+
+.chat-msg-body h2:first-child {
+  margin-top: 0;
+}
+
+.chat-msg-body p {
+  margin: 0.25em 0;
+}
+
+.chat-msg-body ul, .chat-msg-body ol {
+  padding-left: 1.3em;
+  margin: 0.3em 0;
+}
+
+.chat-msg-body li {
+  margin: 0.1em 0;
+}
+
+.chat-msg.thinking {
+  opacity: 0.7;
+}
+
+.chat-msg.thinking .chat-msg-body::after {
+  content: '…';
+  animation: thinking-dots 1.2s steps(4, end) infinite;
+}
+
+@keyframes thinking-dots {
+  0%   { content: '考え中'; }
+  25%  { content: '考え中.'; }
+  50%  { content: '考え中..'; }
+  75%  { content: '考え中...'; }
+  100% { content: '考え中'; }
+}
+
+.chat-input-area {
+  display: flex;
+  gap: 8px;
+  padding: 10px 18px 14px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  align-items: flex-end;
+}
+
+#chat-input {
+  flex: 1;
+  min-height: 38px;
+  max-height: 200px;
+  padding: 9px 12px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+#chat-input:focus {
+  border-color: var(--accent);
+}
+
+#btn-chat-send {
+  height: 38px;
+  width: 38px;
+  flex-shrink: 0;
+}
+
+#btn-chat-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .empty-hint {
   color: var(--text-faint);
   text-align: center;

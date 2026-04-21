@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.5.2" />
+  <link rel="stylesheet" href="style.css?v=0.6.0" />
 </head>
 <body>
   <div id="app">
@@ -130,6 +130,31 @@
           </div>
         </div>
       </div>
+
+      <div id="pane-chat" class="pane">
+        <div class="pane-header">
+          <button class="pane-btn" data-pane-copy="pane-chat" title="このタブだけコピー">
+            <span data-icon="copy"></span><span>コピー</span>
+          </button>
+          <button class="pane-btn" data-pane-clear="pane-chat" title="チャット履歴をクリア">
+            <span data-icon="trash"></span><span>クリア</span>
+          </button>
+        </div>
+        <div class="pane-body chat-body">
+          <div id="chat-messages"></div>
+          <div id="chat-empty" class="empty-hint">
+            資料（文字起こし・メモ・要約）について質問できます<br />
+            <small>※ Geminiが資料を参照して回答します。推測はせず、分からない場合はそう答えます。</small><br />
+            <small>例: 「この会議で決まったことは？」「次のアクションは？」「◯◯について言及は？」</small>
+          </div>
+        </div>
+        <div class="chat-input-area">
+          <textarea id="chat-input" placeholder="資料について質問（Enter送信 / Shift+Enter改行）" rows="1"></textarea>
+          <button id="btn-chat-send" class="btn btn-primary btn-square" title="送信 (Enter)">
+            <span data-icon="send"></span>
+          </button>
+        </div>
+      </div>
     </main>
 
     <footer id="footer">
@@ -246,8 +271,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.5.2"></script>
-  <script src="gemini.js?v=0.5.2"></script>
-  <script src="app.js?v=0.5.2"></script>
+  <script src="icons.js?v=0.6.0"></script>
+  <script src="gemini.js?v=0.6.0"></script>
+  <script src="app.js?v=0.6.0"></script>
 </body>
 </html>
