@@ -2420,6 +2420,9 @@ function switchSession(id) {
   renderTabs();
   loadActiveSessionIntoDOM();
 
+  // アクティブタブが見切れないよう横スクロール（renderTabs後の次フレームで）
+  requestAnimationFrame(scrollActiveTabIntoView);
+
   // main-area 全体をスライドで切替
   if (els.mainArea && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
     els.mainArea.classList.remove('enter-from-right', 'enter-from-left');
@@ -2511,6 +2514,15 @@ function renderTabs() {
     tab.appendChild(closeBtn);
     els.tabsList.appendChild(tab);
   }
+  // アクティブ線（再利用するため renderTabs を跨いで保持）
+  let indicator = els.tabsList.__activeIndicator;
+  if (!indicator) {
+    indicator = document.createElement('div');
+    indicator.className = 'tab-active-indicator';
+    els.tabsList.__activeIndicator = indicator;
+  }
+  els.tabsList.appendChild(indicator);
+
   renderIcons(els.tabsList);
   enablePointerDragSort(els.tabsList, {
     itemSelector: '.tab',
@@ -2522,6 +2534,56 @@ function renderTabs() {
   if (els.btnTabPrev) els.btnTabPrev.disabled = activeIdx <= 0;
   if (els.btnTabNext) els.btnTabNext.disabled = activeIdx < 0 || activeIdx >= state.sessions.length - 1;
   renderTitleBar();
+
+  // アクティブ線の位置更新（次フレームでレイアウト確定後に）
+  requestAnimationFrame(updateActiveTabIndicator);
+}
+
+/* アクティブタブの下をスライドする色線 */
+function updateActiveTabIndicator() {
+  const bar = els.tabsList && els.tabsList.__activeIndicator;
+  if (!bar) return;
+  const activeTab = els.tabsList.querySelector('.tab.active');
+  if (!activeTab) {
+    bar.classList.remove('visible');
+    return;
+  }
+  const listRect = els.tabsList.getBoundingClientRect();
+  const tabRect = activeTab.getBoundingClientRect();
+  const x = tabRect.left - listRect.left;
+  const w = tabRect.width;
+
+  const firstShow = !bar.classList.contains('visible');
+  if (firstShow) {
+    // 初回は transition 切ってジャンプ → rAF で visible にしてフェードイン
+    const savedTransition = bar.style.transition;
+    bar.style.transition = 'none';
+    bar.style.transform = `translateX(${x}px)`;
+    bar.style.width = `${w}px`;
+    // reflow を挟んで transition を戻す
+    void bar.offsetWidth;
+    bar.style.transition = savedTransition;
+    requestAnimationFrame(() => bar.classList.add('visible'));
+  } else {
+    bar.style.transform = `translateX(${x}px)`;
+    bar.style.width = `${w}px`;
+  }
+  bar.classList.toggle('recording', activeTab.classList.contains('recording'));
+}
+
+/* 切替時にアクティブタブが見切れないように横スクロール */
+function scrollActiveTabIntoView() {
+  const scrollEl = document.getElementById('tabs');
+  const tab = els.tabsList && els.tabsList.querySelector('.tab.active');
+  if (!scrollEl || !tab) return;
+  const cRect = scrollEl.getBoundingClientRect();
+  const tRect = tab.getBoundingClientRect();
+  const margin = 16;
+  if (tRect.left < cRect.left + margin) {
+    scrollEl.scrollBy({ left: tRect.left - cRect.left - margin, behavior: 'smooth' });
+  } else if (tRect.right > cRect.right - margin) {
+    scrollEl.scrollBy({ left: tRect.right - cRect.right + margin, behavior: 'smooth' });
+  }
 }
 
 function reorderSessions(newIds) {
@@ -2742,6 +2804,7 @@ document.querySelector('#onboarding .onboarding-skip')?.addEventListener('click'
 document.querySelector('#onboarding .onboarding-overlay')?.addEventListener('click', closeOnboarding);
 window.addEventListener('resize', () => {
   if (!document.getElementById('onboarding').classList.contains('hidden')) onboardingPosition();
+  updateActiveTabIndicator();
 });
 if (els.btnSummaryCombo) {
   els.btnSummaryCombo.addEventListener('click', async (e) => {
