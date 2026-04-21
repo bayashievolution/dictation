@@ -2859,6 +2859,64 @@ els.memo.addEventListener('keydown', (e) => {
       memoPlaceCaretAtStart(newBlock);
     }
   }
+
+  // Backspace 先頭でブロック解除（見出し/引用/リスト/チェックをプレーン段落に戻す）
+  if (e.key === 'Backspace') {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed || range.startOffset !== 0) return;
+
+    const block = memoGetCurrentBlock();
+    if (!block) return;
+    const tag = (block.tagName || '').toLowerCase();
+
+    // h1/h2/h3/blockquote → div に戻す
+    if (['h1','h2','h3','blockquote'].includes(tag)) {
+      e.preventDefault();
+      const div = document.createElement('div');
+      div.textContent = block.textContent;
+      if (!div.textContent) div.innerHTML = '<br>';
+      block.replaceWith(div);
+      memoPlaceCaretAtStart(div);
+      return;
+    }
+
+    // li → リスト外に出す
+    if (tag === 'li') {
+      e.preventDefault();
+      const li = block;
+      const list = li.parentNode;
+      const div = document.createElement('div');
+      div.textContent = li.textContent;
+      if (!div.textContent) div.innerHTML = '<br>';
+      list.parentNode.insertBefore(div, list);
+      li.remove();
+      if (list.children.length === 0) list.remove();
+      memoPlaceCaretAtStart(div);
+      return;
+    }
+
+    // task-item (checkbox label) → div に戻す
+    if (block.classList && block.classList.contains('task-item')) {
+      e.preventDefault();
+      const span = block.querySelector('span');
+      const div = document.createElement('div');
+      div.textContent = span ? span.textContent : '';
+      if (!div.textContent) div.innerHTML = '<br>';
+      block.replaceWith(div);
+      memoPlaceCaretAtStart(div);
+      return;
+    }
+
+    // hr の直後で Backspace: hr 削除
+    if (block.tagName === 'DIV' && block.previousElementSibling?.tagName === 'HR') {
+      e.preventDefault();
+      block.previousElementSibling.remove();
+      memoPlaceCaretAtStart(block);
+      return;
+    }
+  }
 });
 
 // チェックボックスクリックで .done 切替
