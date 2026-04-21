@@ -152,12 +152,14 @@ async function generateTitleWithGemini({ apiKey, summary, transcript }) {
 
   const instruction = [
     'あなたは会議・講義の記録に短いタイトルを付ける編集者です。',
-    '以下のルールに従い、タイトルを1つだけ返します。',
-    '- 15〜20文字以内の体言止めで、内容を端的に表す',
-    '- 20文字を超えないように要点を絞る（超えたら短く言い換える）',
-    '- 装飾（「」、##、** など）や説明・候補列挙は一切付けない',
-    '- 日付や時刻は含めない',
-    '- 出力はタイトル文字列のみ',
+    '以下のルールを絶対に守り、タイトルを1つだけ、1行で返します。',
+    '- **1行**で書く（改行を絶対に入れない）',
+    '- 10〜20文字の体言止めで、内容を端的に表す',
+    '- 20文字を超えないように要点を絞る',
+    '- 候補を複数書かない（1つだけ）',
+    '- 装飾（「」・##・**・` など）や説明・前置きを一切付けない',
+    '- 日付・時刻を含めない',
+    '- 出力はタイトル文字列そのもののみ',
   ].join('\n');
 
   const userPrompt = [
@@ -169,9 +171,9 @@ async function generateTitleWithGemini({ apiKey, summary, transcript }) {
     system_instruction: { parts: [{ text: instruction }] },
     contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
     generationConfig: {
-      temperature: 0.5,
+      temperature: 0.3,
       topP: 0.9,
-      maxOutputTokens: 64,
+      maxOutputTokens: 256,
       responseMimeType: 'text/plain',
     },
   };
@@ -191,12 +193,29 @@ async function generateTitleWithGemini({ apiKey, summary, transcript }) {
   const data = await res.json();
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!raw) throw new Error('タイトルの応答が空です');
-  return raw
-    .trim()
-    .split('\n')[0]
-    .replace(/^[「『"']|["'」』]$/g, '')
-    .replace(/^#+\s*/, '')
-    .slice(0, 60)
+
+  // AI が誤って改行や装飾を含めても安全に1行のタイトル文字列に整形する
+  let cleaned = raw.trim()
+    .replace(/^```[\w]*\n?|\n?```$/g, '')   // コードフェンス
+    .replace(/^\*\*|\*\*$/g, '')             // 太字マーカー
+    .replace(/^#+\s*/, '')                   // 見出し記号
+    .replace(/^[「『"']+|["'」』]+$/g, '')    // 囲み
+    .replace(/\r/g, '')
+    .trim();
+
+  // 改行が混ざったら最長行を採用。候補列挙防止。
+  const lines = cleaned.split('\n').map(s => s.trim()).filter(Boolean);
+  if (lines.length > 1) {
+    // 最長の行をタイトルとして採用（短すぎる行の混入を防ぐ）
+    cleaned = lines.sort((a, b) => b.length - a.length)[0];
+  } else if (lines.length === 1) {
+    cleaned = lines[0];
+  }
+
+  return cleaned
+    .replace(/^[「『"']+|["'」』]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .slice(0, 40)
     .trim();
 }
 

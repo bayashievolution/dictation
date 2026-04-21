@@ -251,8 +251,15 @@ function autoScroll(force = false) {
 }
 
 function getConfirmedText() {
+  // innerText で全体のプレーンテキストを取る（ペースト直書きにも対応）
+  const plain = els.confirmed.innerText.replace(/\u00A0/g, ' ').trim();
+  if (!plain) return '';
+
   const paragraphs = els.confirmed.querySelectorAll('.paragraph');
-  return Array.from(paragraphs)
+  if (paragraphs.length === 0) return plain;
+
+  // 録音+Gemini整形された .paragraph 構造を ## 見出し 付きで抽出
+  const structured = Array.from(paragraphs)
     .map(p => {
       const h2 = p.querySelector('h2');
       const body = p.querySelector('.p-body');
@@ -261,6 +268,10 @@ function getConfirmedText() {
     })
     .filter(Boolean)
     .join('\n\n');
+
+  // 構造化抽出がプレーンテキストの大半をカバーしていれば構造化を採用、
+  // そうでなければ（ペースト内容が混在している等）プレーンテキスト優先
+  return structured.length >= plain.length * 0.8 ? structured : plain;
 }
 
 function getMemoText() {
