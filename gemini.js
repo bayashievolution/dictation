@@ -76,4 +76,66 @@ async function refineWithGemini({ apiKey, context, newChunk }) {
   return text.trim();
 }
 
+const SUMMARY_PROMPT = `あなたは講義・会議の文字起こしを要約する編集者です。
+
+以下のルールで要約してください：
+- 冒頭に 3〜5 行の「# 概要」セクション
+- 次に「## 主要ポイント」として箇条書きで重要トピックを 5〜8 個
+- 必要なら「## 決定事項」「## 次のアクション」「## 論点」など適切な見出しを追加
+- 元の内容に忠実に、推測や創作はしない
+- 「えーと」等のフィラーは無視
+- 出力は Markdown 形式。前置きや説明は付けない`;
+
+/**
+ * 文字起こしテキストから要約を生成
+ * @param {object} args
+ * @param {string} args.apiKey
+ * @param {string} args.transcript - 要約対象の全文
+ * @param {string} [args.title] - セッションタイトル（文脈補助）
+ * @returns {Promise<string>} Markdown形式の要約
+ */
+async function summarizeWithGemini({ apiKey, transcript, title }) {
+  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  if (!transcript || !transcript.trim()) throw new Error('要約対象のテキストがありません');
+
+  const userPrompt = [
+    title ? `【セッションタイトル】${title}` : '',
+    '【文字起こし全文】',
+    transcript,
+  ].filter(Boolean).join('\n\n');
+
+  const body = {
+    system_instruction: {
+      parts: [{ text: SUMMARY_PROMPT }],
+    },
+    contents: [
+      { role: 'user', parts: [{ text: userPrompt }] },
+    ],
+    generationConfig: {
+      temperature: 0.4,
+      topP: 0.9,
+      maxOutputTokens: 4096,
+      responseMimeType: 'text/plain',
+    },
+  };
+
+  const url = `${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Gemini API エラー (${res.status}): ${errText.slice(0, 300)}`);
+  }
+
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('要約の応答が空です');
+  return text.trim();
+}
+
 window.refineWithGemini = refineWithGemini;
+window.summarizeWithGemini = summarizeWithGemini;

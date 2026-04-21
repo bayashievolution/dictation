@@ -1,10 +1,15 @@
 /**
- * dictation — Step3+ 完成版ロジック
- * v0.3 Gemini整形＋無音検出＋停止確認＋設定＋エクスポート
+ * dictation — v0.4 Web版
+ * - 内側タブ（文字起こし / メモ / 要約）
+ * - 外側タブ（セッション）
+ * - Gemini による段落整形＋要約生成
+ * - JSON 保存/読み込み（セッション単位）
+ * - Markdown エクスポート
  * 【修正履歴】
- *   v0.1 初期実装
- *   v0.2 編集可能化・スクロール制御・末尾append保証
- *   v0.3 Gemini整形、無音検出、設定モーダル、停止確認ダイアログ、Markdown保存
+ *   v0.1 Web Speech API 最小実装
+ *   v0.2 編集可能化・末尾append・スクロール制御
+ *   v0.3 Gemini整形・無音検出・停止確認・設定
+ *   v0.4 Chrome前提に方針転換／内側タブ／要約／JSON保存読込
  */
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -12,14 +17,14 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 const SETTINGS_KEY = 'dictation:settings';
 const SESSIONS_KEY = 'dictation:sessions';
 const ACTIVE_TAB_KEY = 'dictation:activeTab';
+
 const DEFAULT_SETTINGS = {
   apiKey: '',
   silenceSec: 3,
   aiEnabled: true,
   autoStopSec: 120,
   autoStopEnabled: true,
-  opacity: 0.75,
-  closeBehavior: 'quit',
+  autoSummarize: true,
 };
 
 const AUTOSAVE_INTERVAL_MS = 15000;
@@ -42,25 +47,32 @@ const state = {
 
   sessions: [],
   activeId: null,
-  isSwitching: false,
+  activePane: 'pane-transcript',
+  isSummarizing: false,
 };
 
 const els = {
   btnToggle: document.getElementById('btn-toggle'),
   btnAi: document.getElementById('btn-ai'),
   btnCopy: document.getElementById('btn-copy'),
-  btnExport: document.getElementById('btn-export'),
+  btnSaveJson: document.getElementById('btn-save-json'),
+  btnLoadJson: document.getElementById('btn-load-json'),
+  btnExportMd: document.getElementById('btn-export-md'),
   btnClear: document.getElementById('btn-clear'),
   btnSettings: document.getElementById('btn-settings'),
   btnScrollBottom: document.getElementById('btn-scroll-bottom'),
-  btnPin: document.getElementById('btn-pin'),
-  btnGhost: document.getElementById('btn-ghost'),
-  btnMinimize: document.getElementById('btn-minimize'),
-  btnClose: document.getElementById('btn-close'),
+  fileLoad: document.getElementById('file-load'),
   status: document.getElementById('status-indicator'),
   confirmed: document.getElementById('confirmed'),
   interim: document.getElementById('interim'),
-  transcript: document.getElementById('transcript'),
+  memo: document.getElementById('memo'),
+  summary: document.getElementById('summary'),
+  summaryEmpty: document.getElementById('summary-empty'),
+  paneTranscript: document.getElementById('pane-transcript'),
+  paneMemo: document.getElementById('pane-memo'),
+  paneSummary: document.getElementById('pane-summary'),
+  innerTabs: document.querySelectorAll('.inner-tab'),
+  btnRegenSummary: document.getElementById('btn-regenerate-summary'),
   emptyHint: document.getElementById('empty-hint'),
   settingsModal: document.getElementById('settings-modal'),
   silenceDialog: document.getElementById('silence-dialog'),
@@ -73,10 +85,7 @@ const els = {
   inputAiEnabled: document.getElementById('input-ai-enabled'),
   inputAutoStop: document.getElementById('input-auto-stop'),
   inputAutoStopSec: document.getElementById('input-auto-stop-sec'),
-  inputOpacity: document.getElementById('input-opacity'),
-  opacityValue: document.getElementById('opacity-value'),
-  closeQuit: document.getElementById('close-quit'),
-  closeTray: document.getElementById('close-tray'),
+  inputAutoSummarize: document.getElementById('input-auto-summarize'),
   tabsList: document.getElementById('tabs-list'),
   btnTabNew: document.getElementById('btn-tab-new'),
 };
@@ -114,20 +123,29 @@ function setRecordingUI(isRec) {
   els.btnToggle.classList.toggle('recording', isRec);
   els.btnToggle.querySelector('.btn-icon').textContent = isRec ? '⏹' : '▶';
   els.btnToggle.title = isRec ? '停止' : '録音開始';
-  if (typeof renderTabs === 'function') renderTabs();
+  renderTabs();
 }
 
 function hideEmptyHint() {
   if (els.emptyHint && !els.emptyHint.hidden) els.emptyHint.hidden = true;
 }
 
+function getActivePaneEl() {
+  if (state.activePane === 'pane-transcript') return els.paneTranscript;
+  if (state.activePane === 'pane-memo') return els.paneMemo;
+  return els.paneSummary;
+}
+
 function isPinnedToBottom() {
-  const t = els.transcript;
-  return t.scrollTop + t.clientHeight >= t.scrollHeight - 40;
+  const pane = els.paneTranscript;
+  return pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 40;
 }
 
 function autoScroll(force = false) {
-  if (force || !state.userScrolledUp) els.transcript.scrollTop = els.transcript.scrollHeight;
+  if (state.activePane !== 'pane-transcript') return;
+  if (force || !state.userScrolledUp) {
+    els.paneTranscript.scrollTop = els.paneTranscript.scrollHeight;
+  }
 }
 
 function getConfirmedText() {
@@ -143,13 +161,25 @@ function getConfirmedText() {
     .join('\n\n');
 }
 
-function updateActionButtons() {
-  const hasText = getConfirmedText().length > 0;
-  els.btnCopy.disabled = !hasText;
-  els.btnExport.disabled = !hasText;
+function getMemoText() {
+  return els.memo.innerText.trim();
 }
 
-/* ───────── Chunk / Refinement ───────── */
+function getSummaryText() {
+  return els.summary.innerText.trim();
+}
+
+function hasAnyContent() {
+  return getConfirmedText() || getMemoText() || getSummaryText();
+}
+
+function updateActionButtons() {
+  const has = hasAnyContent();
+  els.btnCopy.disabled = !has;
+  els.btnExportMd.disabled = !has;
+}
+
+/* ───────── Paragraph rendering ───────── */
 
 function createParagraphEl(text, className = 'paragraph') {
   const p = document.createElement('div');
@@ -228,6 +258,8 @@ async function flushPendingToGemini() {
   if (!state.settings.aiEnabled || !state.settings.apiKey) {
     targetEl.className = 'paragraph';
     setParagraphContent(targetEl, rawText);
+    snapshotActiveToSession();
+    persistSessions();
     return;
   }
 
@@ -242,10 +274,8 @@ async function flushPendingToGemini() {
     targetEl.className = 'paragraph refined';
     setParagraphContent(targetEl, refined || rawText);
     updateActionButtons();
-    if (typeof snapshotActiveToSession === 'function') {
-      snapshotActiveToSession();
-      persistSessions();
-    }
+    snapshotActiveToSession();
+    persistSessions();
   } catch (e) {
     console.error('Gemini refinement failed:', e);
     targetEl.className = 'paragraph';
@@ -285,8 +315,6 @@ function clearAllTimers() {
   if (state.silenceCountdownTimer) { clearInterval(state.silenceCountdownTimer); state.silenceCountdownTimer = null; }
 }
 
-/* ───────── Silence dialog ───────── */
-
 function showSilenceDialog() {
   els.silenceDialog.classList.remove('hidden');
   state.silenceCountdownLeft = 30;
@@ -317,7 +345,7 @@ function updateSilenceCountdown() {
 
 function buildRecognition() {
   if (!SpeechRecognition) {
-    alert('このブラウザ/環境は Web Speech API に対応していません。');
+    alert('このブラウザは Web Speech API に対応していません。Google Chrome で開いてください。');
     return null;
   }
   const rec = new SpeechRecognition();
@@ -415,16 +443,22 @@ function stopRecording() {
   setRecordingUI(false);
   els.interim.textContent = '';
   clearAllTimers();
-  flushPendingToGemini().finally(() => {
+  flushPendingToGemini().finally(async () => {
     snapshotActiveToSession();
     persistSessions();
+    if (state.settings.autoSummarize && state.settings.aiEnabled && state.settings.apiKey) {
+      await generateSummary({ silent: true });
+    }
   });
 }
 
 /* ───────── Actions ───────── */
 
 function copyAll() {
-  const text = getConfirmedText();
+  let text = '';
+  if (state.activePane === 'pane-transcript') text = getConfirmedText();
+  else if (state.activePane === 'pane-memo') text = getMemoText();
+  else text = getSummaryText();
   if (!text) return;
   navigator.clipboard.writeText(text).then(() => {
     const icon = els.btnCopy.querySelector('.btn-icon');
@@ -440,46 +474,198 @@ function copyAll() {
 }
 
 function exportMarkdown() {
-  const text = getConfirmedText();
-  if (!text) return;
+  const transcript = getConfirmedText();
+  const memo = getMemoText();
+  const summary = getSummaryText();
+  if (!transcript && !memo && !summary) return;
+
+  const session = getActiveSession();
+  const title = session?.title || 'dictation';
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
   const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+  const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+
+  const md = [`# ${title} (${stamp})`];
+  if (summary) md.push('\n## 要約\n\n' + summary);
+  if (memo) md.push('\n## メモ\n\n' + memo);
+  if (transcript) md.push('\n## 文字起こし\n\n' + transcript);
+
+  const blob = new Blob([md.join('\n\n')], { type: 'text/markdown;charset=utf-8' });
+  triggerDownload(blob, `${safeTitle}-${stamp}.md`);
+}
+
+function saveSessionAsJson() {
+  snapshotActiveToSession();
   const session = getActiveSession();
-  const safeTitle = (session?.title || 'dictation').replace(/[\\/:*?"<>|]/g, '_');
-  const header = `# ${session?.title || 'dictation'} (${stamp})\n\n`;
-  const blob = new Blob([header + text], { type: 'text/markdown;charset=utf-8' });
+  if (!session) return;
+  const data = {
+    format: 'dictation-session/v1',
+    exportedAt: new Date().toISOString(),
+    session: {
+      title: session.title,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      transcript: session.transcript || '',
+      memo: session.memo || '',
+      summary: session.summary || '',
+    },
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+  const safeTitle = (session.title || 'dictation').replace(/[\\/:*?"<>|]/g, '_');
+  triggerDownload(blob, `${safeTitle}-${stamp}.json`);
+}
+
+function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${safeTitle}-${stamp}.md`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function loadFromJson(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      const s = data.session || data;
+      if (typeof s !== 'object' || s === null) throw new Error('形式が正しくありません');
+      const title = s.title || 'インポート済み';
+      if (state.isRecording) stopRecording();
+      snapshotActiveToSession();
+      persistSessions();
+      const session = createSession({ activate: true, title, skipSave: true });
+      session.transcript = s.transcript || s.html || '';
+      session.memo = s.memo || '';
+      session.summary = s.summary || '';
+      session.createdAt = s.createdAt || Date.now();
+      session.updatedAt = Date.now();
+      persistSessions();
+      loadActiveSessionIntoDOM();
+    } catch (e) {
+      alert('読み込みに失敗しました: ' + e.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
 function clearAll() {
-  if (!getConfirmedText() && !els.interim.textContent && !state.pendingChunkEl) return;
-  if (!confirm('このタブの書き起こしをすべてクリアしますか？')) return;
-  els.confirmed.innerHTML = '';
-  els.interim.textContent = '';
-  state.pendingChunkEl = null;
-  state.pendingChunkText = '';
+  if (!hasAnyContent()) return;
+  const paneName = state.activePane === 'pane-transcript' ? '文字起こし' : state.activePane === 'pane-memo' ? 'メモ' : '要約';
+  if (!confirm(`このタブの「${paneName}」をクリアしますか？`)) return;
+  if (state.activePane === 'pane-transcript') {
+    els.confirmed.innerHTML = '';
+    els.interim.textContent = '';
+    state.pendingChunkEl = null;
+    state.pendingChunkText = '';
+    if (els.emptyHint) els.emptyHint.hidden = false;
+  } else if (state.activePane === 'pane-memo') {
+    els.memo.innerHTML = '';
+  } else {
+    els.summary.innerHTML = '';
+    els.summaryEmpty.hidden = false;
+  }
   updateActionButtons();
-  if (els.emptyHint) els.emptyHint.hidden = false;
   snapshotActiveToSession();
   persistSessions();
 }
 
 function toggleAi() {
-  if (!state.settings.apiKey) {
-    openSettings();
-    return;
-  }
+  if (!state.settings.apiKey) { openSettings(); return; }
   state.settings.aiEnabled = !state.settings.aiEnabled;
   saveSettings();
   applyAiButtonState();
+}
+
+/* ───────── Summary generation ───────── */
+
+async function generateSummary({ silent = false } = {}) {
+  if (state.isSummarizing) return;
+  const transcript = getConfirmedText();
+  if (!transcript) {
+    if (!silent) alert('文字起こしが空です。要約を生成できません。');
+    return;
+  }
+  if (!state.settings.apiKey) {
+    if (!silent) { alert('Gemini API キーが未設定です。設定から登録してください。'); openSettings(); }
+    return;
+  }
+  state.isSummarizing = true;
+  els.summary.classList.add('generating');
+  els.summaryEmpty.hidden = true;
+  const origBtnHtml = els.btnRegenSummary.innerHTML;
+  els.btnRegenSummary.innerHTML = '<span>✨ 生成中…</span>';
+  els.btnRegenSummary.disabled = true;
+  setStatus('listening', '要約生成中');
+  try {
+    const session = getActiveSession();
+    const summary = await summarizeWithGemini({
+      apiKey: state.settings.apiKey,
+      transcript,
+      title: session?.title,
+    });
+    els.summary.innerHTML = renderMarkdown(summary);
+    snapshotActiveToSession();
+    persistSessions();
+    updateActionButtons();
+    if (!silent) switchInnerPane('pane-summary');
+  } catch (e) {
+    console.error('Summary generation failed:', e);
+    if (!silent) alert('要約生成に失敗しました: ' + e.message);
+  } finally {
+    state.isSummarizing = false;
+    els.summary.classList.remove('generating');
+    els.btnRegenSummary.innerHTML = origBtnHtml;
+    els.btnRegenSummary.disabled = false;
+    setStatus(state.isRecording ? 'listening' : 'idle', state.isRecording ? '録音中' : '停止');
+  }
+}
+
+function renderMarkdown(md) {
+  const lines = md.split('\n');
+  const out = [];
+  let inList = false;
+  let listType = null;
+
+  const flushList = () => {
+    if (inList) { out.push(`</${listType}>`); inList = false; listType = null; }
+  };
+
+  for (const line of lines) {
+    const h2 = line.match(/^##\s+(.+)$/);
+    const h1 = line.match(/^#\s+(.+)$/);
+    const ul = line.match(/^[-*]\s+(.+)$/);
+    const ol = line.match(/^\d+\.\s+(.+)$/);
+
+    if (h1) { flushList(); out.push(`<h2>${escapeHtml(h1[1])}</h2>`); }
+    else if (h2) { flushList(); out.push(`<h2>${escapeHtml(h2[1])}</h2>`); }
+    else if (ul) {
+      if (!inList || listType !== 'ul') { flushList(); out.push('<ul>'); inList = true; listType = 'ul'; }
+      out.push(`<li>${escapeHtml(ul[1])}</li>`);
+    } else if (ol) {
+      if (!inList || listType !== 'ol') { flushList(); out.push('<ol>'); inList = true; listType = 'ol'; }
+      out.push(`<li>${escapeHtml(ol[1])}</li>`);
+    } else if (line.trim() === '') {
+      flushList();
+      out.push('<br/>');
+    } else {
+      flushList();
+      out.push(`<div>${escapeHtml(line)}</div>`);
+    }
+  }
+  flushList();
+  return out.join('\n');
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 /* ───────── Settings modal ───────── */
@@ -490,11 +676,7 @@ function openSettings() {
   els.inputAiEnabled.checked = state.settings.aiEnabled;
   els.inputAutoStop.checked = state.settings.autoStopEnabled;
   els.inputAutoStopSec.value = state.settings.autoStopSec;
-  const opacityPct = Math.round((state.settings.opacity ?? 0.75) * 100);
-  els.inputOpacity.value = opacityPct;
-  if (els.opacityValue) els.opacityValue.textContent = `${opacityPct}%`;
-  if (state.settings.closeBehavior === 'tray') els.closeTray.checked = true;
-  else els.closeQuit.checked = true;
+  els.inputAutoSummarize.checked = state.settings.autoSummarize;
   els.settingsModal.classList.remove('hidden');
   setTimeout(() => els.inputApiKey.focus(), 80);
 }
@@ -509,86 +691,25 @@ function saveSettingsFromForm() {
   state.settings.aiEnabled = els.inputAiEnabled.checked;
   state.settings.autoStopEnabled = els.inputAutoStop.checked;
   state.settings.autoStopSec = Math.max(30, Math.min(600, Number(els.inputAutoStopSec.value) || 120));
-  const pct = Math.max(30, Math.min(100, Number(els.inputOpacity.value) || 75));
-  state.settings.opacity = pct / 100;
-  state.settings.closeBehavior = els.closeTray.checked ? 'tray' : 'quit';
+  state.settings.autoSummarize = els.inputAutoSummarize.checked;
   saveSettings();
   applyAiButtonState();
-  if (window.electronAPI) window.electronAPI.setOpacity(state.settings.opacity);
   closeSettings();
 }
 
-/* ───────── Event wiring ───────── */
+/* ───────── Inner pane switch ───────── */
 
-els.btnToggle.addEventListener('click', () => state.isRecording ? stopRecording() : startRecording());
-els.btnAi.addEventListener('click', toggleAi);
-els.btnCopy.addEventListener('click', copyAll);
-els.btnExport.addEventListener('click', exportMarkdown);
-els.btnClear.addEventListener('click', clearAll);
-els.btnSettings.addEventListener('click', openSettings);
-
-els.btnSettingsSave.addEventListener('click', saveSettingsFromForm);
-els.settingsModal.querySelectorAll('[data-dismiss]').forEach(b => b.addEventListener('click', closeSettings));
-
-els.inputOpacity.addEventListener('input', () => {
-  const pct = Number(els.inputOpacity.value) || 75;
-  if (els.opacityValue) els.opacityValue.textContent = `${pct}%`;
-  if (window.electronAPI) window.electronAPI.setOpacity(pct / 100);
-});
-
-els.btnSilenceStop.addEventListener('click', () => {
-  hideSilenceDialog();
-  stopRecording();
-});
-els.btnSilenceContinue.addEventListener('click', () => {
-  hideSilenceDialog();
-  resetLongSilenceTimer();
-});
-
-let editSaveTimer = null;
-els.confirmed.addEventListener('input', () => {
-  updateActionButtons();
-  if (editSaveTimer) clearTimeout(editSaveTimer);
-  editSaveTimer = setTimeout(() => {
-    snapshotActiveToSession();
-    persistSessions();
-  }, 800);
-});
-
-els.transcript.addEventListener('scroll', () => {
-  state.userScrolledUp = !isPinnedToBottom();
-  els.btnScrollBottom.classList.toggle('hidden', !state.userScrolledUp);
-});
-
-els.btnScrollBottom.addEventListener('click', () => {
-  state.userScrolledUp = false;
-  autoScroll(true);
-  els.btnScrollBottom.classList.add('hidden');
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (!els.settingsModal.classList.contains('hidden')) closeSettings();
-    if (!els.silenceDialog.classList.contains('hidden')) {
-      hideSilenceDialog();
-      resetLongSilenceTimer();
-    }
+function switchInnerPane(paneId) {
+  state.activePane = paneId;
+  els.innerTabs.forEach(t => t.classList.toggle('active', t.dataset.pane === paneId));
+  [els.paneTranscript, els.paneMemo, els.paneSummary].forEach(p => p.classList.toggle('active', p.id === paneId));
+  // Update summary empty state
+  if (paneId === 'pane-summary') {
+    els.summaryEmpty.hidden = !!getSummaryText();
   }
-});
-
-if (!SpeechRecognition) {
-  setStatus('error', '未対応');
-  els.btnToggle.disabled = true;
 }
 
-loadSettings();
-initSessions();
-renderTabs();
-loadActiveSessionIntoDOM();
-updateActionButtons();
-startAutoSave();
-
-/* ───────── Sessions (tabs) ───────── */
+/* ───────── Sessions (outer tabs) ───────── */
 
 function initSessions() {
   try {
@@ -597,6 +718,16 @@ function initSessions() {
   } catch (e) {
     console.warn('loadSessions failed', e);
     state.sessions = [];
+  }
+  // Migrate legacy format (session.html → session.transcript)
+  for (const s of state.sessions) {
+    if (s.html !== undefined && s.transcript === undefined) {
+      s.transcript = s.html;
+      delete s.html;
+    }
+    if (s.memo === undefined) s.memo = '';
+    if (s.summary === undefined) s.summary = '';
+    if (s.transcript === undefined) s.transcript = '';
   }
   state.activeId = localStorage.getItem(ACTIVE_TAB_KEY);
   if (!Array.isArray(state.sessions) || state.sessions.length === 0) {
@@ -630,7 +761,9 @@ function createSession({ activate = true, title = null, skipSave = false } = {})
     title: title || defaultTitle(),
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    html: '',
+    transcript: '',
+    memo: '',
+    summary: '',
   };
   state.sessions.push(session);
   if (activate) state.activeId = id;
@@ -647,17 +780,22 @@ function getActiveSession() {
 function snapshotActiveToSession() {
   const s = getActiveSession();
   if (!s) return;
-  s.html = els.confirmed.innerHTML;
+  s.transcript = els.confirmed.innerHTML;
+  s.memo = els.memo.innerHTML;
+  s.summary = els.summary.innerHTML;
   s.updatedAt = Date.now();
 }
 
 function loadActiveSessionIntoDOM() {
   const s = getActiveSession();
-  els.confirmed.innerHTML = s?.html || '';
+  els.confirmed.innerHTML = s?.transcript || '';
+  els.memo.innerHTML = s?.memo || '';
+  els.summary.innerHTML = s?.summary || '';
   els.interim.textContent = '';
   state.pendingChunkEl = null;
   state.pendingChunkText = '';
   if (els.emptyHint) els.emptyHint.hidden = !!els.confirmed.innerHTML;
+  if (els.summaryEmpty) els.summaryEmpty.hidden = !!getSummaryText();
   updateActionButtons();
   state.userScrolledUp = false;
   requestAnimationFrame(() => autoScroll(true));
@@ -665,7 +803,6 @@ function loadActiveSessionIntoDOM() {
 
 function switchSession(id) {
   if (id === state.activeId) return;
-  state.isSwitching = true;
   if (state.isRecording) stopRecording();
   snapshotActiveToSession();
   persistSessions();
@@ -673,14 +810,14 @@ function switchSession(id) {
   persistSessions();
   renderTabs();
   loadActiveSessionIntoDOM();
-  state.isSwitching = false;
 }
 
 function closeSession(id) {
   const idx = state.sessions.findIndex(s => s.id === id);
   if (idx < 0) return;
   const session = state.sessions[idx];
-  if (session.html && !confirm(`「${session.title}」を閉じます。この内容は削除されます。よろしいですか？`)) return;
+  const hasContent = session.transcript || session.memo || session.summary;
+  if (hasContent && !confirm(`「${session.title}」を閉じます。この内容は削除されます。よろしいですか？`)) return;
   const wasActive = state.activeId === id;
   if (wasActive && state.isRecording) stopRecording();
   state.sessions.splice(idx, 1);
@@ -746,13 +883,8 @@ function renderTabs() {
     });
 
     title.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        title.blur();
-      } else if (e.key === 'Escape') {
-        title.textContent = session.title;
-        title.blur();
-      }
+      if (e.key === 'Enter') { e.preventDefault(); title.blur(); }
+      else if (e.key === 'Escape') { title.textContent = session.title; title.blur(); }
     });
 
     tab.appendChild(title);
@@ -769,9 +901,62 @@ function startAutoSave() {
   }, AUTOSAVE_INTERVAL_MS);
 }
 
-window.addEventListener('beforeunload', () => {
-  snapshotActiveToSession();
-  persistSessions();
+/* ───────── Event wiring ───────── */
+
+els.btnToggle.addEventListener('click', () => state.isRecording ? stopRecording() : startRecording());
+els.btnAi.addEventListener('click', toggleAi);
+els.btnCopy.addEventListener('click', copyAll);
+els.btnSaveJson.addEventListener('click', saveSessionAsJson);
+els.btnLoadJson.addEventListener('click', () => els.fileLoad.click());
+els.fileLoad.addEventListener('change', (e) => {
+  const f = e.target.files?.[0];
+  if (f) loadFromJson(f);
+  e.target.value = '';
+});
+els.btnExportMd.addEventListener('click', exportMarkdown);
+els.btnClear.addEventListener('click', clearAll);
+els.btnSettings.addEventListener('click', openSettings);
+els.btnRegenSummary.addEventListener('click', () => generateSummary({ silent: false }));
+
+els.innerTabs.forEach(t => {
+  t.addEventListener('click', () => switchInnerPane(t.dataset.pane));
+});
+
+els.btnSettingsSave.addEventListener('click', saveSettingsFromForm);
+els.settingsModal.querySelectorAll('[data-dismiss]').forEach(b => b.addEventListener('click', closeSettings));
+
+els.btnSilenceStop.addEventListener('click', () => { hideSilenceDialog(); stopRecording(); });
+els.btnSilenceContinue.addEventListener('click', () => { hideSilenceDialog(); resetLongSilenceTimer(); });
+
+let editSaveTimer = null;
+function onEdit() {
+  updateActionButtons();
+  if (editSaveTimer) clearTimeout(editSaveTimer);
+  editSaveTimer = setTimeout(() => { snapshotActiveToSession(); persistSessions(); }, 800);
+}
+els.confirmed.addEventListener('input', onEdit);
+els.memo.addEventListener('input', onEdit);
+els.summary.addEventListener('input', onEdit);
+
+els.paneTranscript.addEventListener('scroll', () => {
+  state.userScrolledUp = !isPinnedToBottom();
+  els.btnScrollBottom.classList.toggle('hidden', !state.userScrolledUp);
+});
+
+els.btnScrollBottom.addEventListener('click', () => {
+  state.userScrolledUp = false;
+  autoScroll(true);
+  els.btnScrollBottom.classList.add('hidden');
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (!els.settingsModal.classList.contains('hidden')) closeSettings();
+    if (!els.silenceDialog.classList.contains('hidden')) {
+      hideSilenceDialog();
+      resetLongSilenceTimer();
+    }
+  }
 });
 
 els.btnTabNew.addEventListener('click', () => {
@@ -781,32 +966,19 @@ els.btnTabNew.addEventListener('click', () => {
   createSession({ activate: true });
 });
 
-/* ───────── Electron window controls ───────── */
+window.addEventListener('beforeunload', () => {
+  snapshotActiveToSession();
+  persistSessions();
+});
 
-function applyWindowState(s) {
-  els.btnPin.classList.toggle('active', !!s.alwaysOnTop);
-  els.btnGhost.classList.toggle('active', (s.opacity ?? 1.0) < 1.0);
+if (!SpeechRecognition) {
+  setStatus('error', '未対応');
+  els.btnToggle.disabled = true;
 }
 
-if (window.electronAPI) {
-  els.btnPin.addEventListener('click', () => window.electronAPI.toggleAlwaysOnTop());
-  els.btnGhost.addEventListener('click', () => window.electronAPI.toggleTransparent());
-  els.btnMinimize.addEventListener('click', () => window.electronAPI.hideToTray());
-  els.btnClose.addEventListener('click', () => {
-    snapshotActiveToSession();
-    persistSessions();
-    if (state.settings.closeBehavior === 'tray') {
-      window.electronAPI.hideToTray();
-    } else {
-      window.electronAPI.close();
-    }
-  });
-  window.electronAPI.getState().then(applyWindowState);
-  window.electronAPI.onWindowState(applyWindowState);
-  if (state.settings.opacity) window.electronAPI.setOpacity(state.settings.opacity);
-} else {
-  els.btnPin.style.display = 'none';
-  els.btnGhost.style.display = 'none';
-  els.btnMinimize.style.display = 'none';
-  els.btnClose.style.display = 'none';
-}
+loadSettings();
+initSessions();
+renderTabs();
+loadActiveSessionIntoDOM();
+updateActionButtons();
+startAutoSave();

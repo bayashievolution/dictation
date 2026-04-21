@@ -15,10 +15,6 @@
       </div>
       <div class="titlebar-right">
         <span id="status-indicator" class="status idle">待機中</span>
-        <button id="btn-pin" class="titlebar-btn" title="常に最前面">📌</button>
-        <button id="btn-ghost" class="titlebar-btn" title="半透明">👻</button>
-        <button id="btn-minimize" class="titlebar-btn" title="最小化（タスクトレイへ）">―</button>
-        <button id="btn-close" class="titlebar-btn titlebar-close" title="閉じる（アプリ終了）">✕</button>
       </div>
     </header>
 
@@ -29,11 +25,17 @@
       <button id="btn-ai" class="btn btn-ai btn-square active" title="AI整形 ON/OFF">
         <span class="btn-icon">✨</span>
       </button>
-      <button id="btn-copy" class="btn btn-secondary btn-square" disabled title="全文をコピー">
+      <button id="btn-copy" class="btn btn-secondary btn-square" disabled title="現在のタブをコピー">
         <span class="btn-icon">📋</span>
       </button>
-      <button id="btn-export" class="btn btn-ghost btn-square" disabled title="Markdownで保存">
+      <button id="btn-save-json" class="btn btn-ghost btn-square" title="このセッションをJSON保存">
         <span class="btn-icon">💾</span>
+      </button>
+      <button id="btn-load-json" class="btn btn-ghost btn-square" title="JSONから復元">
+        <span class="btn-icon">📂</span>
+      </button>
+      <button id="btn-export-md" class="btn btn-ghost btn-square" disabled title="Markdownでエクスポート">
+        <span class="btn-icon">📝</span>
       </button>
       <button id="btn-clear" class="btn btn-ghost btn-square" title="このタブをクリア">
         <span class="btn-icon">🗑</span>
@@ -41,28 +43,60 @@
       <button id="btn-settings" class="btn btn-ghost btn-square" style="margin-left:auto" title="設定">
         <span class="btn-icon">⚙</span>
       </button>
+      <input type="file" id="file-load" accept=".json" style="display:none" />
     </section>
 
     <nav id="tabs">
       <div id="tabs-list"></div>
-      <button id="btn-tab-new" class="tab-new" title="新しいタブ">＋</button>
+      <button id="btn-tab-new" class="tab-new" title="新しいセッション">＋</button>
     </nav>
 
-    <main id="transcript">
-      <div id="confirmed" contenteditable="true" spellcheck="false"></div>
-      <div id="interim"></div>
-      <div id="empty-hint" class="empty-hint">
-        ▶ 録音開始を押すと文字起こしが始まります<br />
-        <small>※ 認識中も本文を直接編集できます。新しい認識結果は末尾に追加されます。</small>
+    <nav id="inner-tabs">
+      <button class="inner-tab active" data-pane="pane-transcript">
+        <span class="inner-tab-icon">🎙</span>文字起こし
+      </button>
+      <button class="inner-tab" data-pane="pane-memo">
+        <span class="inner-tab-icon">📝</span>メモ
+      </button>
+      <button class="inner-tab" data-pane="pane-summary">
+        <span class="inner-tab-icon">📄</span>要約
+      </button>
+    </nav>
+
+    <main id="main-area">
+      <div id="pane-transcript" class="pane active">
+        <div id="confirmed" contenteditable="true" spellcheck="false"></div>
+        <div id="interim"></div>
+        <div id="empty-hint" class="empty-hint">
+          ▶ 録音開始を押すと文字起こしが始まります<br />
+          <small>※ 認識中も本文を直接編集できます。新しい認識結果は末尾に追加されます。</small>
+        </div>
+        <button id="btn-scroll-bottom" class="scroll-bottom hidden" title="最新へ">
+          <span>▼</span>
+        </button>
+      </div>
+
+      <div id="pane-memo" class="pane">
+        <div id="memo" contenteditable="true" spellcheck="false" data-placeholder="ここに自由にメモを書けます。録音中もいつでも。"></div>
+      </div>
+
+      <div id="pane-summary" class="pane">
+        <div class="summary-header">
+          <span class="summary-hint">録音停止時に自動生成 / 手動で再生成も可</span>
+          <button id="btn-regenerate-summary" class="btn btn-ghost btn-sm">
+            <span>✨ 要約を生成</span>
+          </button>
+        </div>
+        <div id="summary" contenteditable="true" spellcheck="false"></div>
+        <div id="summary-empty" class="empty-hint">
+          要約はまだ生成されていません。<br />
+          <small>録音停止後に自動生成、または「要約を生成」ボタンで即生成できます。</small>
+        </div>
       </div>
     </main>
 
-    <button id="btn-scroll-bottom" class="scroll-bottom hidden" title="最新へ">
-      <span>▼</span>
-    </button>
-
     <footer id="footer">
-      <small id="session-info">dictation v0.3</small>
+      <small id="session-info">dictation v0.4 — Web版</small>
     </footer>
   </div>
 
@@ -99,22 +133,10 @@
           <span class="field-label">停止確認までの無音時間（秒）</span>
           <input id="input-auto-stop-sec" type="number" min="30" max="600" step="10" />
         </label>
-        <label class="field">
-          <span class="field-label">半透明時の不透明度 <small id="opacity-value" style="color:var(--text-faint);">75%</small></span>
-          <input id="input-opacity" type="range" min="30" max="100" step="5" />
-          <small class="field-hint">👻ボタンで半透明にしたときの濃さ。30%〜100%</small>
+        <label class="field field-row">
+          <input id="input-auto-summarize" type="checkbox" />
+          <span>録音停止時に自動で要約を生成する</span>
         </label>
-        <div class="field">
-          <span class="field-label">✕ボタンを押したとき</span>
-          <label class="field-row" style="margin-bottom:4px">
-            <input type="radio" name="close-behavior" id="close-quit" value="quit" />
-            <span>アプリを終了する</span>
-          </label>
-          <label class="field-row" style="margin-bottom:0">
-            <input type="radio" name="close-behavior" id="close-tray" value="tray" />
-            <span>タスクトレイに格納する（録音継続）</span>
-          </label>
-        </div>
       </div>
       <div class="modal-footer">
         <button id="btn-settings-save" class="btn btn-primary">保存</button>
