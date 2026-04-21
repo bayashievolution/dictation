@@ -167,6 +167,13 @@ const els = {
   chatEmpty: document.getElementById('chat-empty'),
   chatInput: document.getElementById('chat-input'),
   btnChatSend: document.getElementById('btn-chat-send'),
+  btnQuickChat: document.getElementById('btn-quick-chat'),
+  quickChatModal: document.getElementById('quick-chat-modal'),
+  quickChatBody: document.querySelector('#quick-chat-modal .quick-chat-body'),
+  quickChatMessages: document.getElementById('quick-chat-messages'),
+  quickChatEmpty: document.getElementById('quick-chat-empty'),
+  quickChatInput: document.getElementById('quick-chat-input'),
+  btnQuickChatSend: document.getElementById('btn-quick-chat-send'),
   innerTabsContainer: document.getElementById('inner-tabs'),
   mainArea: document.getElementById('main-area'),
   titleBar: document.getElementById('title-bar'),
@@ -1579,15 +1586,16 @@ function reorderPaneOrder(newOrder) {
 
 /* ───────── Chat (NotebookLM風) ───────── */
 
-function renderChat() {
+function renderChatInto(container, emptyHint, scrollContainer) {
+  if (!container) return;
   const session = getActiveSession();
   const chat = session?.chat || [];
-  els.chatMessages.innerHTML = '';
+  container.innerHTML = '';
   if (chat.length === 0) {
-    if (els.chatEmpty) els.chatEmpty.hidden = false;
+    if (emptyHint) emptyHint.hidden = false;
     return;
   }
-  if (els.chatEmpty) els.chatEmpty.hidden = true;
+  if (emptyHint) emptyHint.hidden = true;
   for (const msg of chat) {
     const div = document.createElement('div');
     div.className = 'chat-msg ' + msg.role + (msg.thinking ? ' thinking' : '') + (msg.error ? ' error' : '');
@@ -1606,9 +1614,18 @@ function renderChat() {
     header.textContent = who;
     div.appendChild(header);
     div.appendChild(body);
-    els.chatMessages.appendChild(div);
+    container.appendChild(div);
   }
-  requestAnimationFrame(() => { els.chatBody.scrollTop = els.chatBody.scrollHeight; });
+  if (scrollContainer) {
+    requestAnimationFrame(() => { scrollContainer.scrollTop = scrollContainer.scrollHeight; });
+  }
+}
+
+function renderChat() {
+  renderChatInto(els.chatMessages, els.chatEmpty, els.chatBody);
+  if (els.quickChatModal && !els.quickChatModal.classList.contains('hidden')) {
+    renderChatInto(els.quickChatMessages, els.quickChatEmpty, els.quickChatBody);
+  }
 }
 
 function resizeChatInput() {
@@ -1616,8 +1633,8 @@ function resizeChatInput() {
   els.chatInput.style.height = Math.min(200, els.chatInput.scrollHeight) + 'px';
 }
 
-async function sendChatMessage() {
-  const text = els.chatInput.value.trim();
+async function sendChatMessageFrom(inputEl, sendBtn) {
+  const text = inputEl.value.trim();
   if (!text) return;
   if (!state.settings.apiKey) {
     alert('Gemini API キーが未設定です。設定から登録してください。');
@@ -1630,12 +1647,12 @@ async function sendChatMessage() {
 
   const history = session.chat.slice();
   session.chat.push({ role: 'user', content: text, ts: Date.now() });
-  els.chatInput.value = '';
-  resizeChatInput();
+  inputEl.value = '';
+  inputEl.style.height = '';
   const thinking = { role: 'assistant', content: '', ts: Date.now(), thinking: true };
   session.chat.push(thinking);
   renderChat();
-  els.btnChatSend.disabled = true;
+  if (sendBtn) sendBtn.disabled = true;
 
   try {
     const answer = await chatWithGemini({
@@ -1660,9 +1677,16 @@ async function sendChatMessage() {
     persistSessions();
     renderChat();
   } finally {
-    els.btnChatSend.disabled = false;
-    els.chatInput.focus();
+    if (sendBtn) sendBtn.disabled = false;
+    inputEl.focus();
   }
+}
+
+async function sendChatMessage() {
+  return sendChatMessageFrom(els.chatInput, els.btnChatSend);
+}
+async function sendQuickChatMessage() {
+  return sendChatMessageFrom(els.quickChatInput, els.btnQuickChatSend);
 }
 
 /* ───────── Auto title ───────── */
@@ -2888,6 +2912,48 @@ els.chatInput.addEventListener('keydown', (e) => {
   }
 });
 els.btnChatSend.addEventListener('click', sendChatMessage);
+
+/* ───────── クイック質問モーダル ───────── */
+function openQuickChat() {
+  if (!els.quickChatModal) return;
+  els.quickChatModal.classList.remove('hidden', 'closing');
+  renderChatInto(els.quickChatMessages, els.quickChatEmpty, els.quickChatBody);
+  setTimeout(() => els.quickChatInput?.focus(), 60);
+}
+function closeQuickChat() {
+  if (!els.quickChatModal) return;
+  els.quickChatModal.classList.add('closing');
+  setTimeout(() => {
+    els.quickChatModal.classList.remove('closing');
+    els.quickChatModal.classList.add('hidden');
+  }, 240);
+}
+if (els.btnQuickChat) {
+  els.btnQuickChat.addEventListener('click', openQuickChat);
+}
+if (els.quickChatModal) {
+  els.quickChatModal.querySelectorAll('[data-dismiss]').forEach(b => {
+    b.addEventListener('click', closeQuickChat);
+  });
+}
+if (els.quickChatInput) {
+  const resizeQuickInput = () => {
+    els.quickChatInput.style.height = 'auto';
+    els.quickChatInput.style.height = Math.min(160, els.quickChatInput.scrollHeight) + 'px';
+  };
+  els.quickChatInput.addEventListener('input', resizeQuickInput);
+  els.quickChatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      sendQuickChatMessage();
+    } else if (e.key === 'Escape') {
+      closeQuickChat();
+    }
+  });
+}
+if (els.btnQuickChatSend) {
+  els.btnQuickChatSend.addEventListener('click', sendQuickChatMessage);
+}
 els.titleDisplay.addEventListener('blur', commitTitleEdit);
 els.titleDisplay.addEventListener('keydown', (e) => {
   if (!els.titleDisplay.classList.contains('editing')) return;
