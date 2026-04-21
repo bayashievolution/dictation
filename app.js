@@ -1512,7 +1512,7 @@ function wirePaneFontControls() {
 }
 
 function applyAppZoom(v) {
-  // #app への細工は全部解除
+  // #app / body への細工は全部解除
   const app = document.getElementById('app');
   if (app) {
     app.style.zoom = '';
@@ -1521,10 +1521,20 @@ function applyAppZoom(v) {
     app.style.width = '';
     app.style.height = '';
   }
-  // html 要素に zoom を適用。Chrome はこの指定を viewport 全体の縮拡として処理するので
-  // vw/vh/% も含めて統一的にスケールされ、clip も 額縁 も発生しない
+  const root = document.documentElement;
   const z = v / 100;
-  document.documentElement.style.zoom = (v === 100) ? '' : z;
+  if (v === 100) {
+    root.style.zoom = '';
+    root.style.width = '';
+    root.style.height = '';
+  } else {
+    // html に zoom を適用し、layout 側を逆スケールで拡大
+    //   → html 視覚サイズ = viewport を埋める
+    //   → 内側の vh/vw/% もすべて viewport カバーに追従
+    root.style.zoom = z;
+    root.style.width  = (100 / z) + 'vw';
+    root.style.height = (100 / z) + 'vh';
+  }
 }
 
 function applyPaneOrder() {

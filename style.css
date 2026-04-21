@@ -1783,19 +1783,6 @@ html, body {
   color: var(--heading);
 }
 
-/* ───────── Footer ───────── */
-#footer {
-  padding: 6px 16px;
-  background: var(--bg-elevated);
-  border-top: 1px solid var(--border);
-  text-align: center;
-}
-
-#footer small {
-  color: var(--text-faint);
-  font-size: 11px;
-  letter-spacing: 0.05em;
-}
 
 /* ───────── Zoom bar (Word-style, bottom-right) ───────── */
 #zoom-bar {
