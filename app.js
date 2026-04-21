@@ -859,6 +859,22 @@ async function listAudioInputDevices() {
   return devices.filter(d => d.kind === 'audioinput');
 }
 
+function applyGeminiOnlyVisibility(animated = true) {
+  const el = document.getElementById('gemini-only-fields');
+  if (!el) return;
+  const isGemini = els.modeGemini && els.modeGemini.checked;
+  if (!animated) {
+    // モーダル開いた直後はトランジション無しで確定状態に
+    const prev = el.style.transition;
+    el.style.transition = 'none';
+    el.classList.toggle('is-hidden', !isGemini);
+    void el.offsetWidth; // reflow
+    el.style.transition = prev;
+  } else {
+    el.classList.toggle('is-hidden', !isGemini);
+  }
+}
+
 async function populateAudioDevices() {
   if (!els.inputAudioDevice) return;
   const sel = els.inputAudioDevice;
@@ -1753,14 +1769,12 @@ let settingsWorkingOrder = null;
 
 function renderPaneOrderList() {
   els.paneOrderList.innerHTML = '';
-  settingsWorkingOrder.forEach((id, idx) => {
+  settingsWorkingOrder.forEach((id) => {
     const meta = PANE_META[id];
     const item = document.createElement('div');
     item.className = 'pane-order-item';
     item.draggable = true;
     item.dataset.paneId = id;
-    const canUp = idx > 0;
-    const canDown = idx < settingsWorkingOrder.length - 1;
     item.innerHTML = `
       <span class="pane-order-grip" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
@@ -1770,23 +1784,13 @@ function renderPaneOrderList() {
         </svg>
       </span>
       <span class="pane-order-item-label"><span data-icon="${meta.icon}"></span>${meta.label}</span>
-      <button class="pane-order-btn up" ${canUp ? '' : 'disabled'} title="上へ" type="button"><span data-icon="chevron-up"></span></button>
-      <button class="pane-order-btn down" ${canDown ? '' : 'disabled'} title="下へ" type="button"><span data-icon="chevron-down"></span></button>
     `;
-    item.querySelector('.up').addEventListener('click', () => {
-      if (!canUp) return;
-      [settingsWorkingOrder[idx-1], settingsWorkingOrder[idx]] = [settingsWorkingOrder[idx], settingsWorkingOrder[idx-1]];
-      renderPaneOrderList();
-    });
-    item.querySelector('.down').addEventListener('click', () => {
-      if (!canDown) return;
-      [settingsWorkingOrder[idx+1], settingsWorkingOrder[idx]] = [settingsWorkingOrder[idx], settingsWorkingOrder[idx+1]];
-      renderPaneOrderList();
-    });
     els.paneOrderList.appendChild(item);
   });
-  enableDragSort(els.paneOrderList, {
+  // タッチ対応のポインタドラッグ（マウス即時／タッチ長押し）
+  enablePointerDragSort(els.paneOrderList, {
     itemSelector: '.pane-order-item',
+    idAttr: 'pane-id',
     onReorder: (newIdOrder) => {
       settingsWorkingOrder = newIdOrder;
       renderPaneOrderList();
@@ -2049,6 +2053,7 @@ function openSettings() {
   }
   els.inputChunkSec.value = state.settings.audioChunkSec || 12;
   populateAudioDevices();
+  applyGeminiOnlyVisibility(/* animated */ false);
   els.fontTranscript.value = state.settings.transcriptFont;
   els.sizeTranscript.value = state.settings.transcriptSize;
   els.fontMemo.value = state.settings.memoFont;
@@ -2403,6 +2408,10 @@ document.querySelectorAll('[data-pane-clear]').forEach(btn => {
 });
 
 els.btnSettingsSave.addEventListener('click', saveSettingsFromForm);
+
+// モード切替で Gemini 専用フィールドの表示/非表示をアニメーション
+if (els.modeWebSpeech) els.modeWebSpeech.addEventListener('change', () => applyGeminiOnlyVisibility(true));
+if (els.modeGemini) els.modeGemini.addEventListener('change', () => applyGeminiOnlyVisibility(true));
 
 /* ───────── Zoom bar (bottom-right) ───────── */
 function setZoom(pct, persist = true) {

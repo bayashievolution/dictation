@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.8.5" />
+  <link rel="stylesheet" href="style.css?v=0.8.6" />
 </head>
 <body>
   <div id="app">
@@ -88,8 +88,8 @@
             <div class="pane-size-stepper">
               <input class="pane-size-input" type="number" min="10" max="36" step="1" data-pane-size="pane-transcript" title="文字サイズ(px)" />
               <div class="size-step-col">
-                <button class="size-step-btn" data-pane-size-step="pane-transcript:1" title="拡大" tabindex="-1">▲</button>
-                <button class="size-step-btn" data-pane-size-step="pane-transcript:-1" title="縮小" tabindex="-1">▼</button>
+                <button class="size-step-btn" data-pane-size-step="pane-transcript:1" title="拡大" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button class="size-step-btn" data-pane-size-step="pane-transcript:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
               </div>
             </div>
           </div>
@@ -120,8 +120,8 @@
             <div class="pane-size-stepper">
               <input class="pane-size-input" type="number" min="10" max="36" step="1" data-pane-size="pane-memo" title="文字サイズ(px)" />
               <div class="size-step-col">
-                <button class="size-step-btn" data-pane-size-step="pane-memo:1" title="拡大" tabindex="-1">▲</button>
-                <button class="size-step-btn" data-pane-size-step="pane-memo:-1" title="縮小" tabindex="-1">▼</button>
+                <button class="size-step-btn" data-pane-size-step="pane-memo:1" title="拡大" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button class="size-step-btn" data-pane-size-step="pane-memo:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
               </div>
             </div>
           </div>
@@ -151,8 +151,8 @@
             <div class="pane-size-stepper">
               <input class="pane-size-input" type="number" min="10" max="36" step="1" data-pane-size="pane-summary" title="文字サイズ(px)" />
               <div class="size-step-col">
-                <button class="size-step-btn" data-pane-size-step="pane-summary:1" title="拡大" tabindex="-1">▲</button>
-                <button class="size-step-btn" data-pane-size-step="pane-summary:-1" title="縮小" tabindex="-1">▼</button>
+                <button class="size-step-btn" data-pane-size-step="pane-summary:1" title="拡大" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button class="size-step-btn" data-pane-size-step="pane-summary:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
               </div>
             </div>
           </div>
@@ -179,8 +179,8 @@
             <div class="pane-size-stepper">
               <input class="pane-size-input" type="number" min="10" max="36" step="1" data-pane-size="pane-chat" title="文字サイズ(px)" />
               <div class="size-step-col">
-                <button class="size-step-btn" data-pane-size-step="pane-chat:1" title="拡大" tabindex="-1">▲</button>
-                <button class="size-step-btn" data-pane-size-step="pane-chat:-1" title="縮小" tabindex="-1">▼</button>
+                <button class="size-step-btn" data-pane-size-step="pane-chat:1" title="拡大" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button class="size-step-btn" data-pane-size-step="pane-chat:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
               </div>
             </div>
           </div>
@@ -257,20 +257,24 @@
               <span><strong>Gemini Audio</strong> — 10〜15秒遅延。任意のデバイス選択可（Zoom/Meet等）</span>
             </label>
           </div>
-          <label class="field">
-            <span class="field-label">音声入力デバイス（Geminiモード時）</span>
-            <select id="input-audio-device"></select>
-            <small class="field-hint">
-              Zoom/Meet の音声を取り込むには
-              <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener">VB-Cable</a>
-              などの仮想オーディオケーブルを入れ、会議アプリの音声出力を仮想入力に回してから、ここで選択。
-            </small>
-          </label>
-          <label class="field">
-            <span class="field-label">Geminiチャンク間隔（秒）</span>
-            <input id="input-chunk-sec" type="number" min="5" max="60" step="1" />
-            <small class="field-hint">この秒数ごとに音声を Gemini へ送信。長いほど精度アップ・遅延増、短いほど反応速い。既定 12 秒。</small>
-          </label>
+          <div class="field-conditional" id="gemini-only-fields">
+            <div class="field-conditional-inner">
+              <label class="field">
+                <span class="field-label">音声入力デバイス</span>
+                <select id="input-audio-device"></select>
+                <small class="field-hint">
+                  Zoom/Meet の音声を取り込むには
+                  <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener">VB-Cable</a>
+                  などの仮想オーディオケーブルを入れ、会議アプリの音声出力を仮想入力に回してから、ここで選択。
+                </small>
+              </label>
+              <label class="field">
+                <span class="field-label">Geminiチャンク間隔（秒）</span>
+                <input id="input-chunk-sec" type="number" min="5" max="60" step="1" />
+                <small class="field-hint">この秒数ごとに音声を Gemini へ送信。長いほど精度アップ・遅延増、短いほど反応速い。既定 12 秒。</small>
+              </label>
+            </div>
+          </div>
         </div>
 
         <div class="field-group">
@@ -345,8 +349,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.8.5"></script>
-  <script src="gemini.js?v=0.8.5"></script>
-  <script src="app.js?v=0.8.5"></script>
+  <script src="icons.js?v=0.8.6"></script>
+  <script src="gemini.js?v=0.8.6"></script>
+  <script src="app.js?v=0.8.6"></script>
 </body>
 </html>

@@ -897,6 +897,11 @@ html, body {
   font-family: inherit;
 }
 
+.size-step-btn [data-icon] svg {
+  width: 10px;
+  height: 10px;
+}
+
 .size-step-btn:hover {
   background: var(--bg-subtle);
   color: var(--text);
@@ -1320,15 +1325,7 @@ html, body {
   font-size: 13px;
   color: var(--text);
 }
-.font-row select {
-  padding: 6px 8px;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-  font-size: 13px;
-}
+.font-row select,
 .font-row input[type="number"] {
   padding: 6px 8px;
   background: var(--bg);
@@ -1337,7 +1334,18 @@ html, body {
   border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 13px;
-  width: 100%;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.font-row select { cursor: pointer; }
+.font-row input[type="number"] { width: 100%; }
+.font-row select:hover,
+.font-row input:hover {
+  border-color: #4a4a54;
+}
+.font-row select:focus,
+.font-row input:focus {
+  border-color: var(--accent);
 }
 .font-row .unit {
   font-size: 11px;
@@ -1555,7 +1563,8 @@ html, body {
 
 .field input[type="text"],
 .field input[type="password"],
-.field input[type="number"] {
+.field input[type="number"],
+.field select {
   width: 100%;
   padding: 8px 10px;
   background: var(--bg);
@@ -1564,12 +1573,34 @@ html, body {
   border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 14px;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, background 0.15s;
+  outline: none;
+  cursor: text;
 }
 
-.field input:focus {
-  outline: none;
+.field select {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239b9ba5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.field input:hover,
+.field select:hover {
+  border-color: #4a4a54;
+}
+
+.field input:focus,
+.field select:focus {
   border-color: var(--accent);
+}
+
+.field input[type="number"]::-webkit-inner-spin-button,
+.field input[type="number"]::-webkit-outer-spin-button {
+  opacity: 0.6;
 }
 
 .field input[type="range"] {
@@ -1577,6 +1608,30 @@ html, body {
   accent-color: var(--accent);
   padding: 6px 0;
   background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+/* ───────── Conditional field group (slide reveal) ───────── */
+.field-conditional {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 0.28s var(--ease-out),
+    opacity 0.2s var(--ease-out),
+    margin 0.28s var(--ease-out);
+  margin-top: 12px;
+}
+.field-conditional > .field-conditional-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+.field-conditional.is-hidden {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  margin-top: 0;
+  pointer-events: none;
 }
 
 .field-hint {
