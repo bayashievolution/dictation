@@ -15,6 +15,17 @@
   --radius-sm: 6px;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-snap: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* per-pane font and size (settable via JS) */
+  --font-sans: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Yu Gothic UI', sans-serif;
+  --font-serif: 'Noto Serif JP', 'Yu Mincho', 'Hiragino Mincho ProN', 'MS Mincho', serif;
+  --font-mono: 'Source Code Pro', 'Cascadia Code', Consolas, 'Courier New', monospace;
+  --transcript-font: var(--font-sans);
+  --transcript-size: 17px;
+  --memo-font: var(--font-sans);
+  --memo-size: 15px;
+  --summary-font: var(--font-sans);
+  --summary-size: 15px;
 }
 
 * {
@@ -540,7 +551,8 @@ html, body {
 /* ───────── Memo ───────── */
 #memo {
   min-height: 100%;
-  font-size: 15px;
+  font-family: var(--memo-font);
+  font-size: var(--memo-size);
   line-height: 1.8;
   outline: none;
   caret-color: var(--accent);
@@ -576,7 +588,8 @@ html, body {
 }
 
 #summary {
-  font-size: 15px;
+  font-family: var(--summary-font);
+  font-size: var(--summary-size);
   line-height: 1.75;
   outline: none;
   caret-color: var(--accent);
@@ -630,7 +643,8 @@ html, body {
 }
 
 #confirmed {
-  font-size: 17px;
+  font-family: var(--transcript-font);
+  font-size: var(--transcript-size);
   line-height: 1.9;
   outline: none;
   caret-color: var(--accent);
@@ -748,6 +762,117 @@ html, body {
   transform: translateY(8px);
 }
 
+/* ───────── SVG icons ───────── */
+[data-icon] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+[data-icon] svg {
+  display: block;
+}
+
+/* ───────── Settings sections ───────── */
+.field-group {
+  margin-bottom: 22px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.field-group:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.field-group-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.font-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 70px auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.font-row-label {
+  font-size: 13px;
+  color: var(--text);
+}
+.font-row select {
+  padding: 6px 8px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 13px;
+}
+.font-row input[type="number"] {
+  padding: 6px 8px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 13px;
+  width: 100%;
+}
+.font-row .unit {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+#pane-order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.pane-order-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.pane-order-item-label {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pane-order-btn {
+  width: 26px;
+  height: 24px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s var(--ease-snap);
+}
+.pane-order-btn:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+.pane-order-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
 /* ───────── Modal ───────── */
 .modal {
   position: fixed;
@@ -787,6 +912,10 @@ html, body {
 
 .modal-small {
   max-width: 360px;
+}
+
+.modal-wide {
+  max-width: 520px;
 }
 
 @keyframes fadeIn {

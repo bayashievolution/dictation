@@ -137,5 +137,68 @@ async function summarizeWithGemini({ apiKey, transcript, title }) {
   return text.trim();
 }
 
+/**
+ * 文字起こし・要約から短いタイトルを生成
+ * @param {object} args
+ * @param {string} args.apiKey
+ * @param {string} [args.summary] - 要約（あれば優先参照）
+ * @param {string} [args.transcript] - 文字起こし
+ * @returns {Promise<string>} 5〜20文字程度のタイトル
+ */
+async function generateTitleWithGemini({ apiKey, summary, transcript }) {
+  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  const source = (summary && summary.trim()) || (transcript && transcript.trim()) || '';
+  if (!source) throw new Error('タイトル生成の素材がありません');
+
+  const instruction = [
+    'あなたは会議・講義の記録に短いタイトルを付ける編集者です。',
+    '以下のルールに従い、タイトルを1つだけ返します。',
+    '- 5〜20文字程度の体言止めで、内容を端的に表す',
+    '- 装飾（「」、##、** など）や説明・候補列挙は一切付けない',
+    '- 日付や時刻は含めない',
+    '- 出力はタイトル文字列のみ',
+  ].join('\n');
+
+  const userPrompt = [
+    summary ? '【要約】\n' + summary.slice(0, 2000) : '',
+    transcript ? '【文字起こし（冒頭）】\n' + transcript.slice(0, 1200) : '',
+  ].filter(Boolean).join('\n\n');
+
+  const body = {
+    system_instruction: { parts: [{ text: instruction }] },
+    contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+    generationConfig: {
+      temperature: 0.5,
+      topP: 0.9,
+      maxOutputTokens: 64,
+      responseMimeType: 'text/plain',
+    },
+  };
+
+  const url = `${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Gemini API エラー (${res.status}): ${errText.slice(0, 300)}`);
+  }
+
+  const data = await res.json();
+  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!raw) throw new Error('タイトルの応答が空です');
+  return raw
+    .trim()
+    .split('\n')[0]
+    .replace(/^[「『"']|["'」』]$/g, '')
+    .replace(/^#+\s*/, '')
+    .slice(0, 40)
+    .trim();
+}
+
 window.refineWithGemini = refineWithGemini;
 window.summarizeWithGemini = summarizeWithGemini;
+window.generateTitleWithGemini = generateTitleWithGemini;

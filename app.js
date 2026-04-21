@@ -25,6 +25,26 @@ const DEFAULT_SETTINGS = {
   autoStopSec: 120,
   autoStopEnabled: true,
   autoSummarize: true,
+  appZoom: 100,
+  paneOrder: ['pane-transcript', 'pane-memo', 'pane-summary'],
+  transcriptFont: 'sans',
+  transcriptSize: 17,
+  memoFont: 'sans',
+  memoSize: 15,
+  summaryFont: 'sans',
+  summarySize: 15,
+};
+
+const PANE_META = {
+  'pane-transcript': { label: '文字起こし', icon: 'mic' },
+  'pane-memo':       { label: 'メモ',       icon: 'pencil' },
+  'pane-summary':    { label: '要約',       icon: 'file-text' },
+};
+
+const FONT_FAMILIES = {
+  sans:  "'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Yu Gothic UI', sans-serif",
+  serif: "'Noto Serif JP', 'Yu Mincho', 'Hiragino Mincho ProN', 'MS Mincho', serif",
+  mono:  "'Source Code Pro', 'Cascadia Code', Consolas, 'Courier New', monospace",
 };
 
 const AUTOSAVE_INTERVAL_MS = 15000;
@@ -72,7 +92,8 @@ const els = {
   paneMemo: document.getElementById('pane-memo'),
   paneSummary: document.getElementById('pane-summary'),
   paneTranscriptBody: document.querySelector('#pane-transcript .pane-body'),
-  innerTabs: document.querySelectorAll('.inner-tab'),
+  innerTabsContainer: document.getElementById('inner-tabs'),
+  mainArea: document.getElementById('main-area'),
   btnRegenSummary: document.getElementById('btn-regenerate-summary'),
   emptyHint: document.getElementById('empty-hint'),
   settingsModal: document.getElementById('settings-modal'),
@@ -87,6 +108,15 @@ const els = {
   inputAutoStop: document.getElementById('input-auto-stop'),
   inputAutoStopSec: document.getElementById('input-auto-stop-sec'),
   inputAutoSummarize: document.getElementById('input-auto-summarize'),
+  inputZoom: document.getElementById('input-zoom'),
+  zoomValue: document.getElementById('zoom-value'),
+  paneOrderList: document.getElementById('pane-order-list'),
+  fontTranscript: document.getElementById('font-transcript'),
+  sizeTranscript: document.getElementById('size-transcript'),
+  fontMemo: document.getElementById('font-memo'),
+  sizeMemo: document.getElementById('size-memo'),
+  fontSummary: document.getElementById('font-summary'),
+  sizeSummary: document.getElementById('size-summary'),
   tabsList: document.getElementById('tabs-list'),
   btnTabNew: document.getElementById('btn-tab-new'),
 };
@@ -123,7 +153,8 @@ function setStatus(mode, label) {
 
 function setRecordingUI(isRec) {
   els.btnToggle.classList.toggle('recording', isRec);
-  els.btnToggle.querySelector('.btn-icon').textContent = isRec ? '⏹' : '▶';
+  const iconEl = els.btnToggle.querySelector('[data-icon]');
+  if (iconEl && typeof setIcon === 'function') setIcon(iconEl, isRec ? 'stop' : 'play', 18);
   els.btnToggle.title = isRec ? '停止' : '録音開始';
   renderTabs();
 }
@@ -451,6 +482,7 @@ function stopRecording() {
     persistSessions();
     if (state.settings.autoSummarize && state.settings.aiEnabled && state.settings.apiKey) {
       await generateSummary({ silent: true });
+      await autoGenerateTitle();
     }
   });
 }
@@ -459,17 +491,16 @@ function stopRecording() {
 
 function flashButton(btn, label = 'コピー完了') {
   const origTitle = btn.title;
-  const origHtml = btn.innerHTML;
-  const iconSpan = btn.querySelector('.btn-icon');
-  if (iconSpan) {
-    const origIcon = iconSpan.textContent;
-    iconSpan.textContent = '✓';
+  const iconEl = btn.querySelector('[data-icon]');
+  if (iconEl) {
+    const origName = iconEl.dataset.icon;
+    const origSize = iconEl.dataset.iconSize || '16';
+    setIcon(iconEl, 'check', origSize);
     btn.title = label;
-    setTimeout(() => { iconSpan.textContent = origIcon; btn.title = origTitle; }, 1200);
+    setTimeout(() => { setIcon(iconEl, origName, origSize); btn.title = origTitle; }, 1200);
   } else {
-    btn.innerHTML = '<span>✓</span><span>OK</span>';
     btn.title = label;
-    setTimeout(() => { btn.innerHTML = origHtml; btn.title = origTitle; }, 1200);
+    setTimeout(() => { btn.title = origTitle; }, 1200);
   }
 }
 
@@ -492,11 +523,26 @@ async function copyPane(paneId, btn) {
   await copyTextOnly(text, btn);
 }
 
+function getPaneText(id) {
+  if (id === 'pane-transcript') return getConfirmedText();
+  if (id === 'pane-memo') return getMemoText();
+  if (id === 'pane-summary') return getSummaryText();
+  return '';
+}
+function getPaneHtml(id) {
+  if (id === 'pane-transcript') return els.confirmed.innerHTML;
+  if (id === 'pane-memo') return els.memo.innerHTML;
+  if (id === 'pane-summary') return els.summary.innerHTML;
+  return '';
+}
+
 function buildCombinedPlain() {
   const parts = [];
-  const t = getConfirmedText(); if (t) parts.push('【文字起こし】\n' + t);
-  const m = getMemoText();      if (m) parts.push('【メモ】\n' + m);
-  const s = getSummaryText();   if (s) parts.push('【要約】\n' + s);
+  for (const id of state.settings.paneOrder) {
+    const meta = PANE_META[id];
+    const t = getPaneText(id);
+    if (t) parts.push(`【${meta.label}】\n` + t);
+  }
   return parts.join('\n\n──────────\n\n');
 }
 
@@ -504,9 +550,11 @@ function buildCombinedMarkdown() {
   const parts = [];
   const session = getActiveSession();
   if (session?.title) parts.push(`# ${session.title}`);
-  const s = getSummaryText();   if (s) parts.push('## 要約\n\n' + s);
-  const m = getMemoText();      if (m) parts.push('## メモ\n\n' + m);
-  const t = getConfirmedText(); if (t) parts.push('## 文字起こし\n\n' + t);
+  for (const id of state.settings.paneOrder) {
+    const meta = PANE_META[id];
+    const t = getPaneText(id);
+    if (t) parts.push(`## ${meta.label}\n\n` + t);
+  }
   return parts.join('\n\n');
 }
 
@@ -515,17 +563,14 @@ function buildCombinedHtmlForNotion() {
   const session = getActiveSession();
   const title = session?.title ? `<h1>${escapeHtml(session.title)}</h1>` : '';
   const sections = [];
-
-  const addSection = (label, innerHtml, plainFallback) => {
-    if (!innerHtml && !plainFallback) return;
-    const body = innerHtml || `<p>${escapeHtml(plainFallback)}</p>`;
-    sections.push(`<details open><summary><strong>${escapeHtml(label)}</strong></summary>${body}</details>`);
-  };
-
-  addSection('要約', els.summary.innerHTML, getSummaryText());
-  addSection('メモ', els.memo.innerHTML, getMemoText());
-  addSection('文字起こし', els.confirmed.innerHTML, getConfirmedText());
-
+  for (const id of state.settings.paneOrder) {
+    const meta = PANE_META[id];
+    const html = getPaneHtml(id);
+    const plain = getPaneText(id);
+    if (!html && !plain) continue;
+    const body = html || `<p>${escapeHtml(plain)}</p>`;
+    sections.push(`<details open><summary><strong>${escapeHtml(meta.label)}</strong></summary>${body}</details>`);
+  }
   return title + sections.join('\n');
 }
 
@@ -665,6 +710,74 @@ function toggleAi() {
   applyAiButtonState();
 }
 
+/* ───────── Display settings / pane order / inner tabs ───────── */
+
+function applyDisplaySettings() {
+  const s = state.settings;
+  const root = document.documentElement;
+  root.style.setProperty('--transcript-font', FONT_FAMILIES[s.transcriptFont] || FONT_FAMILIES.sans);
+  root.style.setProperty('--transcript-size', (s.transcriptSize || 17) + 'px');
+  root.style.setProperty('--memo-font', FONT_FAMILIES[s.memoFont] || FONT_FAMILIES.sans);
+  root.style.setProperty('--memo-size', (s.memoSize || 15) + 'px');
+  root.style.setProperty('--summary-font', FONT_FAMILIES[s.summaryFont] || FONT_FAMILIES.sans);
+  root.style.setProperty('--summary-size', (s.summarySize || 15) + 'px');
+  document.body.style.zoom = ((s.appZoom || 100) / 100);
+}
+
+function applyPaneOrder() {
+  for (const id of state.settings.paneOrder) {
+    const pane = document.getElementById(id);
+    if (pane) els.mainArea.appendChild(pane);
+  }
+}
+
+function renderInnerTabs() {
+  els.innerTabsContainer.innerHTML = '';
+  for (const id of state.settings.paneOrder) {
+    const meta = PANE_META[id];
+    if (!meta) continue;
+    const btn = document.createElement('button');
+    btn.className = 'inner-tab' + (state.activePane === id ? ' active' : '');
+    btn.dataset.pane = id;
+    btn.innerHTML = `<span class="inner-tab-icon" data-icon="${meta.icon}"></span>${meta.label}`;
+    btn.addEventListener('click', () => switchInnerPane(id));
+    els.innerTabsContainer.appendChild(btn);
+  }
+  renderIcons(els.innerTabsContainer);
+}
+
+/* ───────── Auto title ───────── */
+
+function formatDatePart(ts) {
+  const d = new Date(ts);
+  const pad = x => String(x).padStart(2, '0');
+  return `${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function autoGenerateTitle() {
+  const session = getActiveSession();
+  if (!session || session.titleIsManual) return;
+  if (!state.settings.apiKey || !state.settings.aiEnabled) return;
+  const transcript = getConfirmedText();
+  const summary = getSummaryText();
+  if (!transcript && !summary) return;
+  try {
+    const aiTitle = await generateTitleWithGemini({
+      apiKey: state.settings.apiKey,
+      summary,
+      transcript,
+    });
+    if (!aiTitle) return;
+    session.aiTitle = aiTitle;
+    session.title = `${aiTitle}(${formatDatePart(session.createdAt)})`;
+    session.updatedAt = Date.now();
+    persistSessions();
+    renderTabs();
+  } catch (e) {
+    console.warn('auto title failed:', e);
+  }
+}
+
 /* ───────── Summary generation ───────── */
 
 async function generateSummary({ silent = false } = {}) {
@@ -696,7 +809,10 @@ async function generateSummary({ silent = false } = {}) {
     snapshotActiveToSession();
     persistSessions();
     updateActionButtons();
-    if (!silent) switchInnerPane('pane-summary');
+    if (!silent) {
+      switchInnerPane('pane-summary');
+      autoGenerateTitle();
+    }
   } catch (e) {
     console.error('Summary generation failed:', e);
     if (!silent) alert('要約生成に失敗しました: ' + e.message);
@@ -760,6 +876,36 @@ function escapeHtml(s) {
 
 /* ───────── Settings modal ───────── */
 
+let settingsWorkingOrder = null;
+
+function renderPaneOrderList() {
+  els.paneOrderList.innerHTML = '';
+  settingsWorkingOrder.forEach((id, idx) => {
+    const meta = PANE_META[id];
+    const item = document.createElement('div');
+    item.className = 'pane-order-item';
+    const canUp = idx > 0;
+    const canDown = idx < settingsWorkingOrder.length - 1;
+    item.innerHTML = `
+      <span class="pane-order-item-label"><span data-icon="${meta.icon}"></span>${meta.label}</span>
+      <button class="pane-order-btn up" ${canUp ? '' : 'disabled'} title="上へ"><span data-icon="chevron-up"></span></button>
+      <button class="pane-order-btn down" ${canDown ? '' : 'disabled'} title="下へ"><span data-icon="chevron-down"></span></button>
+    `;
+    item.querySelector('.up').addEventListener('click', () => {
+      if (!canUp) return;
+      [settingsWorkingOrder[idx-1], settingsWorkingOrder[idx]] = [settingsWorkingOrder[idx], settingsWorkingOrder[idx-1]];
+      renderPaneOrderList();
+    });
+    item.querySelector('.down').addEventListener('click', () => {
+      if (!canDown) return;
+      [settingsWorkingOrder[idx+1], settingsWorkingOrder[idx]] = [settingsWorkingOrder[idx], settingsWorkingOrder[idx+1]];
+      renderPaneOrderList();
+    });
+    els.paneOrderList.appendChild(item);
+  });
+  renderIcons(els.paneOrderList);
+}
+
 function openSettings() {
   els.inputApiKey.value = state.settings.apiKey;
   els.inputSilenceSec.value = state.settings.silenceSec;
@@ -767,12 +913,24 @@ function openSettings() {
   els.inputAutoStop.checked = state.settings.autoStopEnabled;
   els.inputAutoStopSec.value = state.settings.autoStopSec;
   els.inputAutoSummarize.checked = state.settings.autoSummarize;
+  els.inputZoom.value = state.settings.appZoom;
+  if (els.zoomValue) els.zoomValue.textContent = state.settings.appZoom + '%';
+  els.fontTranscript.value = state.settings.transcriptFont;
+  els.sizeTranscript.value = state.settings.transcriptSize;
+  els.fontMemo.value = state.settings.memoFont;
+  els.sizeMemo.value = state.settings.memoSize;
+  els.fontSummary.value = state.settings.summaryFont;
+  els.sizeSummary.value = state.settings.summarySize;
+  settingsWorkingOrder = state.settings.paneOrder.slice();
+  renderPaneOrderList();
   els.settingsModal.classList.remove('hidden');
   setTimeout(() => els.inputApiKey.focus(), 80);
 }
 
 function closeSettings() {
   els.settingsModal.classList.add('hidden');
+  // Revert live zoom preview if canceled
+  applyDisplaySettings();
 }
 
 function saveSettingsFromForm() {
@@ -782,18 +940,30 @@ function saveSettingsFromForm() {
   state.settings.autoStopEnabled = els.inputAutoStop.checked;
   state.settings.autoStopSec = Math.max(30, Math.min(600, Number(els.inputAutoStopSec.value) || 120));
   state.settings.autoSummarize = els.inputAutoSummarize.checked;
+  state.settings.appZoom = Math.max(75, Math.min(200, Number(els.inputZoom.value) || 100));
+  state.settings.transcriptFont = els.fontTranscript.value;
+  state.settings.transcriptSize = Math.max(10, Math.min(36, Number(els.sizeTranscript.value) || 17));
+  state.settings.memoFont = els.fontMemo.value;
+  state.settings.memoSize = Math.max(10, Math.min(36, Number(els.sizeMemo.value) || 15));
+  state.settings.summaryFont = els.fontSummary.value;
+  state.settings.summarySize = Math.max(10, Math.min(36, Number(els.sizeSummary.value) || 15));
+  if (settingsWorkingOrder && settingsWorkingOrder.length === 3) {
+    state.settings.paneOrder = settingsWorkingOrder.slice();
+  }
   saveSettings();
   applyAiButtonState();
-  closeSettings();
+  applyDisplaySettings();
+  applyPaneOrder();
+  renderInnerTabs();
+  els.settingsModal.classList.add('hidden');
 }
 
 /* ───────── Inner pane switch ───────── */
 
 function switchInnerPane(paneId) {
   state.activePane = paneId;
-  els.innerTabs.forEach(t => t.classList.toggle('active', t.dataset.pane === paneId));
+  els.innerTabsContainer.querySelectorAll('.inner-tab').forEach(t => t.classList.toggle('active', t.dataset.pane === paneId));
   [els.paneTranscript, els.paneMemo, els.paneSummary].forEach(p => p.classList.toggle('active', p.id === paneId));
-  // Update summary empty state
   if (paneId === 'pane-summary') {
     els.summaryEmpty.hidden = !!getSummaryText();
   }
@@ -925,6 +1095,7 @@ function renameSession(id, title) {
   const s = state.sessions.find(x => x.id === id);
   if (!s) return;
   s.title = title.trim() || defaultTitle();
+  s.titleIsManual = true;
   s.updatedAt = Date.now();
   persistSessions();
   renderTabs();
@@ -1015,11 +1186,14 @@ document.querySelectorAll('[data-pane-clear]').forEach(btn => {
   btn.addEventListener('click', () => clearPane(btn.dataset.paneClear));
 });
 
-els.innerTabs.forEach(t => {
-  t.addEventListener('click', () => switchInnerPane(t.dataset.pane));
-});
-
 els.btnSettingsSave.addEventListener('click', saveSettingsFromForm);
+
+// Live preview of zoom while dragging the slider
+els.inputZoom.addEventListener('input', () => {
+  const v = Number(els.inputZoom.value) || 100;
+  if (els.zoomValue) els.zoomValue.textContent = v + '%';
+  document.body.style.zoom = (v / 100);
+});
 els.settingsModal.querySelectorAll('[data-dismiss]').forEach(b => b.addEventListener('click', closeSettings));
 
 els.btnSilenceStop.addEventListener('click', () => { hideSilenceDialog(); stopRecording(); });
@@ -1074,6 +1248,10 @@ if (!SpeechRecognition) {
 }
 
 loadSettings();
+applyDisplaySettings();
+applyPaneOrder();
+renderInnerTabs();
+if (typeof renderIcons === 'function') renderIcons();
 initSessions();
 renderTabs();
 loadActiveSessionIntoDOM();
