@@ -81,14 +81,7 @@ html, body {
   line-height: 1.7;
   margin: 0;
   padding: 0;
-}
-html {
   overflow: hidden;
-}
-body {
-  /* zoom+inverse時、#app の layout が body を超える範囲は display されるよう visible に
-     html が overflow:hidden なので page-level のスクロールは発生しない */
-  overflow: visible;
 }
 
 #app {

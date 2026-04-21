@@ -1515,19 +1515,28 @@ function applyAppZoom(v) {
   const app = document.getElementById('app');
   if (!app) return;
   const z = v / 100;
-  app.style.transform = '';
-  app.style.transformOrigin = '';
   if (v === 100) {
     app.style.zoom = '';
+    app.style.transform = '';
+    app.style.transformOrigin = '';
     app.style.width = '';
     app.style.height = '';
-  } else {
-    // zoom プロパティは layout・visual 両方をスケールするので、
-    // 逆スケールで指定すれば結果的に viewport にピッタリ収まる
-    // （transform: scale と違って body の overflow で clip されない）
+  } else if (v > 100) {
+    // 拡大: zoom + 逆スケール（layout 小さくして scaled visual = 100%）
     app.style.zoom = z;
+    app.style.transform = '';
+    app.style.transformOrigin = '';
     app.style.height = (10000 / v) + 'vh';
     app.style.width  = (10000 / v) + '%';
+  } else {
+    // 縮小: transform + origin 上中央
+    // （zoom + 逆スケールだと Chrome が layout overflow を視覚的にクリップしてしまう）
+    // 結果: 縮小時は左右・下にわずかな blank が出るが、body bg と同色で目立たない
+    app.style.zoom = '';
+    app.style.transform = `scale(${z})`;
+    app.style.transformOrigin = '50% 0';
+    app.style.width = '';
+    app.style.height = '';
   }
 }
 
