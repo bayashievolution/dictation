@@ -843,6 +843,41 @@ html, body {
   font-size: 11px;
 }
 
+/* Segmented control (低/中/高 スイッチ) */
+.segmented {
+  display: inline-flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  height: 26px;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: border-color 0.15s;
+}
+.segmented:hover { border-color: #4a4a54; }
+.segmented button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 10px;
+  font-size: 11px;
+  font-family: inherit;
+  font-weight: 500;
+  transition: background 0.12s var(--ease-snap), color 0.12s;
+}
+.segmented button:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+.segmented button.active {
+  background: #a78bfa22;
+  color: #c4b5fd;
+}
+.segmented button + button {
+  border-left: 1px solid var(--border);
+}
+
 /* アクション付きトグル（ノブ＝自動ON/OFF、ラベル＝今すぐ実行） */
 .toggle-switch.toggle-with-action .toggle-track {
   cursor: pointer;
@@ -1798,8 +1833,8 @@ html, body {
   position: fixed;
   bottom: 18px;
   right: 12px;
-  /* bottom は瞬時に（フェード中に切替えるので見えない）、opacity はフェード */
-  transition: opacity 0.2s var(--ease-out);
+  /* bottom は瞬時に（フェード中に切替えるので見えない）、opacity はゆっくりフェード */
+  transition: opacity 0.5s var(--ease-out);
   z-index: 50;
   display: flex;
   align-items: center;

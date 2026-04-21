@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = {
   autoStopSec: 120,
   autoStopEnabled: true,
   autoSummarize: true,
+  summaryDetail: 'medium',
   appZoom: 100,
   paneOrder: ['pane-transcript', 'pane-memo', 'pane-summary', 'pane-chat'],
   transcriptFont: 'sans',
@@ -172,6 +173,8 @@ const els = {
   titleDisplay: document.getElementById('title-display'),
   btnEditTitle: document.getElementById('btn-edit-title'),
   btnRegenTitle: document.getElementById('btn-regen-title'),
+  btnCopyTitle: document.getElementById('btn-copy-title'),
+  summaryDetailSwitch: document.getElementById('summary-detail-switch'),
   btnSummaryCombo: document.getElementById('btn-summary-combo'),
   btnRefineTranscript: document.getElementById('btn-refine-transcript'),
   emptyHint: document.getElementById('empty-hint'),
@@ -187,6 +190,9 @@ const els = {
   inputAutoStop: document.getElementById('input-auto-stop'),
   inputAutoStopSec: document.getElementById('input-auto-stop-sec'),
   inputAutoSummarize: document.getElementById('input-auto-summarize'),
+  summaryDetailLow: document.getElementById('summary-detail-low'),
+  summaryDetailMedium: document.getElementById('summary-detail-medium'),
+  summaryDetailHigh: document.getElementById('summary-detail-high'),
   modeWebSpeech: document.getElementById('mode-webspeech'),
   modeGemini: document.getElementById('mode-gemini'),
   inputAudioDevice: document.getElementById('input-audio-device'),
@@ -1729,6 +1735,7 @@ async function generateSummary({ silent = false } = {}) {
       apiKey: state.settings.apiKey,
       transcript,
       title: session?.title,
+      detail: state.settings.summaryDetail || 'medium',
     });
     els.summary.innerHTML = renderMarkdown(summary);
     snapshotActiveToSession();
@@ -2150,6 +2157,10 @@ function openSettings() {
   els.inputAutoStop.checked = state.settings.autoStopEnabled;
   els.inputAutoStopSec.value = state.settings.autoStopSec;
   els.inputAutoSummarize.checked = state.settings.autoSummarize;
+  const detail = state.settings.summaryDetail || 'medium';
+  if (detail === 'low') els.summaryDetailLow.checked = true;
+  else if (detail === 'high') els.summaryDetailHigh.checked = true;
+  else els.summaryDetailMedium.checked = true;
   // 音声入力モード
   if (state.settings.inputMode === 'gemini-audio') {
     els.modeGemini.checked = true;
@@ -2182,6 +2193,9 @@ function saveSettingsFromForm() {
   state.settings.autoStopEnabled = els.inputAutoStop.checked;
   state.settings.autoStopSec = Math.max(30, Math.min(600, Number(els.inputAutoStopSec.value) || 120));
   state.settings.autoSummarize = els.inputAutoSummarize.checked;
+  state.settings.summaryDetail =
+    els.summaryDetailLow.checked ? 'low' :
+    els.summaryDetailHigh.checked ? 'high' : 'medium';
   state.settings.inputMode = els.modeGemini.checked ? 'gemini-audio' : 'web-speech';
   state.settings.audioDeviceId = els.inputAudioDevice ? els.inputAudioDevice.value : '';
   state.settings.audioChunkSec = Math.max(5, Math.min(60, Number(els.inputChunkSec.value) || 12));
@@ -2213,10 +2227,11 @@ function switchInnerPane(paneId) {
     const zb = els.zoomBar;
     if (zb) {
       zb.classList.add('fading');
+      // 0.5s フェード: 480ms で透明、位置切替、480ms でフェードイン
       setTimeout(() => {
         document.body.classList.toggle('chat-active', willBeChat);
         zb.classList.remove('fading');
-      }, 180);
+      }, 480);
     } else {
       document.body.classList.toggle('chat-active', willBeChat);
     }
@@ -2652,6 +2667,38 @@ els.btnTabNew.addEventListener('click', () => {
 els.btnEditTitle.addEventListener('click', startTitleEdit);
 els.btnRegenTitle.addEventListener('click', regenTitleFromBar);
 
+// タイトルバーのコピーボタン
+if (els.btnCopyTitle) {
+  els.btnCopyTitle.addEventListener('click', async () => {
+    const session = getActiveSession();
+    if (!session) return;
+    try {
+      await navigator.clipboard.writeText(session.title || '');
+      flashButton(els.btnCopyTitle);
+    } catch (err) {
+      alert('コピー失敗: ' + err.message);
+    }
+  });
+}
+
+// 要約のシンプルさ ピル型スイッチ
+function applySummaryDetailSwitch() {
+  if (!els.summaryDetailSwitch) return;
+  const detail = state.settings.summaryDetail || 'medium';
+  els.summaryDetailSwitch.querySelectorAll('button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.detail === detail);
+  });
+}
+if (els.summaryDetailSwitch) {
+  els.summaryDetailSwitch.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.settings.summaryDetail = btn.dataset.detail;
+      saveSettings();
+      applySummaryDetailSwitch();
+    });
+  });
+}
+
 els.chatInput.addEventListener('input', resizeChatInput);
 els.chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -2683,6 +2730,7 @@ populatePaneFontSelects();
 wirePaneFontControls();
 wireNumberSteppers();
 applyDisplaySettings();
+applySummaryDetailSwitch();
 applyPaneOrder();
 renderInnerTabs();
 if (typeof renderIcons === 'function') renderIcons();
