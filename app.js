@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS = {
   appZoom: 100,
   paneOrder: ['pane-transcript', 'pane-memo', 'pane-summary'],
   transcriptFont: 'sans',
-  transcriptSize: 17,
+  transcriptSize: 15,
   memoFont: 'sans',
   memoSize: 15,
   summaryFont: 'sans',
@@ -42,10 +42,60 @@ const PANE_META = {
 };
 
 const FONT_FAMILIES = {
-  sans:  "'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Yu Gothic UI', sans-serif",
-  serif: "'Noto Serif JP', 'Yu Mincho', 'Hiragino Mincho ProN', 'MS Mincho', serif",
-  mono:  "'Source Code Pro', 'Cascadia Code', Consolas, 'Courier New', monospace",
+  sans:            "'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Yu Gothic UI', sans-serif",
+  'zen-kaku':      "'Zen Kaku Gothic New', 'Noto Sans JP', sans-serif",
+  'mplus':         "'M PLUS 1p', 'Noto Sans JP', sans-serif",
+  'kosugi-maru':   "'Kosugi Maru', 'Noto Sans JP', sans-serif",
+  'sawarabi-goth': "'Sawarabi Gothic', 'Noto Sans JP', sans-serif",
+  serif:           "'Noto Serif JP', 'Yu Mincho', 'Hiragino Mincho ProN', 'MS Mincho', serif",
+  'shippori':      "'Shippori Mincho', 'Noto Serif JP', serif",
+  'kaisei-opti':   "'Kaisei Opti', 'Noto Serif JP', serif",
+  'klee':          "'Klee One', 'Noto Serif JP', serif",
+  'yomogi':        "'Yomogi', 'Noto Serif JP', cursive",
+  mono:            "'Source Code Pro', 'Cascadia Code', Consolas, 'Courier New', monospace",
+  'jetbrains':     "'JetBrains Mono', 'Source Code Pro', monospace",
 };
+
+const FONT_OPTIONS = [
+  { group: 'ゴシック', items: [
+    { value: 'sans',            label: 'Noto Sans JP（デフォルト）' },
+    { value: 'zen-kaku',        label: 'Zen Kaku Gothic New' },
+    { value: 'mplus',           label: 'M PLUS 1p' },
+    { value: 'kosugi-maru',     label: 'Kosugi Maru（丸ゴシック）' },
+    { value: 'sawarabi-goth',   label: 'Sawarabi Gothic' },
+  ]},
+  { group: '明朝', items: [
+    { value: 'serif',           label: 'Noto Serif JP' },
+    { value: 'shippori',        label: 'Shippori Mincho' },
+    { value: 'kaisei-opti',     label: 'Kaisei Opti' },
+  ]},
+  { group: '手書き風', items: [
+    { value: 'klee',            label: 'Klee One（教科書体）' },
+    { value: 'yomogi',          label: 'Yomogi（筆）' },
+  ]},
+  { group: '等幅', items: [
+    { value: 'mono',            label: 'Source Code Pro' },
+    { value: 'jetbrains',       label: 'JetBrains Mono' },
+  ]},
+];
+
+function populateFontSelects() {
+  [els.fontTranscript, els.fontMemo, els.fontSummary].forEach(select => {
+    if (!select) return;
+    select.innerHTML = '';
+    for (const group of FONT_OPTIONS) {
+      const og = document.createElement('optgroup');
+      og.label = group.group;
+      for (const item of group.items) {
+        const o = document.createElement('option');
+        o.value = item.value;
+        o.textContent = item.label;
+        og.appendChild(o);
+      }
+      select.appendChild(og);
+    }
+  });
+}
 
 const AUTOSAVE_INTERVAL_MS = 15000;
 
@@ -108,8 +158,12 @@ const els = {
   inputAutoStop: document.getElementById('input-auto-stop'),
   inputAutoStopSec: document.getElementById('input-auto-stop-sec'),
   inputAutoSummarize: document.getElementById('input-auto-summarize'),
-  inputZoom: document.getElementById('input-zoom'),
-  zoomValue: document.getElementById('zoom-value'),
+  zoomBar: document.getElementById('zoom-bar'),
+  zoomRange: document.getElementById('zoom-range'),
+  zoomPercent: document.getElementById('zoom-percent'),
+  zoomMinus: document.getElementById('zoom-minus'),
+  zoomPlus: document.getElementById('zoom-plus'),
+  zoomReset: document.getElementById('zoom-reset'),
   paneOrderList: document.getElementById('pane-order-list'),
   fontTranscript: document.getElementById('font-transcript'),
   sizeTranscript: document.getElementById('size-transcript'),
@@ -610,15 +664,14 @@ async function copyAllMultiformat() {
   }
 }
 
-function saveSessionAsJson() {
-  snapshotActiveToSession();
-  const session = getActiveSession();
-  if (!session) return;
+function buildExportHtml(session) {
   const data = {
     format: 'dictation-session/v1',
     exportedAt: new Date().toISOString(),
     session: {
       title: session.title,
+      aiTitle: session.aiTitle || null,
+      titleIsManual: !!session.titleIsManual,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       transcript: session.transcript || '',
@@ -626,12 +679,201 @@ function saveSessionAsJson() {
       summary: session.summary || '',
     },
   };
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+  // Embed JSON safely — escape </ so it doesn't close the script tag
+  const embedded = JSON.stringify(data).replace(/<\/(script)/gi, '<\\/$1');
+
+  const fmt = (ts) => {
+    const d = new Date(ts);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const sections = [];
+  for (const id of state.settings.paneOrder) {
+    const meta = PANE_META[id];
+    const html = id === 'pane-transcript' ? session.transcript
+               : id === 'pane-memo' ? session.memo
+               : session.summary;
+    if (!html || !html.trim()) continue;
+    const iconGlyph = id === 'pane-transcript' ? '🎙' : id === 'pane-memo' ? '📝' : '📄';
+    sections.push(`
+<section class="pane-section">
+  <h2><span class="sec-icon">${iconGlyph}</span>${escapeHtml(meta.label)}</h2>
+  <div class="sec-body">${html}</div>
+</section>`);
+  }
+
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="dictation:format" content="dictation-session/v1">
+<meta name="dictation:title" content="${escapeHtml(session.title)}">
+<title>${escapeHtml(session.title)} — dictation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #1a1a1f;
+  --bg-elevated: #23232a;
+  --bg-subtle: #2d2d36;
+  --border: #3a3a44;
+  --text: #e8e8eb;
+  --text-muted: #9b9ba5;
+  --text-faint: #6b6b73;
+  --accent: #34d399;
+  --heading: #7dd3fc;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 15px;
+  line-height: 1.85;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 48px 20px 80px;
+}
+header.doc-head {
+  margin-bottom: 28px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-faint);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.brand::before {
+  content: '🎙';
+  font-size: 14px;
+}
+h1.doc-title {
+  font-size: 28px;
+  font-weight: 600;
+  margin: 8px 0 6px;
+  color: var(--text);
+  line-height: 1.4;
+}
+.doc-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.doc-meta span strong {
+  color: var(--text-faint);
+  font-weight: normal;
+  margin-right: 6px;
+}
+.pane-section {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 26px;
+  margin-bottom: 18px;
+}
+.pane-section h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 0 0 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.sec-icon { font-size: 16px; }
+.sec-body {
+  color: var(--text);
+  word-break: break-word;
+}
+.sec-body .paragraph {
+  margin: 0 0 1.1em;
+}
+.sec-body .paragraph:last-child { margin-bottom: 0; }
+.sec-body .paragraph h2 {
+  color: var(--heading);
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0 0 0.4em;
+  padding: 0;
+  border: none;
+}
+.sec-body .p-body {
+  color: var(--text);
+}
+.sec-body h2 {
+  color: var(--heading);
+  font-size: 16px;
+  font-weight: 600;
+  margin: 1.1em 0 0.35em;
+  padding-top: 0.2em;
+  border-top: 1px solid var(--border);
+}
+.sec-body h2:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.sec-body p { margin: 0.35em 0; }
+.sec-body ul, .sec-body ol { padding-left: 1.3em; margin: 0.35em 0; }
+.sec-body li { margin: 0.15em 0; }
+footer.doc-foot {
+  margin-top: 36px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: 0.06em;
+}
+footer.doc-foot a {
+  color: var(--text-faint);
+  text-decoration: none;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="doc-head">
+    <span class="brand">dictation</span>
+    <h1 class="doc-title">${escapeHtml(session.title)}</h1>
+    <div class="doc-meta">
+      <span><strong>作成</strong>${fmt(session.createdAt)}</span>
+      <span><strong>更新</strong>${fmt(session.updatedAt)}</span>
+    </div>
+  </header>
+${sections.join('\n')}
+  <footer class="doc-foot">
+    generated by dictation — このファイルはダブルクリックで開けます。dictation に再読込も可能。
+  </footer>
+</div>
+<script type="application/json" id="dictation-data">${embedded}</script>
+</body>
+</html>
+`;
+}
+
+function saveSessionAsHtml() {
+  snapshotActiveToSession();
+  const session = getActiveSession();
+  if (!session) return;
+  const html = buildExportHtml(session);
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
   const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
   const safeTitle = (session.title || 'dictation').replace(/[\\/:*?"<>|]/g, '_');
-  triggerDownload(blob, `${safeTitle}-${stamp}.json`);
+  triggerDownload(blob, `${safeTitle}-${stamp}.html`);
+  flashButton(els.btnSaveJson, 'HTML保存完了');
 }
 
 function triggerDownload(blob, filename) {
@@ -645,30 +887,59 @@ function triggerDownload(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function loadFromJson(file) {
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const data = JSON.parse(reader.result);
-      const s = data.session || data;
-      if (typeof s !== 'object' || s === null) throw new Error('形式が正しくありません');
-      const title = s.title || 'インポート済み';
-      if (state.isRecording) stopRecording();
-      snapshotActiveToSession();
-      persistSessions();
-      const session = createSession({ activate: true, title, skipSave: true });
-      session.transcript = s.transcript || s.html || '';
-      session.memo = s.memo || '';
-      session.summary = s.summary || '';
-      session.createdAt = s.createdAt || Date.now();
-      session.updatedAt = Date.now();
-      persistSessions();
-      loadActiveSessionIntoDOM();
-    } catch (e) {
-      alert('読み込みに失敗しました: ' + e.message);
+function importSessionData(s) {
+  if (typeof s !== 'object' || s === null) throw new Error('データ形式が正しくありません');
+  const title = s.title || 'インポート済み';
+  if (state.isRecording) stopRecording();
+  snapshotActiveToSession();
+  persistSessions();
+  const session = createSession({ activate: true, title, skipSave: true });
+  session.transcript = s.transcript || s.html || '';
+  session.memo = s.memo || '';
+  session.summary = s.summary || '';
+  session.aiTitle = s.aiTitle || null;
+  session.titleIsManual = !!s.titleIsManual;
+  session.createdAt = s.createdAt || Date.now();
+  session.updatedAt = Date.now();
+  persistSessions();
+  loadActiveSessionIntoDOM();
+}
+
+async function loadFromFile(file) {
+  try {
+    const text = await file.text();
+    const name = (file.name || '').toLowerCase();
+
+    // HTML (preferred new format)
+    if (name.endsWith('.html') || name.endsWith('.htm') || text.trimStart().toLowerCase().startsWith('<!doctype html')) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(text, 'text/html');
+      const meta = doc.querySelector('meta[name="dictation:format"]');
+      if (!meta || !String(meta.getAttribute('content') || '').startsWith('dictation-session/')) {
+        alert('これは dictation の保存ファイルではありません。\n\ndictation で「保存」したHTMLファイルか、旧JSONファイルだけを読み込めます。');
+        return;
+      }
+      const script = doc.querySelector('script[type="application/json"]#dictation-data');
+      if (!script || !script.textContent.trim()) {
+        alert('HTMLファイルにセッションデータが埋め込まれていません。\n別の dictation ファイルを試してください。');
+        return;
+      }
+      const data = JSON.parse(script.textContent);
+      importSessionData(data.session || data);
+      return;
     }
-  };
-  reader.readAsText(file);
+
+    // JSON (legacy)
+    if (name.endsWith('.json') || text.trimStart().startsWith('{')) {
+      const data = JSON.parse(text);
+      importSessionData(data.session || data);
+      return;
+    }
+
+    alert('対応していないファイル形式です（HTML または JSON を選んでください）');
+  } catch (e) {
+    alert('読み込みに失敗しました: ' + e.message);
+  }
 }
 
 function clearPane(paneId, { confirmFirst = true } = {}) {
@@ -884,12 +1155,21 @@ function renderPaneOrderList() {
     const meta = PANE_META[id];
     const item = document.createElement('div');
     item.className = 'pane-order-item';
+    item.draggable = true;
+    item.dataset.paneId = id;
     const canUp = idx > 0;
     const canDown = idx < settingsWorkingOrder.length - 1;
     item.innerHTML = `
+      <span class="pane-order-grip" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+          <circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/>
+          <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
+          <circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/>
+        </svg>
+      </span>
       <span class="pane-order-item-label"><span data-icon="${meta.icon}"></span>${meta.label}</span>
-      <button class="pane-order-btn up" ${canUp ? '' : 'disabled'} title="上へ"><span data-icon="chevron-up"></span></button>
-      <button class="pane-order-btn down" ${canDown ? '' : 'disabled'} title="下へ"><span data-icon="chevron-down"></span></button>
+      <button class="pane-order-btn up" ${canUp ? '' : 'disabled'} title="上へ" type="button"><span data-icon="chevron-up"></span></button>
+      <button class="pane-order-btn down" ${canDown ? '' : 'disabled'} title="下へ" type="button"><span data-icon="chevron-down"></span></button>
     `;
     item.querySelector('.up').addEventListener('click', () => {
       if (!canUp) return;
@@ -903,7 +1183,70 @@ function renderPaneOrderList() {
     });
     els.paneOrderList.appendChild(item);
   });
+  enableDragSort(els.paneOrderList, {
+    itemSelector: '.pane-order-item',
+    onReorder: (newIdOrder) => {
+      settingsWorkingOrder = newIdOrder;
+      renderPaneOrderList();
+    },
+  });
   renderIcons(els.paneOrderList);
+}
+
+/* ───────── Drag-sort (HTML5 Drag API) ───────── */
+/**
+ * 汎用的なドラッグ並べ替え。
+ * list の直下の itemSelector にマッチする要素を並べ替え可能にする。
+ * 各要素は draggable=true で、data 属性でIDを保持していること前提。
+ * @param {HTMLElement} list
+ * @param {object} opts
+ * @param {string} opts.itemSelector - 例: '.pane-order-item'
+ * @param {string} [opts.idAttr] - ID を取り出す data 属性（kebab）、既定 'pane-id'
+ * @param {function} opts.onReorder - 新しいID配列を引数に呼ばれる
+ */
+function enableDragSort(list, { itemSelector, idAttr = 'pane-id', onReorder }) {
+  let dragged = null;
+
+  const items = list.querySelectorAll(itemSelector);
+  items.forEach(item => {
+    item.addEventListener('dragstart', (e) => {
+      dragged = item;
+      item.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', ''); } catch {}
+    });
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      list.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
+        el.classList.remove('drag-over-top', 'drag-over-bottom');
+      });
+      dragged = null;
+    });
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (!dragged || dragged === item) return;
+      const rect = item.getBoundingClientRect();
+      const isAbove = e.clientY < rect.top + rect.height / 2;
+      item.classList.toggle('drag-over-top', isAbove);
+      item.classList.toggle('drag-over-bottom', !isAbove);
+    });
+    item.addEventListener('dragleave', () => {
+      item.classList.remove('drag-over-top', 'drag-over-bottom');
+    });
+    item.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (!dragged || dragged === item) return;
+      const rect = item.getBoundingClientRect();
+      const isAbove = e.clientY < rect.top + rect.height / 2;
+      if (isAbove) list.insertBefore(dragged, item);
+      else list.insertBefore(dragged, item.nextSibling);
+      item.classList.remove('drag-over-top', 'drag-over-bottom');
+      const dataKey = idAttr.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      const newOrder = Array.from(list.querySelectorAll(itemSelector)).map(el => el.dataset[dataKey]);
+      if (onReorder) onReorder(newOrder);
+    });
+  });
 }
 
 function openSettings() {
@@ -913,8 +1256,6 @@ function openSettings() {
   els.inputAutoStop.checked = state.settings.autoStopEnabled;
   els.inputAutoStopSec.value = state.settings.autoStopSec;
   els.inputAutoSummarize.checked = state.settings.autoSummarize;
-  els.inputZoom.value = state.settings.appZoom;
-  if (els.zoomValue) els.zoomValue.textContent = state.settings.appZoom + '%';
   els.fontTranscript.value = state.settings.transcriptFont;
   els.sizeTranscript.value = state.settings.transcriptSize;
   els.fontMemo.value = state.settings.memoFont;
@@ -929,8 +1270,6 @@ function openSettings() {
 
 function closeSettings() {
   els.settingsModal.classList.add('hidden');
-  // Revert live zoom preview if canceled
-  applyDisplaySettings();
 }
 
 function saveSettingsFromForm() {
@@ -940,7 +1279,6 @@ function saveSettingsFromForm() {
   state.settings.autoStopEnabled = els.inputAutoStop.checked;
   state.settings.autoStopSec = Math.max(30, Math.min(600, Number(els.inputAutoStopSec.value) || 120));
   state.settings.autoSummarize = els.inputAutoSummarize.checked;
-  state.settings.appZoom = Math.max(75, Math.min(200, Number(els.inputZoom.value) || 100));
   state.settings.transcriptFont = els.fontTranscript.value;
   state.settings.transcriptSize = Math.max(10, Math.min(36, Number(els.sizeTranscript.value) || 17));
   state.settings.memoFont = els.fontMemo.value;
@@ -1114,9 +1452,23 @@ function renderTabs() {
     title.textContent = session.title;
     title.title = session.title;
 
+    const regenBtn = document.createElement('button');
+    regenBtn.className = 'tab-regen';
+    regenBtn.title = 'AIでタイトル再生成';
+    regenBtn.innerHTML = '<span data-icon="sparkles"></span>';
+    regenBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (session.id !== state.activeId) switchSession(session.id);
+      session.titleIsManual = false;
+      if (!state.settings.apiKey) { openSettings(); return; }
+      regenBtn.classList.add('spinning');
+      await autoGenerateTitle();
+      regenBtn.classList.remove('spinning');
+    });
+
     const closeBtn = document.createElement('button');
     closeBtn.className = 'tab-close';
-    closeBtn.textContent = '✕';
+    closeBtn.innerHTML = '<span data-icon="x"></span>';
     closeBtn.title = '閉じる';
 
     closeBtn.addEventListener('click', (e) => {
@@ -1149,9 +1501,11 @@ function renderTabs() {
     });
 
     tab.appendChild(title);
+    tab.appendChild(regenBtn);
     tab.appendChild(closeBtn);
     els.tabsList.appendChild(tab);
   }
+  renderIcons(els.tabsList);
 }
 
 function startAutoSave() {
@@ -1168,11 +1522,11 @@ els.btnToggle.addEventListener('click', () => state.isRecording ? stopRecording(
 els.btnAi.addEventListener('click', toggleAi);
 els.btnCopyAllPlain.addEventListener('click', copyAllPlain);
 els.btnCopyAllMd.addEventListener('click', copyAllMultiformat);
-els.btnSaveJson.addEventListener('click', saveSessionAsJson);
+els.btnSaveJson.addEventListener('click', saveSessionAsHtml);
 els.btnLoadJson.addEventListener('click', () => els.fileLoad.click());
 els.fileLoad.addEventListener('change', (e) => {
   const f = e.target.files?.[0];
-  if (f) loadFromJson(f);
+  if (f) loadFromFile(f);
   e.target.value = '';
 });
 els.btnClearAll.addEventListener('click', clearAllPanes);
@@ -1188,12 +1542,21 @@ document.querySelectorAll('[data-pane-clear]').forEach(btn => {
 
 els.btnSettingsSave.addEventListener('click', saveSettingsFromForm);
 
-// Live preview of zoom while dragging the slider
-els.inputZoom.addEventListener('input', () => {
-  const v = Number(els.inputZoom.value) || 100;
-  if (els.zoomValue) els.zoomValue.textContent = v + '%';
-  document.body.style.zoom = (v / 100);
-});
+/* ───────── Zoom bar (bottom-right) ───────── */
+function setZoom(pct, persist = true) {
+  const v = Math.max(75, Math.min(200, Math.round(pct / 5) * 5 || 100));
+  state.settings.appZoom = v;
+  document.body.style.zoom = v / 100;
+  els.zoomRange.value = v;
+  els.zoomPercent.textContent = v + '%';
+  if (persist) saveSettings();
+}
+
+els.zoomRange.addEventListener('input', () => setZoom(Number(els.zoomRange.value) || 100, false));
+els.zoomRange.addEventListener('change', () => setZoom(Number(els.zoomRange.value) || 100, true));
+els.zoomMinus.addEventListener('click', () => setZoom(state.settings.appZoom - 5));
+els.zoomPlus.addEventListener('click', () => setZoom(state.settings.appZoom + 5));
+els.zoomReset.addEventListener('click', () => setZoom(100));
 els.settingsModal.querySelectorAll('[data-dismiss]').forEach(b => b.addEventListener('click', closeSettings));
 
 els.btnSilenceStop.addEventListener('click', () => { hideSilenceDialog(); stopRecording(); });
@@ -1248,10 +1611,13 @@ if (!SpeechRecognition) {
 }
 
 loadSettings();
+populateFontSelects();
 applyDisplaySettings();
 applyPaneOrder();
 renderInnerTabs();
 if (typeof renderIcons === 'function') renderIcons();
+els.zoomRange.value = state.settings.appZoom;
+els.zoomPercent.textContent = state.settings.appZoom + '%';
 initSessions();
 renderTabs();
 loadActiveSessionIntoDOM();

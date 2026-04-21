@@ -4,7 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>dictation — リアルタイム文字起こし</title>
-  <link rel="stylesheet" href="style.css?v=0.5.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=0.5.1" />
 </head>
 <body>
   <div id="app">
@@ -32,10 +35,10 @@
       <button id="btn-copy-all-md" class="btn btn-secondary btn-square" disabled title="全タブをMarkdown形式でコピー（Notionは3トグルで復元）">
         <span class="btn-icon" data-icon="book"></span>
       </button>
-      <button id="btn-save-json" class="btn btn-ghost btn-square" title="このセッションをJSON保存">
+      <button id="btn-save-json" class="btn btn-ghost btn-square" title="HTMLで保存（ダブルクリックで綺麗に読める、再インポート可）">
         <span class="btn-icon" data-icon="save"></span>
       </button>
-      <button id="btn-load-json" class="btn btn-ghost btn-square" title="JSONから復元">
+      <button id="btn-load-json" class="btn btn-ghost btn-square" title="HTML/JSONから読み込み">
         <span class="btn-icon" data-icon="folder-open"></span>
       </button>
       <button id="btn-clear-all" class="btn btn-ghost btn-square" title="全タブをクリア">
@@ -44,7 +47,7 @@
       <button id="btn-settings" class="btn btn-ghost btn-square" style="margin-left:auto" title="設定">
         <span class="btn-icon" data-icon="settings"></span>
       </button>
-      <input type="file" id="file-load" accept=".json" style="display:none" />
+      <input type="file" id="file-load" accept=".html,.htm,.json" style="display:none" />
     </section>
 
     <nav id="tabs">
@@ -120,6 +123,14 @@
     <footer id="footer">
       <small id="session-info">dictation v0.5 — Web版</small>
     </footer>
+
+    <div id="zoom-bar" title="拡大率">
+      <button class="zoom-btn" id="zoom-minus" title="縮小">−</button>
+      <input type="range" id="zoom-range" min="75" max="200" step="5" value="100" />
+      <button class="zoom-btn" id="zoom-plus" title="拡大">＋</button>
+      <span id="zoom-percent">100%</span>
+      <button class="zoom-btn zoom-reset" id="zoom-reset" title="100% に戻す">⟲</button>
+    </div>
   </div>
 
   <!-- 設定モーダル -->
@@ -170,10 +181,6 @@
 
         <div class="field-group">
           <h3 class="field-group-title">表示</h3>
-          <label class="field">
-            <span class="field-label">全体の拡大率 <small id="zoom-value">100%</small></span>
-            <input id="input-zoom" type="range" min="75" max="200" step="5" />
-          </label>
           <div class="field">
             <span class="field-label">タブの順序（↑↓で入れ替え／Markdown出力にも反映）</span>
             <div id="pane-order-list"></div>
@@ -182,31 +189,20 @@
             <span class="field-label">フォントと文字サイズ</span>
             <div class="font-row">
               <span class="font-row-label">文字起こし</span>
-              <select id="font-transcript">
-                <option value="sans">Sans-serif</option>
-                <option value="serif">Serif</option>
-                <option value="mono">Monospace</option>
-              </select>
+              <select id="font-transcript"></select>
               <input id="size-transcript" type="number" min="10" max="36" step="1" /><span class="unit">px</span>
             </div>
             <div class="font-row">
               <span class="font-row-label">メモ</span>
-              <select id="font-memo">
-                <option value="sans">Sans-serif</option>
-                <option value="serif">Serif</option>
-                <option value="mono">Monospace</option>
-              </select>
+              <select id="font-memo"></select>
               <input id="size-memo" type="number" min="10" max="36" step="1" /><span class="unit">px</span>
             </div>
             <div class="font-row">
               <span class="font-row-label">要約</span>
-              <select id="font-summary">
-                <option value="sans">Sans-serif</option>
-                <option value="serif">Serif</option>
-                <option value="mono">Monospace</option>
-              </select>
+              <select id="font-summary"></select>
               <input id="size-summary" type="number" min="10" max="36" step="1" /><span class="unit">px</span>
             </div>
+            <small class="field-hint">Google Fonts から日本語フォントを読み込んでいます（要ネット接続）</small>
           </div>
         </div>
 
@@ -238,8 +234,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.5.0"></script>
-  <script src="gemini.js?v=0.5.0"></script>
-  <script src="app.js?v=0.5.0"></script>
+  <script src="icons.js?v=0.5.1"></script>
+  <script src="gemini.js?v=0.5.1"></script>
+  <script src="app.js?v=0.5.1"></script>
 </body>
 </html>
