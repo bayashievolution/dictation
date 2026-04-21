@@ -633,36 +633,45 @@ async function generateSummary({ silent = false } = {}) {
 function renderMarkdown(md) {
   const lines = md.split('\n');
   const out = [];
+  let paragraph = [];
   let inList = false;
   let listType = null;
 
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      out.push(`<p>${paragraph.join('<br>')}</p>`);
+      paragraph = [];
+    }
+  };
   const flushList = () => {
     if (inList) { out.push(`</${listType}>`); inList = false; listType = null; }
   };
+  const flush = () => { flushParagraph(); flushList(); };
 
   for (const line of lines) {
-    const h2 = line.match(/^##\s+(.+)$/);
-    const h1 = line.match(/^#\s+(.+)$/);
+    const h = line.match(/^#{1,3}\s+(.+)$/);
     const ul = line.match(/^[-*]\s+(.+)$/);
     const ol = line.match(/^\d+\.\s+(.+)$/);
 
-    if (h1) { flushList(); out.push(`<h2>${escapeHtml(h1[1])}</h2>`); }
-    else if (h2) { flushList(); out.push(`<h2>${escapeHtml(h2[1])}</h2>`); }
-    else if (ul) {
+    if (h) {
+      flush();
+      out.push(`<h2>${escapeHtml(h[1])}</h2>`);
+    } else if (ul) {
+      flushParagraph();
       if (!inList || listType !== 'ul') { flushList(); out.push('<ul>'); inList = true; listType = 'ul'; }
       out.push(`<li>${escapeHtml(ul[1])}</li>`);
     } else if (ol) {
+      flushParagraph();
       if (!inList || listType !== 'ol') { flushList(); out.push('<ol>'); inList = true; listType = 'ol'; }
       out.push(`<li>${escapeHtml(ol[1])}</li>`);
     } else if (line.trim() === '') {
-      flushList();
-      out.push('<br/>');
+      flush();
     } else {
       flushList();
-      out.push(`<div>${escapeHtml(line)}</div>`);
+      paragraph.push(escapeHtml(line));
     }
   }
-  flushList();
+  flush();
   return out.join('\n');
 }
 

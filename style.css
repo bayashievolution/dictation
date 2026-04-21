@@ -498,32 +498,38 @@ html, body {
 
 #summary {
   font-size: 15px;
-  line-height: 1.9;
+  line-height: 1.75;
   outline: none;
   caret-color: var(--accent);
   color: var(--text);
-  white-space: pre-wrap;
 }
 
 #summary h2 {
   color: var(--heading);
   font-size: 16px;
   font-weight: 600;
-  margin: 1em 0 0.4em;
+  margin: 1.1em 0 0.35em;
+  padding-top: 0.2em;
+  border-top: 1px solid var(--border);
 }
 
-#summary h1:first-child,
 #summary h2:first-child {
   margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+#summary p {
+  margin: 0.35em 0;
 }
 
 #summary ul, #summary ol {
-  padding-left: 1.4em;
-  margin: 0.5em 0;
+  padding-left: 1.3em;
+  margin: 0.35em 0;
 }
 
 #summary li {
-  margin: 0.2em 0;
+  margin: 0.15em 0;
 }
 
 #summary.generating {
