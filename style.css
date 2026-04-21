@@ -92,13 +92,16 @@ html, body {
 /* ───────── Titlebar ───────── */
 #titlebar {
   display: flex;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 10px 16px;
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border);
   user-select: none;
   -webkit-app-region: drag;
+  flex-shrink: 0;
 }
 
 .titlebar-left {
@@ -121,7 +124,15 @@ html, body {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
+  min-width: 0;
   -webkit-app-region: no-drag;
+}
+
+.titlebar-left {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .titlebar-btn {
@@ -642,6 +653,15 @@ html, body {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  container-type: inline-size;
+  container-name: pane-header;
+}
+
+/* 狭い幅に折り返された時はフォントコントロールを左寄せに */
+@container pane-header (max-width: 540px) {
+  .pane-font-controls {
+    margin-left: 0;
+  }
 }
 
 .pane-btn {

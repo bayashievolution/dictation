@@ -590,7 +590,9 @@ function buildRecognition() {
     if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
       setStatus('error', 'マイク拒否');
       state.shouldAutoRestart = false;
-      alert('マイクアクセスが拒否されました。');
+      state.isRecording = false;
+      setRecordingUI(false);
+      showMicDeniedGuide(event.error);
     } else {
       setStatus('error', `エラー: ${event.error}`);
     }
@@ -612,10 +614,52 @@ function buildRecognition() {
   return rec;
 }
 
-function startRecording() {
+async function ensureMicPermission() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(t => t.stop());
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e };
+  }
+}
+
+function showMicDeniedGuide(detail) {
+  const isExtension = location.protocol === 'chrome-extension:';
+  const steps = isExtension ? [
+    '【Chrome拡張でマイクを許可する手順】',
+    '1. Chromeアドレスバーに chrome://extensions/ と入力',
+    '2. 「ばっさんディクテーション」の「詳細」をクリック',
+    '3. 「サイト設定」を開く → マイクを「許可」に',
+    '',
+    'または chrome://settings/content/microphone で',
+    'ブロック一覧から拡張機能URLを削除 → 拡張を再読込',
+  ] : [
+    'ブラウザのアドレスバー左端の錠マークをクリック',
+    '→ マイクを「許可」に変更 → ページをリロード',
+  ];
+  alert([
+    'マイクアクセスが拒否されました。',
+    '',
+    ...steps,
+    '',
+    'エラー: ' + (detail || 'Permission denied'),
+  ].join('\n'));
+}
+
+async function startRecording() {
   if (state.settings.inputMode === 'gemini-audio') {
     return startGeminiAudioRecording();
   }
+  // 事前にマイク許可を明示的に取得（拡張サイドパネル等では必要）
+  const perm = await ensureMicPermission();
+  if (!perm.ok) {
+    setStatus('error', 'マイク拒否');
+    const err = perm.error || {};
+    showMicDeniedGuide(err.message || err.name || '');
+    return;
+  }
+
   // Web Speech API モード
   if (state.recognition) {
     state.recognition.onend = null;
@@ -682,7 +726,8 @@ async function startGeminiAudioRecording() {
     state.audioStream = await navigator.mediaDevices.getUserMedia(constraints);
   } catch (e) {
     console.error('getUserMedia failed:', e);
-    setStatus('error', 'マイク取得失敗: ' + (e.message || e.name));
+    setStatus('error', 'マイク取得失敗');
+    showMicDeniedGuide(e.message || e.name);
     return;
   }
 
