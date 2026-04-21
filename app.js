@@ -2382,6 +2382,7 @@ function loadActiveSessionIntoDOM() {
   state.pendingChunkText = '';
   if (els.emptyHint) els.emptyHint.hidden = !!els.confirmed.innerHTML;
   if (els.summaryEmpty) els.summaryEmpty.hidden = !!getSummaryText();
+  updateMemoCheatsheetVisibility();
   renderChat();
   updateActionButtons();
   renderTitleBar();
@@ -2789,14 +2790,22 @@ function checkMemoMarkdown() {
   }
 }
 
+function updateMemoCheatsheetVisibility() {
+  const sheet = document.getElementById('memo-cheatsheet');
+  if (!sheet) return;
+  const empty = !els.memo.textContent.trim() && !els.memo.querySelector('*:not(br)');
+  sheet.classList.toggle('hidden', !empty);
+}
+
 let memoIsComposing = false;
 els.memo.addEventListener('compositionstart', () => { memoIsComposing = true; });
 els.memo.addEventListener('compositionend', () => {
   memoIsComposing = false;
-  // IME 変換確定後に一度チェック
   checkMemoMarkdown();
+  updateMemoCheatsheetVisibility();
 });
 els.memo.addEventListener('input', (e) => {
+  updateMemoCheatsheetVisibility();
   if (memoIsComposing) return;
   checkMemoMarkdown();
 });
@@ -2845,8 +2854,23 @@ els.memo.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Enter on empty li: リストを抜ける
+  // Enter: チェックボックス / リスト特別処理
   if (e.key === 'Enter' && !e.shiftKey) {
+    // task-item (checkbox): Enter で次の行に div を挿入
+    const label = memoFindAncestor('LABEL');
+    if (label && label.classList && label.classList.contains('task-item')) {
+      e.preventDefault();
+      const span = label.querySelector('span');
+      const isEmpty = !span || span.textContent.trim() === '';
+      const newBlock = document.createElement('div');
+      newBlock.innerHTML = '<br>';
+      label.parentNode.insertBefore(newBlock, label.nextSibling);
+      if (isEmpty) label.remove();
+      memoPlaceCaretAtStart(newBlock);
+      return;
+    }
+
+    // 空の li: リストを抜ける
     const li = memoFindAncestor('LI');
     if (li && li.textContent.trim() === '') {
       e.preventDefault();
