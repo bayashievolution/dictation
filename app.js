@@ -1515,27 +1515,19 @@ function applyAppZoom(v) {
   const app = document.getElementById('app');
   if (!app) return;
   const z = v / 100;
-  if (v > 100) {
-    // 拡大: zoom プロパティ（top-left原点でOK）＋ 逆スケールでビューポートに収める
-    app.style.zoom = z;
-    app.style.transform = '';
-    app.style.transformOrigin = '';
-    app.style.height = (10000 / v) + 'vh';
-    app.style.width  = (10000 / v) + '%';
-  } else if (v < 100) {
-    // 縮小: transform + top center で視覚的に中央寄せ
-    // （zoom は top-left 原点のため縮小時は左寄りに見えてしまう）
+  app.style.transform = '';
+  app.style.transformOrigin = '';
+  if (v === 100) {
     app.style.zoom = '';
-    app.style.transform = `scale(${z})`;
-    app.style.transformOrigin = 'top center';
     app.style.width = '';
     app.style.height = '';
   } else {
-    app.style.zoom = '';
-    app.style.transform = '';
-    app.style.transformOrigin = '';
-    app.style.width = '';
-    app.style.height = '';
+    // zoom プロパティは layout・visual 両方をスケールするので、
+    // 逆スケールで指定すれば結果的に viewport にピッタリ収まる
+    // （transform: scale と違って body の overflow で clip されない）
+    app.style.zoom = z;
+    app.style.height = (10000 / v) + 'vh';
+    app.style.width  = (10000 / v) + '%';
   }
 }
 
@@ -1845,7 +1837,18 @@ function renderPaneOrderList() {
  * @param {string} [opts.idAttr='id'] - kebab. 例 'id' / 'pane'
  * @param {function} opts.onReorder
  */
-function enablePointerDragSort(list, { itemSelector, idAttr = 'id', onReorder }) {
+function enablePointerDragSort(list, opts) {
+  // 再ワイヤ防止: 既にバインド済みなら opts を更新して返す
+  if (list.__dragSortWired) {
+    list.__dragSortOpts = opts;
+    return;
+  }
+  list.__dragSortWired = true;
+  list.__dragSortOpts = opts;
+  const getOpts = () => list.__dragSortOpts || {};
+  const itemSelector = opts.itemSelector;
+  const idAttr = opts.idAttr || 'id';
+
   const LONG_PRESS_MS = 400;
   const MOVE_THRESHOLD = 6;
 
@@ -1856,6 +1859,8 @@ function enablePointerDragSort(list, { itemSelector, idAttr = 'id', onReorder })
   let pointerId = null;
   let isDragging = false;
   let didReorder = false;
+  let edgeScrollRAF = null;
+  let lastPointerEvent = null;
 
   function dataKeyFor(attr) {
     return attr.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
@@ -1975,7 +1980,8 @@ function enablePointerDragSort(list, { itemSelector, idAttr = 'id', onReorder })
       const key = dataKeyFor(idAttr);
       const newOrder = itemsAfter.map(el => el.dataset[key]);
       didReorder = true;
-      if (onReorder) onReorder(newOrder);
+      const cb = getOpts().onReorder;
+      if (cb) cb(newOrder);
     }
     clearHighlights();
     try { list.releasePointerCapture(pointerId); } catch {}
@@ -2013,6 +2019,26 @@ function enablePointerDragSort(list, { itemSelector, idAttr = 'id', onReorder })
     }
   });
 
+  function edgeScrollStep() {
+    if (!isDragging || !lastPointerEvent) { edgeScrollRAF = null; return; }
+    // スクロール対象: list そのものか、スクロール可能な祖先
+    const scrollEl = (list.scrollWidth > list.clientWidth || list.scrollHeight > list.clientHeight)
+      ? list
+      : (list.closest('nav, .pane-body, main, section') || list);
+    const rect = scrollEl.getBoundingClientRect();
+    const ex = lastPointerEvent.clientX, ey = lastPointerEvent.clientY;
+    const horiz = detectHorizontal();
+    const EDGE = 50, SPEED = 10;
+    if (horiz) {
+      if (ex < rect.left + EDGE) scrollEl.scrollLeft -= SPEED;
+      else if (ex > rect.right - EDGE) scrollEl.scrollLeft += SPEED;
+    } else {
+      if (ey < rect.top + EDGE) scrollEl.scrollTop -= SPEED;
+      else if (ey > rect.bottom - EDGE) scrollEl.scrollTop += SPEED;
+    }
+    edgeScrollRAF = requestAnimationFrame(edgeScrollStep);
+  }
+
   list.addEventListener('pointermove', (e) => {
     // 長押し待ち中に動いた → キャンセル
     if (pressTimer) {
@@ -2037,9 +2063,14 @@ function enablePointerDragSort(list, { itemSelector, idAttr = 'id', onReorder })
     e.preventDefault();
     moveGhost(e);
     updateHighlight(e);
+    // エッジスクロール起動
+    lastPointerEvent = e;
+    if (!edgeScrollRAF) edgeScrollRAF = requestAnimationFrame(edgeScrollStep);
   });
 
   const finish = (e) => {
+    if (edgeScrollRAF) { cancelAnimationFrame(edgeScrollRAF); edgeScrollRAF = null; }
+    lastPointerEvent = null;
     if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; activeItem = null; pointerId = null; return; }
     if (isDragging) endDrag(e);
     activeItem = null;
