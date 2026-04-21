@@ -425,6 +425,7 @@ html, body {
   white-space: nowrap;
   min-width: 0;
   padding: 3px 6px;
+  margin-left: 6px;
   border: 1px solid transparent;
   border-radius: 4px;
   transition: all 0.15s var(--ease-snap);
@@ -612,6 +613,10 @@ html, body {
 .pane-btn-action:hover:not(:disabled) {
   background: #a78bfa33;
   color: #ddd6fe;
+}
+
+.pane-btn.spinning svg {
+  animation: spin 1.2s linear infinite;
 }
 
 .controls-sep {

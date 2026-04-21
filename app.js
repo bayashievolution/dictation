@@ -156,6 +156,7 @@ const els = {
   btnEditTitle: document.getElementById('btn-edit-title'),
   btnRegenTitle: document.getElementById('btn-regen-title'),
   btnRegenSummary: document.getElementById('btn-regenerate-summary'),
+  btnRefineTranscript: document.getElementById('btn-refine-transcript'),
   emptyHint: document.getElementById('empty-hint'),
   settingsModal: document.getElementById('settings-modal'),
   silenceDialog: document.getElementById('silence-dialog'),
@@ -400,6 +401,78 @@ async function flushPendingToGemini() {
       else setStatus('idle', '停止');
     }, 6000);
   } finally {
+    autoScroll();
+  }
+}
+
+/* ───────── Refine pasted / unstructured text ───────── */
+
+/**
+ * #confirmed 内の .paragraph に入っていない生テキスト（ペーストされたもの等）を
+ * まとめて Gemini に送って .paragraph として整形置換する。
+ */
+async function refineUnstructuredInTranscript({ force = false, showFeedback = true } = {}) {
+  if (!state.settings.apiKey) {
+    if (showFeedback) { alert('Gemini API キーが未設定です'); openSettings(); }
+    return;
+  }
+  if (!force && !state.settings.aiEnabled) return;
+
+  // .paragraph でない直下ノードを収集
+  const unstructuredNodes = Array.from(els.confirmed.childNodes).filter(n => {
+    if (n.nodeType === Node.ELEMENT_NODE) {
+      return !n.classList || !n.classList.contains('paragraph');
+    }
+    if (n.nodeType === Node.TEXT_NODE) return !!n.textContent.trim();
+    return false;
+  });
+  if (unstructuredNodes.length === 0) return;
+
+  // テキストを集めて改行で結合
+  const rawText = unstructuredNodes.map(n => {
+    if (n.nodeType === Node.TEXT_NODE) return n.textContent;
+    return n.innerText || n.textContent || '';
+  }).join('\n').trim();
+  if (!rawText) return;
+
+  // 除去して refining パラグラフに差し替え（元の位置は末尾）
+  unstructuredNodes.forEach(n => n.remove());
+  hideEmptyHint();
+  const targetEl = createParagraphEl(rawText, 'paragraph refining');
+  els.confirmed.appendChild(targetEl);
+  updateActionButtons();
+  autoScroll();
+
+  if (els.btnRefineTranscript) {
+    els.btnRefineTranscript.classList.add('spinning');
+    els.btnRefineTranscript.disabled = true;
+  }
+
+  try {
+    const refined = await refineWithGemini({
+      apiKey: state.settings.apiKey,
+      context: getContextForGemini(),
+      newChunk: rawText,
+    });
+    targetEl.className = 'paragraph refined';
+    setParagraphContent(targetEl, refined || rawText);
+    snapshotActiveToSession();
+    persistSessions();
+  } catch (e) {
+    console.error('refine pasted failed:', e);
+    targetEl.className = 'paragraph';
+    setParagraphContent(targetEl, rawText);
+    if (showFeedback) setStatus('error', '整形失敗: ' + (e.message || '').slice(0, 60));
+    setTimeout(() => {
+      if (state.isRecording) setStatus('listening', '録音中');
+      else setStatus('idle', '停止');
+    }, 4000);
+  } finally {
+    if (els.btnRefineTranscript) {
+      els.btnRefineTranscript.classList.remove('spinning');
+      els.btnRefineTranscript.disabled = false;
+    }
+    updateActionButtons();
     autoScroll();
   }
 }
@@ -1203,27 +1276,41 @@ function formatDatePart(ts) {
   return `${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-async function autoGenerateTitle() {
+async function autoGenerateTitle({ silent = true, force = false } = {}) {
   const session = getActiveSession();
-  if (!session || session.titleIsManual) return;
-  if (!state.settings.apiKey || !state.settings.aiEnabled) return;
+  if (!session) return;
+  if (!force && session.titleIsManual) return;
+  if (!state.settings.apiKey) {
+    if (!silent) { alert('Gemini API キーが未設定です。設定から登録してください。'); openSettings(); }
+    return;
+  }
+  // auto（録音停止時等）は aiEnabled に従う。手動再生成（force）は常に実行。
+  if (!force && !state.settings.aiEnabled) return;
   const transcript = getConfirmedText();
   const summary = getSummaryText();
-  if (!transcript && !summary) return;
+  if (!transcript && !summary) {
+    if (!silent) alert('タイトル生成の素材がありません（文字起こし・要約が空）');
+    return;
+  }
   try {
     const aiTitle = await generateTitleWithGemini({
       apiKey: state.settings.apiKey,
       summary,
       transcript,
     });
-    if (!aiTitle) return;
+    if (!aiTitle) {
+      if (!silent) alert('タイトルが空で返ってきました');
+      return;
+    }
     session.aiTitle = aiTitle;
     session.title = `${aiTitle}(${formatDatePart(session.createdAt)})`;
+    session.titleIsManual = false;
     session.updatedAt = Date.now();
     persistSessions();
     renderTabs();
   } catch (e) {
     console.warn('auto title failed:', e);
+    if (!silent) alert('タイトル生成に失敗しました: ' + (e.message || String(e)));
   }
 }
 
@@ -1721,13 +1808,11 @@ function cancelTitleEdit() {
 }
 
 async function regenTitleFromBar() {
-  if (!state.settings.apiKey) { openSettings(); return; }
   const session = getActiveSession();
   if (!session) return;
-  session.titleIsManual = false;
   els.btnRegenTitle.classList.add('spinning');
   try {
-    await autoGenerateTitle();
+    await autoGenerateTitle({ silent: false, force: true });
   } finally {
     els.btnRegenTitle.classList.remove('spinning');
   }
@@ -1797,6 +1882,19 @@ function onEdit() {
 els.confirmed.addEventListener('input', onEdit);
 els.memo.addEventListener('input', onEdit);
 els.summary.addEventListener('input', onEdit);
+
+// ペースト時：AI整形ONなら少し待って整形発動
+els.confirmed.addEventListener('paste', () => {
+  if (!state.settings.aiEnabled || !state.settings.apiKey) return;
+  setTimeout(() => { refineUnstructuredInTranscript({ showFeedback: false }); }, 150);
+});
+
+// 文字起こし整形ボタン
+if (els.btnRefineTranscript) {
+  els.btnRefineTranscript.addEventListener('click', () => {
+    refineUnstructuredInTranscript({ force: true, showFeedback: true });
+  });
+}
 
 els.paneTranscriptBody.addEventListener('scroll', () => {
   state.userScrolledUp = !isPinnedToBottom();
