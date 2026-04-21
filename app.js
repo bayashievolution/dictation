@@ -1915,6 +1915,11 @@ function enablePointerDragSort(list, { itemSelector, idAttr = 'id', onReorder })
     const hovered = document.elementFromPoint(e.clientX, e.clientY);
     const target = hovered ? hovered.closest(itemSelector) : null;
     if (target && target !== activeItem && list.contains(target)) {
+      // FLIP: First ── 並べ替え前の位置を記録
+      const itemsBefore = Array.from(list.querySelectorAll(itemSelector));
+      const firstRects = new Map();
+      itemsBefore.forEach(el => firstRects.set(el, el.getBoundingClientRect()));
+
       const horiz = detectHorizontal();
       const r = target.getBoundingClientRect();
       const before = horiz
@@ -1923,8 +1928,35 @@ function enablePointerDragSort(list, { itemSelector, idAttr = 'id', onReorder })
       if (before) list.insertBefore(activeItem, target);
       else list.insertBefore(activeItem, target.nextSibling);
 
+      // FLIP: Last/Invert ── 新しい位置を測り、差分だけ過去位置へ飛ばす
+      const itemsAfter = Array.from(list.querySelectorAll(itemSelector));
+      itemsAfter.forEach(el => {
+        const first = firstRects.get(el);
+        if (!first) return;
+        const last = el.getBoundingClientRect();
+        const dx = first.left - last.left;
+        const dy = first.top - last.top;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+        el.style.transition = 'none';
+        el.style.transform = `translate(${dx}px, ${dy}px)`;
+      });
+      // FLIP: Play ── 次フレームで transform を戻すとトランジションでスライド
+      requestAnimationFrame(() => {
+        itemsAfter.forEach(el => {
+          if (!el.style.transform) return;
+          el.style.transition = 'transform 0.28s cubic-bezier(0.16, 1, 0.3, 1)';
+          el.style.transform = '';
+        });
+        setTimeout(() => {
+          itemsAfter.forEach(el => {
+            el.style.transition = '';
+            el.style.transform = '';
+          });
+        }, 320);
+      });
+
       const key = dataKeyFor(idAttr);
-      const newOrder = Array.from(list.querySelectorAll(itemSelector)).map(el => el.dataset[key]);
+      const newOrder = itemsAfter.map(el => el.dataset[key]);
       didReorder = true;
       if (onReorder) onReorder(newOrder);
     }

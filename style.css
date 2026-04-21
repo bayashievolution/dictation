@@ -336,6 +336,7 @@ html, body {
   gap: 2px;
   align-items: stretch;
   min-height: 34px;
+  flex-shrink: 0;
 }
 
 .tab {
@@ -459,6 +460,9 @@ html, body {
   border-radius: 4px;
   transition: all 0.12s var(--ease-snap);
   flex-shrink: 0;
+  position: sticky;
+  right: 0;
+  background: var(--bg-elevated);
 }
 
 .tab-new:hover {
@@ -552,6 +556,8 @@ html, body {
   padding: 0 8px;
   gap: 0;
   flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .inner-tab {
@@ -568,6 +574,8 @@ html, body {
   transition: all 0.15s var(--ease-snap);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .inner-tab:hover {
