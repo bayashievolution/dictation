@@ -19,6 +19,8 @@ const ICON_DEFS = {
   x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
   'chevron-down': '<polyline points="6 9 12 15 18 9"/>',
   'chevron-up': '<polyline points="18 15 12 9 6 15"/>',
+  'chevron-left': '<polyline points="15 18 9 12 15 6"/>',
+  'chevron-right': '<polyline points="9 18 15 12 9 6"/>',
   check: '<polyline points="20 6 9 17 4 12"/>',
   mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 11a7 7 0 01-14 0"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>',
   'pencil': '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>',

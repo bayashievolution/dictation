@@ -469,6 +469,37 @@ html, body {
   border-bottom: none;
 }
 
+/* 左端のタブ送り（◀ ▶）: ＋ボタンと対になる */
+.tab-nav {
+  background: var(--bg-elevated);
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--text-muted);
+  width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s, opacity 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.tab-nav:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+.tab-nav:active:not(:disabled) {
+  background: var(--bg);
+}
+.tab-nav:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.tab-nav [data-icon] svg {
+  width: 14px;
+  height: 14px;
+}
+
 .tab-new {
   background: var(--bg-elevated);
   border: none;

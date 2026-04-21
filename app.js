@@ -219,6 +219,8 @@ const els = {
   sizeSummary: document.getElementById('size-summary'),
   tabsList: document.getElementById('tabs-list'),
   btnTabNew: document.getElementById('btn-tab-new'),
+  btnTabPrev: document.getElementById('btn-tab-prev'),
+  btnTabNext: document.getElementById('btn-tab-next'),
 };
 
 /* ───────── Settings ───────── */
@@ -2515,6 +2517,10 @@ function renderTabs() {
     idAttr: 'id',
     onReorder: reorderSessions,
   });
+  // ◀ ▶ ボタンの端っこ到達時グレーアウト
+  const activeIdx = state.sessions.findIndex(s => s.id === state.activeId);
+  if (els.btnTabPrev) els.btnTabPrev.disabled = activeIdx <= 0;
+  if (els.btnTabNext) els.btnTabNext.disabled = activeIdx < 0 || activeIdx >= state.sessions.length - 1;
   renderTitleBar();
 }
 
@@ -3204,6 +3210,17 @@ els.btnTabNew.addEventListener('click', () => {
   persistSessions();
   createSession({ activate: true });
 });
+
+/* 左右タブ送り: 現在のタブから前後へ1つ移動 */
+function switchAdjacentSession(dir) {
+  const idx = state.sessions.findIndex(s => s.id === state.activeId);
+  if (idx < 0) return;
+  const nextIdx = idx + dir;
+  if (nextIdx < 0 || nextIdx >= state.sessions.length) return;
+  switchSession(state.sessions[nextIdx].id);
+}
+els.btnTabPrev?.addEventListener('click', () => switchAdjacentSession(-1));
+els.btnTabNext?.addEventListener('click', () => switchAdjacentSession(1));
 
 els.btnEditTitle.addEventListener('click', startTitleEdit);
 els.btnRegenTitle.addEventListener('click', regenTitleFromBar);
