@@ -332,6 +332,30 @@ html, body {
   border-top-color: var(--danger);
 }
 
+.tab {
+  position: relative;
+  touch-action: manipulation;
+}
+
+.tab.dragging {
+  opacity: 0.3;
+}
+
+.tab.drag-over-left::before,
+.tab.drag-over-right::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  box-shadow: 0 0 6px var(--accent);
+  pointer-events: none;
+}
+.tab.drag-over-left::before  { left: -2px; }
+.tab.drag-over-right::after  { right: -2px; }
+
 .tab-title {
   max-width: 140px;
   overflow: hidden;
@@ -515,6 +539,34 @@ html, body {
 .inner-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+.inner-tab {
+  position: relative;
+  touch-action: manipulation;
+}
+
+.inner-tab.dragging {
+  opacity: 0.35;
+}
+
+.inner-tab.drag-over-left::before,
+.inner-tab.drag-over-right::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  box-shadow: 0 0 6px var(--accent);
+  pointer-events: none;
+}
+.inner-tab.drag-over-left::before  { left: -2px; }
+.inner-tab.drag-over-right::after  { right: -2px; }
+
+.drag-ghost {
+  pointer-events: none;
 }
 
 .inner-tab-icon {

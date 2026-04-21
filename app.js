@@ -211,9 +211,10 @@ function saveSettings() {
 
 function applyAiButtonState() {
   if (els.btnRefineTranscript) {
-    const on = state.settings.aiEnabled && !!state.settings.apiKey;
+    const on = !!state.settings.aiEnabled;
     els.btnRefineTranscript.classList.toggle('on', on);
     els.btnRefineTranscript.setAttribute('aria-pressed', on ? 'true' : 'false');
+    els.btnRefineTranscript.classList.toggle('needs-key', on && !state.settings.apiKey);
   }
 }
 
@@ -1152,8 +1153,17 @@ function applyDisplaySettings() {
   root.style.setProperty('--memo-size', (s.memoSize || 15) + 'px');
   root.style.setProperty('--summary-font', FONT_FAMILIES[s.summaryFont] || FONT_FAMILIES.sans);
   root.style.setProperty('--summary-size', (s.summarySize || 15) + 'px');
+  applyAppZoom(s.appZoom || 100);
+}
+
+function applyAppZoom(v) {
   const app = document.getElementById('app');
-  if (app) app.style.zoom = ((s.appZoom || 100) / 100);
+  if (!app) return;
+  const z = v / 100;
+  app.style.zoom = z;
+  // ビューポートをカバーするために逆スケール（浮き・はみ出し防止）
+  app.style.height = (10000 / v) + 'vh';
+  app.style.width  = (10000 / v) + '%';
 }
 
 function applyPaneOrder() {
@@ -1176,6 +1186,18 @@ function renderInnerTabs() {
     els.innerTabsContainer.appendChild(btn);
   }
   renderIcons(els.innerTabsContainer);
+  enablePointerDragSort(els.innerTabsContainer, {
+    itemSelector: '.inner-tab',
+    idAttr: 'pane',
+    onReorder: reorderPaneOrder,
+  });
+}
+
+function reorderPaneOrder(newOrder) {
+  if (!Array.isArray(newOrder) || newOrder.length !== state.settings.paneOrder.length) return;
+  state.settings.paneOrder = newOrder;
+  saveSettings();
+  applyPaneOrder();
 }
 
 /* ───────── Chat (NotebookLM風) ───────── */
@@ -1454,6 +1476,189 @@ function renderPaneOrderList() {
     },
   });
   renderIcons(els.paneOrderList);
+}
+
+/* ───────── Pointer-based drag sort（マウス即時／タッチ長押し） ───────── */
+/**
+ * タブなど横向き/縦向きリストをドラッグ並べ替え可能にする。
+ * PC: クリック＋ドラッグで即開始。タッチ: 長押し（400ms）で開始。
+ * @param {HTMLElement} list
+ * @param {object} opts
+ * @param {string} opts.itemSelector
+ * @param {string} [opts.idAttr='id'] - kebab. 例 'id' / 'pane'
+ * @param {function} opts.onReorder
+ */
+function enablePointerDragSort(list, { itemSelector, idAttr = 'id', onReorder }) {
+  const LONG_PRESS_MS = 400;
+  const MOVE_THRESHOLD = 6;
+
+  let activeItem = null;
+  let ghost = null;
+  let pressTimer = null;
+  let startX = 0, startY = 0;
+  let pointerId = null;
+  let isDragging = false;
+  let didReorder = false;
+
+  function dataKeyFor(attr) {
+    return attr.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  }
+
+  function detectHorizontal() {
+    const items = list.querySelectorAll(itemSelector);
+    if (items.length < 2) return true;
+    const r1 = items[0].getBoundingClientRect();
+    const r2 = items[1].getBoundingClientRect();
+    return Math.abs(r1.top - r2.top) < Math.abs(r1.left - r2.left);
+  }
+
+  function clearHighlights() {
+    list.querySelectorAll('.drag-over-top, .drag-over-bottom, .drag-over-left, .drag-over-right')
+      .forEach(el => el.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-left', 'drag-over-right'));
+  }
+
+  function createGhost(item) {
+    const rect = item.getBoundingClientRect();
+    const g = item.cloneNode(true);
+    g.classList.add('drag-ghost');
+    g.style.position = 'fixed';
+    g.style.pointerEvents = 'none';
+    g.style.zIndex = '9999';
+    g.style.width = rect.width + 'px';
+    g.style.height = rect.height + 'px';
+    g.style.left = rect.left + 'px';
+    g.style.top = rect.top + 'px';
+    g.style.opacity = '0.9';
+    g.style.boxShadow = '0 8px 24px rgba(0,0,0,0.55)';
+    document.body.appendChild(g);
+    return g;
+  }
+
+  function startDrag(item, e) {
+    activeItem = item;
+    isDragging = true;
+    didReorder = false;
+    item.classList.add('dragging');
+    ghost = createGhost(item);
+    try { list.setPointerCapture(pointerId); } catch {}
+  }
+
+  function moveGhost(e) {
+    if (!ghost) return;
+    ghost.style.left = (e.clientX - ghost.offsetWidth / 2) + 'px';
+    ghost.style.top = (e.clientY - ghost.offsetHeight / 2) + 'px';
+  }
+
+  function updateHighlight(e) {
+    if (!ghost) return;
+    ghost.style.display = 'none';
+    const hovered = document.elementFromPoint(e.clientX, e.clientY);
+    ghost.style.display = '';
+    const target = hovered ? hovered.closest(itemSelector) : null;
+    clearHighlights();
+    if (!target || target === activeItem || !list.contains(target)) return;
+    const horiz = detectHorizontal();
+    const r = target.getBoundingClientRect();
+    const before = horiz
+      ? e.clientX < r.left + r.width / 2
+      : e.clientY < r.top + r.height / 2;
+    target.classList.add(horiz ? (before ? 'drag-over-left' : 'drag-over-right')
+                                : (before ? 'drag-over-top'  : 'drag-over-bottom'));
+  }
+
+  function endDrag(e) {
+    if (!activeItem) return;
+    if (ghost) { try { document.body.removeChild(ghost); } catch {} ghost = null; }
+    activeItem.classList.remove('dragging');
+
+    ghost = null;
+    const hovered = document.elementFromPoint(e.clientX, e.clientY);
+    const target = hovered ? hovered.closest(itemSelector) : null;
+    if (target && target !== activeItem && list.contains(target)) {
+      const horiz = detectHorizontal();
+      const r = target.getBoundingClientRect();
+      const before = horiz
+        ? e.clientX < r.left + r.width / 2
+        : e.clientY < r.top + r.height / 2;
+      if (before) list.insertBefore(activeItem, target);
+      else list.insertBefore(activeItem, target.nextSibling);
+
+      const key = dataKeyFor(idAttr);
+      const newOrder = Array.from(list.querySelectorAll(itemSelector)).map(el => el.dataset[key]);
+      didReorder = true;
+      if (onReorder) onReorder(newOrder);
+    }
+    clearHighlights();
+    try { list.releasePointerCapture(pointerId); } catch {}
+
+    // 直後の click を抑止（ドラッグ結果で予期せぬ切替を防ぐ）
+    if (isDragging) {
+      const suppress = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+      document.addEventListener('click', suppress, { capture: true, once: true });
+    }
+
+    activeItem = null;
+    pointerId = null;
+    isDragging = false;
+  }
+
+  list.addEventListener('pointerdown', (e) => {
+    const item = e.target.closest(itemSelector);
+    if (!item || !list.contains(item)) return;
+    // ボタン/入力欄クリックはドラッグ発動しない
+    if (e.target !== item && e.target.closest('button, input, textarea, select, [contenteditable="true"]')) return;
+
+    startX = e.clientX;
+    startY = e.clientY;
+    pointerId = e.pointerId;
+
+    if (e.pointerType === 'touch') {
+      // タッチ: 長押しでドラッグ発動
+      pressTimer = setTimeout(() => {
+        pressTimer = null;
+        startDrag(item, e);
+      }, LONG_PRESS_MS);
+    } else {
+      // マウス等: 十分に動いたらドラッグ発動
+      activeItem = item;
+    }
+  });
+
+  list.addEventListener('pointermove', (e) => {
+    // 長押し待ち中に動いた → キャンセル
+    if (pressTimer) {
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (Math.sqrt(dx * dx + dy * dy) > MOVE_THRESHOLD * 2) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+        activeItem = null;
+      }
+      return;
+    }
+    if (!activeItem) return;
+
+    if (!isDragging && e.pointerId === pointerId) {
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (Math.sqrt(dx * dx + dy * dy) < MOVE_THRESHOLD) return;
+      startDrag(activeItem, e);
+    }
+    if (!isDragging) return;
+    e.preventDefault();
+    moveGhost(e);
+    updateHighlight(e);
+  });
+
+  const finish = (e) => {
+    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; activeItem = null; pointerId = null; return; }
+    if (isDragging) endDrag(e);
+    activeItem = null;
+    pointerId = null;
+    isDragging = false;
+  };
+  list.addEventListener('pointerup', finish);
+  list.addEventListener('pointercancel', finish);
 }
 
 /* ───────── Drag-sort (HTML5 Drag API) ───────── */
@@ -1761,7 +1966,21 @@ function renderTabs() {
     els.tabsList.appendChild(tab);
   }
   renderIcons(els.tabsList);
+  enablePointerDragSort(els.tabsList, {
+    itemSelector: '.tab',
+    idAttr: 'id',
+    onReorder: reorderSessions,
+  });
   renderTitleBar();
+}
+
+function reorderSessions(newIds) {
+  const map = new Map(state.sessions.map(s => [s.id, s]));
+  const reordered = newIds.map(id => map.get(id)).filter(Boolean);
+  if (reordered.length === state.sessions.length) {
+    state.sessions = reordered;
+    persistSessions();
+  }
 }
 
 /* ───────── Title bar ───────── */
@@ -1853,8 +2072,7 @@ els.btnSettingsSave.addEventListener('click', saveSettingsFromForm);
 function setZoom(pct, persist = true) {
   const v = Math.max(75, Math.min(200, Math.round(pct / 5) * 5 || 100));
   state.settings.appZoom = v;
-  const app = document.getElementById('app');
-  if (app) app.style.zoom = v / 100;
+  applyAppZoom(v);
   els.zoomRange.value = v;
   els.zoomPercent.textContent = v + '%';
   if (persist) saveSettings();
