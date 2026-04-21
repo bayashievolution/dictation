@@ -1350,7 +1350,7 @@ html, body {
 .scroll-bottom {
   position: absolute;
   right: 20px;
-  bottom: 20px;
+  bottom: 70px;
   width: 38px;
   height: 38px;
   border-radius: 50%;
