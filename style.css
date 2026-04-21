@@ -1084,9 +1084,9 @@ html, body {
   transition: opacity 0.25s var(--ease-out), transform 0.25s var(--ease-out), margin 0.25s var(--ease-out), max-height 0.3s var(--ease-out);
   max-height: 400px;
   overflow: hidden;
-  /* 右端はヘルプアイコンの下くらい、左揃え（block×fit-contentで自然に左寄せ） */
-  width: fit-content;
-  max-width: 100%;
+  /* 狭い画面（拡張サイドパネル）では横いっぱい、広くなったらそれ以上広がらない */
+  width: 100%;
+  max-width: 420px;
 }
 .memo-cheatsheet.hidden {
   opacity: 0;
