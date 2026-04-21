@@ -2405,6 +2405,11 @@ function loadActiveSessionIntoDOM() {
 
 function switchSession(id) {
   if (id === state.activeId) return;
+  // 方向判定: 並びで右へ移動 → 新コンテンツは右から、左へ → 左から
+  const oldIdx = state.sessions.findIndex(s => s.id === state.activeId);
+  const newIdx = state.sessions.findIndex(s => s.id === id);
+  const direction = (oldIdx >= 0 && newIdx >= 0 && newIdx < oldIdx) ? 'left' : 'right';
+
   if (state.isRecording) stopRecording();
   snapshotActiveToSession();
   persistSessions();
@@ -2412,6 +2417,16 @@ function switchSession(id) {
   persistSessions();
   renderTabs();
   loadActiveSessionIntoDOM();
+
+  // main-area 全体をスライドで切替
+  if (els.mainArea && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
+    els.mainArea.classList.remove('enter-from-right', 'enter-from-left');
+    void els.mainArea.offsetWidth;
+    els.mainArea.classList.add(direction === 'right' ? 'enter-from-right' : 'enter-from-left');
+    setTimeout(() => {
+      els.mainArea.classList.remove('enter-from-right', 'enter-from-left');
+    }, 320);
+  }
 }
 
 function closeSession(id) {
