@@ -89,51 +89,6 @@ html, body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* ───────── Titlebar ───────── */
-#titlebar {
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border);
-  user-select: none;
-  -webkit-app-region: drag;
-  flex-shrink: 0;
-}
-
-.titlebar-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.app-icon {
-  font-size: 16px;
-}
-
-.app-name {
-  letter-spacing: 0.02em;
-}
-
-.titlebar-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  min-width: 0;
-  -webkit-app-region: no-drag;
-}
-
-.titlebar-left {
-  flex-shrink: 1;
-  min-width: 0;
-  overflow: hidden;
-}
 
 .titlebar-btn {
   width: 28px;
