@@ -2764,22 +2764,25 @@ els.memo.addEventListener('input', (e) => {
   if (['h1','h2','h3','li','blockquote','hr','label'].includes(tag)) return;
   const text = block.textContent || '';
 
+  // --- 区切り線 (- 単独や -- 入力中に箇条書きに化けないよう最初に判定)
+  if (text === '---') { memoTransformToHr(block); return; }
   // # 見出し
-  let m = text.match(/^(#{1,3})\s(.*)$/);
+  let m = text.match(/^(#{1,3})\s(.+)$/);
   if (m) { memoTransformBlock(block, `h${m[1].length}`, m[2]); return; }
-  // - or * or ・ 箇条書き
-  m = text.match(/^[-*・]\s?(.*)$/);
+  // - or * 箇条書き (スペース必須、かつ content 1 文字以上)
+  m = text.match(/^[-*]\s(.+)$/);
+  if (m) { memoTransformToListItem(block, 'ul', m[1]); return; }
+  // ・ 箇条書き（スペース不要、content 1 文字以上）
+  m = text.match(/^・\s?(.+)$/);
   if (m) { memoTransformToListItem(block, 'ul', m[1]); return; }
   // 1. 番号リスト
-  m = text.match(/^\d+\.\s(.*)$/);
+  m = text.match(/^\d+\.\s(.+)$/);
   if (m) { memoTransformToListItem(block, 'ol', m[1]); return; }
   // > 引用
-  m = text.match(/^>\s(.*)$/);
+  m = text.match(/^>\s(.+)$/);
   if (m) { memoTransformBlock(block, 'blockquote', m[1]); return; }
-  // --- 区切り線
-  if (text === '---') { memoTransformToHr(block); return; }
   // [ ] / [] / [x] チェックボックス
-  m = text.match(/^\[([ xX])?\]\s(.*)$/);
+  m = text.match(/^\[([ xX])?\]\s(.+)$/);
   if (m) {
     const checked = !!(m[1] && m[1].trim());
     memoTransformToCheckbox(block, checked, m[2]);
