@@ -2681,6 +2681,17 @@ function memoGetCurrentBlock() {
   return (node && node !== els.memo) ? node : null;
 }
 
+function memoFindTaskItem() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  let node = sel.getRangeAt(0).startContainer;
+  while (node && node !== els.memo) {
+    if (node.nodeType === Node.ELEMENT_NODE && node.classList && node.classList.contains('task-item')) return node;
+    node = node.parentNode;
+  }
+  return null;
+}
+
 function memoFindAncestor(tagName) {
   const sel = window.getSelection();
   if (!sel.rangeCount) return null;
@@ -2743,17 +2754,18 @@ function memoTransformToHr(block) {
 }
 
 function memoTransformToCheckbox(block, checked, content) {
-  const label = document.createElement('label');
-  label.className = 'task-item' + (checked ? ' done' : '');
+  // label で包まない（label だと text クリックでもチェックが発火するため）
+  const wrap = document.createElement('div');
+  wrap.className = 'task-item' + (checked ? ' done' : '');
   const cb = document.createElement('input');
   cb.type = 'checkbox';
   cb.checked = checked;
   cb.contentEditable = 'false';
   const span = document.createElement('span');
   span.textContent = content;
-  label.appendChild(cb);
-  label.appendChild(span);
-  block.replaceWith(label);
+  wrap.appendChild(cb);
+  wrap.appendChild(span);
+  block.replaceWith(wrap);
   memoPlaceCaretAtEnd(span);
 }
 
@@ -2857,8 +2869,8 @@ els.memo.addEventListener('keydown', (e) => {
   // Enter: チェックボックス / リスト特別処理
   if (e.key === 'Enter' && !e.shiftKey) {
     // task-item (checkbox): Enter で次の行に div を挿入
-    const label = memoFindAncestor('LABEL');
-    if (label && label.classList && label.classList.contains('task-item')) {
+    const label = memoFindTaskItem();
+    if (label) {
       e.preventDefault();
       const span = label.querySelector('span');
       const isEmpty = !span || span.textContent.trim() === '';
