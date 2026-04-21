@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "ばっさんディクテーション",
+  "short_name": "ばっさんディクテ",
+  "version": "0.7.0",
+  "description": "リアルタイム文字起こし＋Gemini AI整形・要約・質問。Chromeサイドパネルで講義スライドと並べて使える。",
+  "author": "bayashi",
+  "permissions": [
+    "sidePanel",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "action": {
+    "default_title": "ばっさんディクテーション（クリックでサイドパネル）"
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "assets/icon-16.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src 'self' https://generativelanguage.googleapis.com;"
+  }
+}
