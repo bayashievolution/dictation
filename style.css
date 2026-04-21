@@ -799,6 +799,33 @@ html, body {
   font-size: 11px;
 }
 
+/* アクション付きトグル（ノブ＝自動ON/OFF、ラベル＝今すぐ実行） */
+.toggle-switch.toggle-with-action .toggle-track {
+  cursor: pointer;
+  transition: background 0.2s var(--ease-out), box-shadow 0.15s;
+  position: relative;
+}
+.toggle-switch.toggle-with-action .toggle-track:hover {
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18);
+}
+.toggle-switch.toggle-with-action .toggle-label {
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 3px;
+  transition: color 0.12s;
+}
+.toggle-switch.toggle-with-action .toggle-label:hover {
+  color: #ddd6fe;
+}
+.toggle-switch.toggle-with-action.on {
+  background: #a78bfa1f;
+  color: #c4b5fd;
+  border-color: #a78bfa66;
+}
+.toggle-switch.toggle-with-action.firing .toggle-label [data-icon] svg {
+  animation: spin 1.2s linear infinite;
+}
+
 /* ───────── Per-pane font controls (Word風) ───────── */
 .pane-font-controls {
   display: inline-flex;
@@ -833,8 +860,22 @@ html, body {
   border-color: var(--accent);
 }
 
-/* カスタムスピナー（テーマ統一） */
-.pane-size-stepper {
+/* ───────── Number stepper (汎用 テーマ統一スピナー) ───────── */
+/* .field 内では full-width 、内側の input は枠を持たず stepper 側が枠を担当 */
+.field > .number-stepper:not(.number-stepper--compact) {
+  width: 100%;
+  height: auto;
+}
+.field > .number-stepper:not(.number-stepper--compact) input[type="number"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  text-align: left;
+}
+
+.number-stepper {
   display: inline-flex;
   align-items: stretch;
   height: 26px;
@@ -846,15 +887,15 @@ html, body {
   flex-shrink: 0;
 }
 
-.pane-size-stepper:hover {
+.number-stepper:hover {
   border-color: #4a4a54;
 }
 
-.pane-size-stepper:focus-within {
+.number-stepper:focus-within {
   border-color: var(--accent);
 }
 
-.pane-size-input {
+.number-stepper input[type="number"] {
   width: 46px;
   padding: 0 6px;
   background: transparent;
@@ -867,20 +908,20 @@ html, body {
   -moz-appearance: textfield;
 }
 
-.pane-size-input::-webkit-inner-spin-button,
-.pane-size-input::-webkit-outer-spin-button {
+.number-stepper input[type="number"]::-webkit-inner-spin-button,
+.number-stepper input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 
-.size-step-col {
+.number-stepper-btns {
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--border);
   width: 18px;
 }
 
-.size-step-btn {
+.number-stepper-btn {
   flex: 1 1 50%;
   background: transparent;
   border: none;
@@ -897,22 +938,22 @@ html, body {
   font-family: inherit;
 }
 
-.size-step-btn [data-icon] svg {
+.number-stepper-btn [data-icon] svg {
   width: 10px;
   height: 10px;
 }
 
-.size-step-btn:hover {
+.number-stepper-btn:hover {
   background: var(--bg-subtle);
   color: var(--text);
 }
 
-.size-step-btn:active {
+.number-stepper-btn:active {
   background: var(--accent-dim);
   color: var(--accent);
 }
 
-.size-step-btn + .size-step-btn {
+.number-stepper-btn + .number-stepper-btn {
   border-top: 1px solid var(--border);
 }
 

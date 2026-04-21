@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.8.6" />
+  <link rel="stylesheet" href="style.css?v=0.8.7" />
 </head>
 <body>
   <div id="app">
@@ -73,7 +73,7 @@
     <main id="main-area">
       <div id="pane-transcript" class="pane active">
         <div class="pane-header">
-          <button id="btn-refine-transcript" class="toggle-switch" title="ONで録音中/ペースト時に自動整形。OFFなら生のまま。ONにした瞬間も現在の生テキストを整形">
+          <button id="btn-refine-transcript" class="toggle-switch" title="ON=録音中・ペースト時に自動整形／OFF=生のまま／ON切替時は現在の生テキストも一括整形">
             <span class="toggle-track"><span class="toggle-knob"></span></span>
             <span class="toggle-label"><span data-icon="sparkles"></span>文字起こし整形</span>
           </button>
@@ -85,11 +85,11 @@
           </button>
           <div class="pane-font-controls">
             <select class="pane-font-select" data-pane-font="pane-transcript" title="フォント"></select>
-            <div class="pane-size-stepper">
+            <div class="number-stepper number-stepper--compact">
               <input class="pane-size-input" type="number" min="10" max="36" step="1" data-pane-size="pane-transcript" title="文字サイズ(px)" />
-              <div class="size-step-col">
-                <button class="size-step-btn" data-pane-size-step="pane-transcript:1" title="拡大" tabindex="-1"><span data-icon="chevron-up"></span></button>
-                <button class="size-step-btn" data-pane-size-step="pane-transcript:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
+              <div class="number-stepper-btns">
+                <button class="number-stepper-btn" data-pane-size-step="pane-transcript:1" title="拡大" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button class="number-stepper-btn" data-pane-size-step="pane-transcript:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
               </div>
             </div>
           </div>
@@ -117,11 +117,11 @@
           </button>
           <div class="pane-font-controls">
             <select class="pane-font-select" data-pane-font="pane-memo" title="フォント"></select>
-            <div class="pane-size-stepper">
+            <div class="number-stepper number-stepper--compact">
               <input class="pane-size-input" type="number" min="10" max="36" step="1" data-pane-size="pane-memo" title="文字サイズ(px)" />
-              <div class="size-step-col">
-                <button class="size-step-btn" data-pane-size-step="pane-memo:1" title="拡大" tabindex="-1"><span data-icon="chevron-up"></span></button>
-                <button class="size-step-btn" data-pane-size-step="pane-memo:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
+              <div class="number-stepper-btns">
+                <button class="number-stepper-btn" data-pane-size-step="pane-memo:1" title="拡大" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button class="number-stepper-btn" data-pane-size-step="pane-memo:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
               </div>
             </div>
           </div>
@@ -133,12 +133,9 @@
 
       <div id="pane-summary" class="pane">
         <div class="pane-header">
-          <button id="btn-regenerate-summary" class="pane-btn pane-btn-action" title="今すぐ要約を生成">
-            <span data-icon="sparkles"></span><span>要約を生成</span>
-          </button>
-          <button id="btn-auto-summary" class="toggle-switch toggle-compact" title="録音停止時に自動で要約を生成">
-            <span class="toggle-track"><span class="toggle-knob"></span></span>
-            <span class="toggle-label">自動</span>
+          <button id="btn-summary-combo" class="toggle-switch toggle-with-action" title="ON=録音停止時に自動生成／OFF=生成しない／本体クリックでいつでも今すぐ生成">
+            <span class="toggle-track" data-role="toggle"><span class="toggle-knob"></span></span>
+            <span class="toggle-label" data-role="action"><span data-icon="sparkles"></span>要約を生成</span>
           </button>
           <button class="pane-btn" data-pane-copy="pane-summary" title="このタブだけコピー">
             <span data-icon="copy"></span><span>コピー</span>
@@ -148,11 +145,11 @@
           </button>
           <div class="pane-font-controls">
             <select class="pane-font-select" data-pane-font="pane-summary" title="フォント"></select>
-            <div class="pane-size-stepper">
+            <div class="number-stepper number-stepper--compact">
               <input class="pane-size-input" type="number" min="10" max="36" step="1" data-pane-size="pane-summary" title="文字サイズ(px)" />
-              <div class="size-step-col">
-                <button class="size-step-btn" data-pane-size-step="pane-summary:1" title="拡大" tabindex="-1"><span data-icon="chevron-up"></span></button>
-                <button class="size-step-btn" data-pane-size-step="pane-summary:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
+              <div class="number-stepper-btns">
+                <button class="number-stepper-btn" data-pane-size-step="pane-summary:1" title="拡大" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button class="number-stepper-btn" data-pane-size-step="pane-summary:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
               </div>
             </div>
           </div>
@@ -176,11 +173,11 @@
           </button>
           <div class="pane-font-controls">
             <select class="pane-font-select" data-pane-font="pane-chat" title="フォント"></select>
-            <div class="pane-size-stepper">
+            <div class="number-stepper number-stepper--compact">
               <input class="pane-size-input" type="number" min="10" max="36" step="1" data-pane-size="pane-chat" title="文字サイズ(px)" />
-              <div class="size-step-col">
-                <button class="size-step-btn" data-pane-size-step="pane-chat:1" title="拡大" tabindex="-1"><span data-icon="chevron-up"></span></button>
-                <button class="size-step-btn" data-pane-size-step="pane-chat:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
+              <div class="number-stepper-btns">
+                <button class="number-stepper-btn" data-pane-size-step="pane-chat:1" title="拡大" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button class="number-stepper-btn" data-pane-size-step="pane-chat:-1" title="縮小" tabindex="-1"><span data-icon="chevron-down"></span></button>
               </div>
             </div>
           </div>
@@ -270,7 +267,13 @@
               </label>
               <label class="field">
                 <span class="field-label">Geminiチャンク間隔（秒）</span>
-                <input id="input-chunk-sec" type="number" min="5" max="60" step="1" />
+                <div class="number-stepper">
+                  <input id="input-chunk-sec" type="number" min="5" max="60" step="1" />
+                  <div class="number-stepper-btns">
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
                 <small class="field-hint">この秒数ごとに音声を Gemini へ送信。長いほど精度アップ・遅延増、短いほど反応速い。既定 12 秒。</small>
               </label>
             </div>
@@ -281,7 +284,13 @@
           <h3 class="field-group-title">動作</h3>
           <label class="field">
             <span class="field-label">無音検出時間（秒）</span>
-            <input id="input-silence-sec" type="number" min="1" max="30" step="1" />
+            <div class="number-stepper">
+              <input id="input-silence-sec" type="number" min="1" max="30" step="1" />
+              <div class="number-stepper-btns">
+                <button type="button" class="number-stepper-btn" data-stepper-target="input-silence-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button type="button" class="number-stepper-btn" data-stepper-target="input-silence-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+              </div>
+            </div>
             <small class="field-hint">この秒数だけ静かになったら、溜めた発話を Gemini に送って整形します。</small>
           </label>
           <label class="field field-row">
@@ -290,7 +299,13 @@
           </label>
           <label class="field">
             <span class="field-label">停止確認までの無音時間（秒）</span>
-            <input id="input-auto-stop-sec" type="number" min="30" max="600" step="10" />
+            <div class="number-stepper">
+              <input id="input-auto-stop-sec" type="number" min="30" max="600" step="10" />
+              <div class="number-stepper-btns">
+                <button type="button" class="number-stepper-btn" data-stepper-target="input-auto-stop-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button type="button" class="number-stepper-btn" data-stepper-target="input-auto-stop-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+              </div>
+            </div>
           </label>
         </div>
 
@@ -305,17 +320,35 @@
             <div class="font-row">
               <span class="font-row-label">文字起こし</span>
               <select id="font-transcript"></select>
-              <input id="size-transcript" type="number" min="10" max="36" step="1" /><span class="unit">px</span>
+              <div class="number-stepper number-stepper--compact">
+                <input id="size-transcript" type="number" min="10" max="36" step="1" />
+                <div class="number-stepper-btns">
+                  <button type="button" class="number-stepper-btn" data-stepper-target="size-transcript" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                  <button type="button" class="number-stepper-btn" data-stepper-target="size-transcript" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                </div>
+              </div><span class="unit">px</span>
             </div>
             <div class="font-row">
               <span class="font-row-label">メモ</span>
               <select id="font-memo"></select>
-              <input id="size-memo" type="number" min="10" max="36" step="1" /><span class="unit">px</span>
+              <div class="number-stepper number-stepper--compact">
+                <input id="size-memo" type="number" min="10" max="36" step="1" />
+                <div class="number-stepper-btns">
+                  <button type="button" class="number-stepper-btn" data-stepper-target="size-memo" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                  <button type="button" class="number-stepper-btn" data-stepper-target="size-memo" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                </div>
+              </div><span class="unit">px</span>
             </div>
             <div class="font-row">
               <span class="font-row-label">要約</span>
               <select id="font-summary"></select>
-              <input id="size-summary" type="number" min="10" max="36" step="1" /><span class="unit">px</span>
+              <div class="number-stepper number-stepper--compact">
+                <input id="size-summary" type="number" min="10" max="36" step="1" />
+                <div class="number-stepper-btns">
+                  <button type="button" class="number-stepper-btn" data-stepper-target="size-summary" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                  <button type="button" class="number-stepper-btn" data-stepper-target="size-summary" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                </div>
+              </div><span class="unit">px</span>
             </div>
             <small class="field-hint">Google Fonts から日本語フォントを読み込んでいます（要ネット接続）</small>
           </div>
@@ -349,8 +382,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.8.6"></script>
-  <script src="gemini.js?v=0.8.6"></script>
-  <script src="app.js?v=0.8.6"></script>
+  <script src="icons.js?v=0.8.7"></script>
+  <script src="gemini.js?v=0.8.7"></script>
+  <script src="app.js?v=0.8.7"></script>
 </body>
 </html>

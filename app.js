@@ -172,8 +172,7 @@ const els = {
   titleDisplay: document.getElementById('title-display'),
   btnEditTitle: document.getElementById('btn-edit-title'),
   btnRegenTitle: document.getElementById('btn-regen-title'),
-  btnRegenSummary: document.getElementById('btn-regenerate-summary'),
-  btnAutoSummary: document.getElementById('btn-auto-summary'),
+  btnSummaryCombo: document.getElementById('btn-summary-combo'),
   btnRefineTranscript: document.getElementById('btn-refine-transcript'),
   emptyHint: document.getElementById('empty-hint'),
   settingsModal: document.getElementById('settings-modal'),
@@ -239,10 +238,10 @@ function applyAiButtonState() {
     els.btnRefineTranscript.setAttribute('aria-pressed', on ? 'true' : 'false');
     els.btnRefineTranscript.classList.toggle('needs-key', on && !state.settings.apiKey);
   }
-  if (els.btnAutoSummary) {
+  if (els.btnSummaryCombo) {
     const on = !!state.settings.autoSummarize;
-    els.btnAutoSummary.classList.toggle('on', on);
-    els.btnAutoSummary.setAttribute('aria-pressed', on ? 'true' : 'false');
+    els.btnSummaryCombo.classList.toggle('on', on);
+    els.btnSummaryCombo.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
 }
 
@@ -1449,6 +1448,29 @@ function populatePaneFontSelects() {
   });
 }
 
+function wireNumberSteppers() {
+  document.querySelectorAll('.number-stepper-btn[data-stepper-target]').forEach(btn => {
+    if (btn.dataset.wired) return;
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetId = btn.dataset.stepperTarget;
+      const delta = Number(btn.dataset.stepperDelta) || 0;
+      const input = document.getElementById(targetId);
+      if (!input) return;
+      const step = Number(input.step) || 1;
+      const current = Number(input.value) || Number(input.min) || 0;
+      const min = input.min !== '' ? Number(input.min) : -Infinity;
+      const max = input.max !== '' ? Number(input.max) : Infinity;
+      const next = Math.max(min, Math.min(max, current + delta * step));
+      if (next === current) return;
+      input.value = next;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  });
+}
+
 function wirePaneFontControls() {
   document.querySelectorAll('.pane-font-select').forEach(select => {
     select.addEventListener('change', () => {
@@ -1683,9 +1705,7 @@ async function generateSummary({ silent = false } = {}) {
   state.isSummarizing = true;
   els.summary.classList.add('generating');
   els.summaryEmpty.hidden = true;
-  const origBtnHtml = els.btnRegenSummary.innerHTML;
-  els.btnRegenSummary.innerHTML = '<span>✨ 生成中…</span>';
-  els.btnRegenSummary.disabled = true;
+  if (els.btnSummaryCombo) els.btnSummaryCombo.classList.add('firing');
   setStatus('listening', '要約生成中');
   try {
     const session = getActiveSession();
@@ -1708,8 +1728,7 @@ async function generateSummary({ silent = false } = {}) {
   } finally {
     state.isSummarizing = false;
     els.summary.classList.remove('generating');
-    els.btnRegenSummary.innerHTML = origBtnHtml;
-    els.btnRegenSummary.disabled = false;
+    if (els.btnSummaryCombo) els.btnSummaryCombo.classList.remove('firing');
     setStatus(state.isRecording ? 'listening' : 'idle', state.isRecording ? '録音中' : '停止');
   }
 }
@@ -2390,13 +2409,23 @@ els.fileLoad.addEventListener('change', (e) => {
 });
 els.btnClearAll.addEventListener('click', clearAllPanes);
 els.btnSettings.addEventListener('click', openSettings);
-els.btnRegenSummary.addEventListener('click', () => generateSummary({ silent: false }));
-
-if (els.btnAutoSummary) {
-  els.btnAutoSummary.addEventListener('click', () => {
-    state.settings.autoSummarize = !state.settings.autoSummarize;
-    saveSettings();
-    applyAiButtonState();
+if (els.btnSummaryCombo) {
+  els.btnSummaryCombo.addEventListener('click', async (e) => {
+    // あたり判定: ノブ(track)=自動ON/OFFトグル、それ以外=今すぐ生成
+    const hit = e.target.closest('[data-role]');
+    const role = hit?.dataset.role;
+    if (role === 'toggle') {
+      state.settings.autoSummarize = !state.settings.autoSummarize;
+      saveSettings();
+      applyAiButtonState();
+    } else {
+      els.btnSummaryCombo.classList.add('firing');
+      try {
+        await generateSummary({ silent: false });
+      } finally {
+        els.btnSummaryCombo.classList.remove('firing');
+      }
+    }
   });
 }
 
@@ -2514,6 +2543,7 @@ loadSettings();
 populateFontSelects();
 populatePaneFontSelects();
 wirePaneFontControls();
+wireNumberSteppers();
 applyDisplaySettings();
 applyPaneOrder();
 renderInnerTabs();
