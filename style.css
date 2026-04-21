@@ -1412,21 +1412,21 @@ html, body {
 /* font-row の select / stepper を同じ高さで揃える */
 .font-row select,
 .font-row .number-stepper {
-  height: 32px;
+  height: 36px;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 13px;
+  line-height: 1.4;
   outline: none;
   transition: border-color 0.15s;
   box-sizing: border-box;
 }
 .font-row select {
-  padding: 0 22px 0 8px;
+  padding: 0 22px 0 10px;
   cursor: pointer;
-  /* Chrome の select は内部レンダリングで垂直中央揃え、line-height は指定しない */
 }
 .font-row select:hover,
 .font-row .number-stepper:hover {

@@ -1512,32 +1512,19 @@ function wirePaneFontControls() {
 }
 
 function applyAppZoom(v) {
+  // #app への細工は全部解除
   const app = document.getElementById('app');
-  if (!app) return;
-  const z = v / 100;
-  if (v === 100) {
+  if (app) {
     app.style.zoom = '';
     app.style.transform = '';
     app.style.transformOrigin = '';
-    app.style.width = '';
-    app.style.height = '';
-  } else if (v > 100) {
-    // 拡大: zoom + 逆スケール（layout 小さくして scaled visual = 100%）
-    app.style.zoom = z;
-    app.style.transform = '';
-    app.style.transformOrigin = '';
-    app.style.height = (10000 / v) + 'vh';
-    app.style.width  = (10000 / v) + '%';
-  } else {
-    // 縮小: transform + origin 上中央
-    // （zoom + 逆スケールだと Chrome が layout overflow を視覚的にクリップしてしまう）
-    // 結果: 縮小時は左右・下にわずかな blank が出るが、body bg と同色で目立たない
-    app.style.zoom = '';
-    app.style.transform = `scale(${z})`;
-    app.style.transformOrigin = '50% 0';
     app.style.width = '';
     app.style.height = '';
   }
+  // html 要素に zoom を適用。Chrome はこの指定を viewport 全体の縮拡として処理するので
+  // vw/vh/% も含めて統一的にスケールされ、clip も 額縁 も発生しない
+  const z = v / 100;
+  document.documentElement.style.zoom = (v === 100) ? '' : z;
 }
 
 function applyPaneOrder() {
@@ -2590,9 +2577,23 @@ els.confirmed.addEventListener('paste', () => {
   setTimeout(() => { refineUnstructuredInTranscript({ showFeedback: false }); }, 150);
 });
 
-// 文字起こし整形トグル（aiEnabled のON/OFF、ONにした瞬間に生テキストも整形）
+// 文字起こし整形コンボ: ノブ=自動ON/OFFトグル、本体=今すぐ整形
 if (els.btnRefineTranscript) {
-  els.btnRefineTranscript.addEventListener('click', toggleAi);
+  els.btnRefineTranscript.addEventListener('click', async (e) => {
+    const hit = e.target.closest('[data-role]');
+    const role = hit?.dataset.role;
+    if (role === 'toggle') {
+      toggleAi();
+    } else {
+      if (!state.settings.apiKey) { openSettings(); return; }
+      els.btnRefineTranscript.classList.add('firing');
+      try {
+        await refineUnstructuredInTranscript({ force: true, showFeedback: true });
+      } finally {
+        els.btnRefineTranscript.classList.remove('firing');
+      }
+    }
+  });
 }
 
 els.paneTranscriptBody.addEventListener('scroll', () => {
