@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dictation — リアルタイム文字起こし</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="titlebar">
+      <div class="titlebar-left">
+        <span class="app-icon">🎙</span>
+        <span class="app-name">dictation</span>
+      </div>
+      <div class="titlebar-right">
+        <span id="status-indicator" class="status idle">待機中</span>
+      </div>
+    </header>
+
+    <section id="controls">
+      <button id="btn-toggle" class="btn btn-primary">
+        <span class="btn-icon">▶</span>
+        <span class="btn-label">録音開始</span>
+      </button>
+      <button id="btn-copy" class="btn btn-secondary" disabled>
+        <span class="btn-icon">📋</span>
+        <span class="btn-label">コピー</span>
+      </button>
+      <button id="btn-clear" class="btn btn-ghost">
+        <span class="btn-icon">🗑</span>
+        <span class="btn-label">クリア</span>
+      </button>
+    </section>
+
+    <main id="transcript">
+      <div id="confirmed"></div>
+      <div id="interim"></div>
+      <div id="empty-hint" class="empty-hint">
+        ▶ 録音開始を押すと文字起こしが始まります<br />
+        <small>※ Chromeで開いてください。初回はマイク許可を求められます。</small>
+      </div>
+    </main>
+
+    <footer id="footer">
+      <small id="session-info">Step 1 / Web Speech API 動作確認版</small>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
