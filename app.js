@@ -2756,11 +2756,10 @@ function memoTransformToCheckbox(block, checked, content) {
   memoPlaceCaretAtEnd(span);
 }
 
-els.memo.addEventListener('input', (e) => {
+function checkMemoMarkdown() {
   const block = memoGetCurrentBlock();
   if (!block) return;
   const tag = (block.tagName || '').toLowerCase();
-  // ブロックが既にマークダウン要素の場合は変換しない
   if (['h1','h2','h3','li','blockquote','hr','label'].includes(tag)) return;
   const text = block.textContent || '';
 
@@ -2769,10 +2768,10 @@ els.memo.addEventListener('input', (e) => {
   // # 見出し
   let m = text.match(/^(#{1,3})\s(.+)$/);
   if (m) { memoTransformBlock(block, `h${m[1].length}`, m[2]); return; }
-  // - or * 箇条書き (スペース必須、かつ content 1 文字以上)
+  // - or * 箇条書き (スペース必須、content 1 文字以上)
   m = text.match(/^[-*]\s(.+)$/);
   if (m) { memoTransformToListItem(block, 'ul', m[1]); return; }
-  // ・ 箇条書き（スペース不要、content 1 文字以上）
+  // ・ 箇条書き（スペース任意、content 1 文字以上）
   m = text.match(/^・\s?(.+)$/);
   if (m) { memoTransformToListItem(block, 'ul', m[1]); return; }
   // 1. 番号リスト
@@ -2788,6 +2787,18 @@ els.memo.addEventListener('input', (e) => {
     memoTransformToCheckbox(block, checked, m[2]);
     return;
   }
+}
+
+let memoIsComposing = false;
+els.memo.addEventListener('compositionstart', () => { memoIsComposing = true; });
+els.memo.addEventListener('compositionend', () => {
+  memoIsComposing = false;
+  // IME 変換確定後に一度チェック
+  checkMemoMarkdown();
+});
+els.memo.addEventListener('input', (e) => {
+  if (memoIsComposing) return;
+  checkMemoMarkdown();
 });
 
 els.memo.addEventListener('keydown', (e) => {
