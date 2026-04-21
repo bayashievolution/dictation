@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.9.16" />
+  <link rel="stylesheet" href="style.css?v=0.9.17" />
 </head>
 <body>
   <div id="app">
@@ -391,7 +391,9 @@
   <div id="quick-chat-modal" class="modal quick-chat hidden">
     <div class="modal-backdrop" data-dismiss></div>
     <div class="modal-card modal-sheet">
-      <div class="sheet-handle"></div>
+      <div class="sheet-handle-wrap" role="button" tabindex="0" title="ドラッグで下げて閉じる／クリックでも閉じる">
+        <span class="sheet-handle"></span>
+      </div>
       <div class="modal-header">
         <h2><span data-icon="bot"></span> 資料について質問</h2>
         <button class="modal-close" data-dismiss title="閉じる"><span data-icon="x"></span></button>
@@ -432,8 +434,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.9.15"></script>
-  <script src="gemini.js?v=0.9.15"></script>
-  <script src="app.js?v=0.9.15"></script>
+  <script src="icons.js?v=0.9.17"></script>
+  <script src="gemini.js?v=0.9.17"></script>
+  <script src="app.js?v=0.9.17"></script>
 </body>
 </html>

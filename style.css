@@ -1513,15 +1513,15 @@ html, body {
 .modal.quick-chat .modal-backdrop {
   background: rgba(0, 0, 0, 0.45);
 }
-.modal-sheet {
+.modal.quick-chat .modal-card.modal-sheet {
   width: 100%;
   max-width: none;
   max-height: 72vh;
   border-radius: 16px 16px 0 0;
-  animation: sheetSlideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
   box-shadow: 0 -10px 36px rgba(0,0,0,0.55);
+  animation: sheetSlideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 @keyframes sheetSlideUp {
   from { transform: translateY(100%); opacity: 0.4; }
@@ -1542,13 +1542,28 @@ html, body {
   to   { opacity: 0; }
 }
 
+.sheet-handle-wrap {
+  width: 100%;
+  padding: 6px 0 2px;
+  cursor: grab;
+  touch-action: none;
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.sheet-handle-wrap:hover .sheet-handle,
+.sheet-handle-wrap:active .sheet-handle {
+  background: var(--text-muted);
+}
+.sheet-handle-wrap:active {
+  cursor: grabbing;
+}
 .sheet-handle {
-  width: 40px;
+  width: 44px;
   height: 4px;
   background: var(--border);
   border-radius: 2px;
-  margin: 8px auto 0;
-  flex-shrink: 0;
+  transition: background 0.15s;
 }
 
 .modal-sheet .modal-header h2 {

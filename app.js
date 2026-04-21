@@ -2976,6 +2976,54 @@ if (els.quickChatModal) {
   els.quickChatModal.querySelectorAll('[data-dismiss]').forEach(b => {
     b.addEventListener('click', closeQuickChat);
   });
+
+  // シートハンドル: クリックで閉じる＋下ドラッグで閉じる
+  const handle = els.quickChatModal.querySelector('.sheet-handle-wrap');
+  const sheet = els.quickChatModal.querySelector('.modal-sheet');
+  if (handle && sheet) {
+    let startY = 0;
+    let currentY = 0;
+    let dragging = false;
+    let moved = false;
+    handle.addEventListener('pointerdown', (e) => {
+      startY = e.clientY;
+      currentY = 0;
+      moved = false;
+      dragging = true;
+      sheet.style.transition = 'none';
+      try { handle.setPointerCapture(e.pointerId); } catch {}
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      currentY = Math.max(0, e.clientY - startY);
+      if (currentY > 3) moved = true;
+      sheet.style.transform = `translateY(${currentY}px)`;
+    });
+    const endDrag = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      try { handle.releasePointerCapture(e.pointerId); } catch {}
+      sheet.style.transition = '';
+      if (!moved) {
+        // タップ/クリック扱い → 閉じる
+        sheet.style.transform = '';
+        closeQuickChat();
+      } else if (currentY > 80) {
+        // 十分に引き下げた → 閉じる
+        sheet.style.transform = '';
+        closeQuickChat();
+      } else {
+        // 戻す
+        sheet.style.transition = 'transform 0.2s var(--ease-out)';
+        sheet.style.transform = '';
+      }
+    };
+    handle.addEventListener('pointerup', endDrag);
+    handle.addEventListener('pointercancel', endDrag);
+    handle.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeQuickChat(); }
+    });
+  }
 }
 if (els.quickChatInput) {
   const resizeQuickInput = () => {
