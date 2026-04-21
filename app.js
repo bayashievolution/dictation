@@ -2372,10 +2372,23 @@ function snapshotActiveToSession() {
   s.updatedAt = Date.now();
 }
 
+function migrateMemoTaskItems() {
+  // 旧: <label class="task-item"> → 新: <div class="task-item">
+  // label だとテキストクリックでもチェックが発火してしまうため
+  const labels = els.memo.querySelectorAll('label.task-item');
+  labels.forEach(label => {
+    const div = document.createElement('div');
+    div.className = label.className;
+    while (label.firstChild) div.appendChild(label.firstChild);
+    label.replaceWith(div);
+  });
+}
+
 function loadActiveSessionIntoDOM() {
   const s = getActiveSession();
   els.confirmed.innerHTML = s?.transcript || '';
   els.memo.innerHTML = s?.memo || '';
+  migrateMemoTaskItems();
   els.summary.innerHTML = s?.summary || '';
   els.interim.textContent = '';
   state.pendingChunkEl = null;
