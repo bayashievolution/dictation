@@ -1796,8 +1796,9 @@ html, body {
 /* ───────── Zoom bar (Word-style, bottom-right) ───────── */
 #zoom-bar {
   position: fixed;
-  bottom: 24px;
+  bottom: 18px;
   right: 12px;
+  transition: bottom 0.2s var(--ease-out), opacity 0.2s var(--ease-out);
   z-index: 50;
   display: flex;
   align-items: center;
@@ -1815,6 +1816,11 @@ html, body {
 
 #zoom-bar:hover {
   opacity: 1;
+}
+
+/* チャットタブ時は入力欄と被らないよう zoom-bar を上に持ち上げる */
+body.chat-active #zoom-bar {
+  bottom: 76px;
 }
 
 #zoom-bar input[type="range"] {
