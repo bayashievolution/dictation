@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.9.27" />
+  <link rel="stylesheet" href="style.css?v=0.9.28" />
 </head>
 <body>
   <div id="app">
@@ -173,7 +173,7 @@
             <span class="toggle-track" data-role="toggle"><span class="toggle-knob"></span></span>
             <span class="toggle-label" data-role="action"><span data-icon="sparkles"></span>要約を生成</span>
           </button>
-          <div id="summary-detail-switch" class="segmented" title="要約のシンプルさ（低＝キーワードのみ／中＝バランス／高＝詳細議事録）">
+          <div id="summary-detail-switch" class="segmented" title="要約のシンプルさ（低＝詳細議事録／中＝バランス／高＝キーワードのみ）">
             <button type="button" data-detail="low">低</button>
             <button type="button" data-detail="medium">中</button>
             <button type="button" data-detail="high">高</button>
@@ -274,7 +274,7 @@
             <span class="field-label">要約のシンプルさ</span>
             <label class="field-row" style="margin-bottom:4px">
               <input type="radio" name="summary-detail" id="summary-detail-low" value="low" />
-              <span><strong>低</strong> — 重要なキーワードを用いて要約（最もシンプル）</span>
+              <span><strong>低</strong> — ほぼ全ての内容を含んだまとめ（詳細な議事録・復習等）</span>
             </label>
             <label class="field-row" style="margin-bottom:4px">
               <input type="radio" name="summary-detail" id="summary-detail-medium" value="medium" />
@@ -282,7 +282,7 @@
             </label>
             <label class="field-row" style="margin-bottom:0">
               <input type="radio" name="summary-detail" id="summary-detail-high" value="high" />
-              <span><strong>高</strong> — ほぼ全ての内容を含んだまとめ（詳細な議事録・復習等）</span>
+              <span><strong>高</strong> — 重要なキーワードを用いて要約（最もシンプル）</span>
             </label>
           </div>
         </div>
@@ -470,8 +470,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.9.27"></script>
-  <script src="gemini.js?v=0.9.27"></script>
-  <script src="app.js?v=0.9.27"></script>
+  <script src="icons.js?v=0.9.28"></script>
+  <script src="gemini.js?v=0.9.28"></script>
+  <script src="app.js?v=0.9.28"></script>
 </body>
 </html>
