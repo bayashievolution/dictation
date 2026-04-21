@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS = {
   aiEnabled: true,
   autoStopSec: 120,
   autoStopEnabled: true,
+  opacity: 0.75,
 };
 
 const AUTOSAVE_INTERVAL_MS = 15000;
@@ -71,6 +72,8 @@ const els = {
   inputAiEnabled: document.getElementById('input-ai-enabled'),
   inputAutoStop: document.getElementById('input-auto-stop'),
   inputAutoStopSec: document.getElementById('input-auto-stop-sec'),
+  inputOpacity: document.getElementById('input-opacity'),
+  opacityValue: document.getElementById('opacity-value'),
   tabsList: document.getElementById('tabs-list'),
   btnTabNew: document.getElementById('btn-tab-new'),
 };
@@ -107,7 +110,7 @@ function setStatus(mode, label) {
 function setRecordingUI(isRec) {
   els.btnToggle.classList.toggle('recording', isRec);
   els.btnToggle.querySelector('.btn-icon').textContent = isRec ? '⏹' : '▶';
-  els.btnToggle.querySelector('.btn-label').textContent = isRec ? '停止' : '録音開始';
+  els.btnToggle.title = isRec ? '停止' : '録音開始';
   if (typeof renderTabs === 'function') renderTabs();
 }
 
@@ -375,10 +378,15 @@ function buildRecognition() {
 }
 
 function startRecording() {
-  if (!state.recognition) {
-    state.recognition = buildRecognition();
-    if (!state.recognition) return;
+  if (state.recognition) {
+    state.recognition.onend = null;
+    state.recognition.onresult = null;
+    state.recognition.onerror = null;
+    state.recognition.onstart = null;
+    try { state.recognition.abort(); } catch {}
   }
+  state.recognition = buildRecognition();
+  if (!state.recognition) return;
   state.isRecording = true;
   state.shouldAutoRestart = true;
   try {
@@ -387,7 +395,10 @@ function startRecording() {
     resetLongSilenceTimer();
   } catch (e) {
     console.error('start failed', e);
-    setStatus('error', '開始失敗');
+    setStatus('error', '開始失敗: ' + e.message);
+    state.isRecording = false;
+    state.shouldAutoRestart = false;
+    setRecordingUI(false);
   }
 }
 
@@ -413,10 +424,15 @@ function copyAll() {
   const text = getConfirmedText();
   if (!text) return;
   navigator.clipboard.writeText(text).then(() => {
-    const label = els.btnCopy.querySelector('.btn-label');
-    const orig = label.textContent;
-    label.textContent = 'コピーしました';
-    setTimeout(() => { label.textContent = orig; }, 1500);
+    const icon = els.btnCopy.querySelector('.btn-icon');
+    const orig = icon.textContent;
+    const origTitle = els.btnCopy.title;
+    icon.textContent = '✓';
+    els.btnCopy.title = 'コピーしました';
+    setTimeout(() => {
+      icon.textContent = orig;
+      els.btnCopy.title = origTitle;
+    }, 1200);
   }).catch(err => alert('コピー失敗: ' + err.message));
 }
 
@@ -471,6 +487,9 @@ function openSettings() {
   els.inputAiEnabled.checked = state.settings.aiEnabled;
   els.inputAutoStop.checked = state.settings.autoStopEnabled;
   els.inputAutoStopSec.value = state.settings.autoStopSec;
+  const opacityPct = Math.round((state.settings.opacity ?? 0.75) * 100);
+  els.inputOpacity.value = opacityPct;
+  if (els.opacityValue) els.opacityValue.textContent = `${opacityPct}%`;
   els.settingsModal.classList.remove('hidden');
   setTimeout(() => els.inputApiKey.focus(), 80);
 }
@@ -485,8 +504,11 @@ function saveSettingsFromForm() {
   state.settings.aiEnabled = els.inputAiEnabled.checked;
   state.settings.autoStopEnabled = els.inputAutoStop.checked;
   state.settings.autoStopSec = Math.max(30, Math.min(600, Number(els.inputAutoStopSec.value) || 120));
+  const pct = Math.max(30, Math.min(100, Number(els.inputOpacity.value) || 75));
+  state.settings.opacity = pct / 100;
   saveSettings();
   applyAiButtonState();
+  if (window.electronAPI) window.electronAPI.setOpacity(state.settings.opacity);
   closeSettings();
 }
 
@@ -501,6 +523,12 @@ els.btnSettings.addEventListener('click', openSettings);
 
 els.btnSettingsSave.addEventListener('click', saveSettingsFromForm);
 els.settingsModal.querySelectorAll('[data-dismiss]').forEach(b => b.addEventListener('click', closeSettings));
+
+els.inputOpacity.addEventListener('input', () => {
+  const pct = Number(els.inputOpacity.value) || 75;
+  if (els.opacityValue) els.opacityValue.textContent = `${pct}%`;
+  if (window.electronAPI) window.electronAPI.setOpacity(pct / 100);
+});
 
 els.btnSilenceStop.addEventListener('click', () => {
   hideSilenceDialog();
@@ -758,9 +786,14 @@ if (window.electronAPI) {
   els.btnPin.addEventListener('click', () => window.electronAPI.toggleAlwaysOnTop());
   els.btnGhost.addEventListener('click', () => window.electronAPI.toggleTransparent());
   els.btnMinimize.addEventListener('click', () => window.electronAPI.hideToTray());
-  els.btnClose.addEventListener('click', () => window.electronAPI.hideToTray());
+  els.btnClose.addEventListener('click', () => {
+    snapshotActiveToSession();
+    persistSessions();
+    window.electronAPI.close();
+  });
   window.electronAPI.getState().then(applyWindowState);
   window.electronAPI.onWindowState(applyWindowState);
+  if (state.settings.opacity) window.electronAPI.setOpacity(state.settings.opacity);
 } else {
   els.btnPin.style.display = 'none';
   els.btnGhost.style.display = 'none';

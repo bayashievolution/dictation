@@ -78,13 +78,14 @@ function createWindow() {
     mainWindow.show();
   });
 
-  mainWindow.on('close', (e) => {
-    if (!isQuitting) {
-      e.preventDefault();
-      mainWindow.hide();
-    } else {
-      saveWindowState();
-    }
+  mainWindow.on('minimize', (e) => {
+    e.preventDefault();
+    mainWindow.hide();
+    updateTrayMenu();
+  });
+
+  mainWindow.on('close', () => {
+    saveWindowState();
   });
 
   mainWindow.on('resize', saveWindowState);
@@ -190,14 +191,27 @@ function toggleAlwaysOnTop() {
   broadcastState();
 }
 
+let preferredOpacity = 0.75;
+
 function toggleTransparent() {
   if (!mainWindow) return;
   const current = mainWindow.getOpacity();
-  const next = current < 1.0 ? 1.0 : 0.75;
+  const next = current < 1.0 ? 1.0 : preferredOpacity;
   mainWindow.setOpacity(next);
   saveWindowState();
   updateTrayMenu();
   broadcastState();
+}
+
+function setTransparentLevel(value) {
+  const clamped = Math.max(0.3, Math.min(1.0, Number(value) || 0.75));
+  preferredOpacity = clamped;
+  if (!mainWindow) return;
+  if (mainWindow.getOpacity() < 1.0) {
+    mainWindow.setOpacity(clamped);
+    saveWindowState();
+    broadcastState();
+  }
 }
 
 function broadcastState() {
@@ -225,8 +239,8 @@ if (!gotTheLock) {
   });
 }
 
-app.on('window-all-closed', (e) => {
-  e.preventDefault();
+app.on('window-all-closed', () => {
+  app.quit();
 });
 
 app.on('before-quit', () => {
@@ -240,6 +254,7 @@ app.on('will-quit', () => {
 
 ipcMain.handle('win:toggleAlwaysOnTop', () => { toggleAlwaysOnTop(); });
 ipcMain.handle('win:toggleTransparent', () => { toggleTransparent(); });
+ipcMain.handle('win:setOpacity', (_e, v) => { setTransparentLevel(v); });
 ipcMain.handle('win:minimize', () => mainWindow?.minimize());
 ipcMain.handle('win:hideToTray', () => hideWindow());
 ipcMain.handle('win:close', () => {
@@ -249,4 +264,5 @@ ipcMain.handle('win:close', () => {
 ipcMain.handle('win:getState', () => ({
   alwaysOnTop: mainWindow?.isAlwaysOnTop() ?? false,
   opacity: mainWindow?.getOpacity() ?? 1.0,
+  preferredOpacity,
 }));

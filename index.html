@@ -17,33 +17,28 @@
         <span id="status-indicator" class="status idle">待機中</span>
         <button id="btn-pin" class="titlebar-btn" title="常に最前面">📌</button>
         <button id="btn-ghost" class="titlebar-btn" title="半透明">👻</button>
-        <button id="btn-minimize" class="titlebar-btn" title="最小化（トレイへ）">―</button>
-        <button id="btn-close" class="titlebar-btn titlebar-close" title="閉じる（トレイへ）">✕</button>
+        <button id="btn-minimize" class="titlebar-btn" title="最小化（タスクトレイへ）">―</button>
+        <button id="btn-close" class="titlebar-btn titlebar-close" title="閉じる（アプリ終了）">✕</button>
       </div>
     </header>
 
     <section id="controls">
-      <button id="btn-toggle" class="btn btn-primary">
+      <button id="btn-toggle" class="btn btn-primary btn-square" title="録音開始（クリックで開始/停止）">
         <span class="btn-icon">▶</span>
-        <span class="btn-label">録音開始</span>
       </button>
-      <button id="btn-ai" class="btn btn-ai active" title="AI整形ON/OFF">
+      <button id="btn-ai" class="btn btn-ai btn-square active" title="AI整形 ON/OFF">
         <span class="btn-icon">✨</span>
-        <span class="btn-label">AI整形</span>
       </button>
-      <button id="btn-copy" class="btn btn-secondary" disabled>
+      <button id="btn-copy" class="btn btn-secondary btn-square" disabled title="全文をコピー">
         <span class="btn-icon">📋</span>
-        <span class="btn-label">コピー</span>
       </button>
-      <button id="btn-export" class="btn btn-ghost" disabled>
+      <button id="btn-export" class="btn btn-ghost btn-square" disabled title="Markdownで保存">
         <span class="btn-icon">💾</span>
-        <span class="btn-label">保存</span>
       </button>
-      <button id="btn-clear" class="btn btn-ghost">
+      <button id="btn-clear" class="btn btn-ghost btn-square" title="このタブをクリア">
         <span class="btn-icon">🗑</span>
-        <span class="btn-label">クリア</span>
       </button>
-      <button id="btn-settings" class="btn btn-ghost" style="margin-left:auto" title="設定">
+      <button id="btn-settings" class="btn btn-ghost btn-square" style="margin-left:auto" title="設定">
         <span class="btn-icon">⚙</span>
       </button>
     </section>
@@ -103,6 +98,11 @@
         <label class="field">
           <span class="field-label">停止確認までの無音時間（秒）</span>
           <input id="input-auto-stop-sec" type="number" min="30" max="600" step="10" />
+        </label>
+        <label class="field">
+          <span class="field-label">半透明時の不透明度 <small id="opacity-value" style="color:var(--text-faint);">75%</small></span>
+          <input id="input-opacity" type="range" min="30" max="100" step="5" />
+          <small class="field-hint">👻ボタンで半透明にしたときの濃さ。30%〜100%</small>
         </label>
       </div>
       <div class="modal-footer">

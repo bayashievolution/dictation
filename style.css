@@ -232,6 +232,30 @@ html, body {
   font-size: 14px;
 }
 
+.btn-square {
+  padding: 0;
+  width: 38px;
+  height: 38px;
+  justify-content: center;
+}
+
+.btn-square .btn-icon {
+  font-size: 16px;
+}
+
+.btn-square.btn-primary {
+  width: 44px;
+  height: 38px;
+}
+
+.btn-square.btn-primary .btn-icon {
+  font-size: 18px;
+}
+
+.btn[title] {
+  position: relative;
+}
+
 /* ───────── Tabs ───────── */
 #tabs {
   display: flex;
@@ -647,6 +671,13 @@ html, body {
 .field input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.field input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  padding: 6px 0;
+  background: transparent;
 }
 
 .field-hint {
