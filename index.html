@@ -7,15 +7,24 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.8.4" />
+  <link rel="stylesheet" href="style.css?v=0.8.5" />
 </head>
 <body>
   <div id="app">
+    <header id="titlebar">
+      <div class="titlebar-left">
+        <span class="app-icon" data-icon="mic" data-icon-size="18"></span>
+        <span class="app-name">ばっさんディクテーション</span>
+      </div>
+      <div class="titlebar-right">
+        <span id="status-indicator" class="status idle">待機中</span>
+      </div>
+    </header>
+
     <section id="controls">
       <button id="btn-toggle" class="btn btn-primary btn-square" title="録音開始（クリックで開始/停止）">
         <span class="btn-icon" data-icon="play" data-icon-size="18"></span>
       </button>
-      <span id="status-indicator" class="status idle">待機中</span>
       <span class="controls-sep"></span>
       <button id="btn-copy-all-plain" class="btn btn-secondary btn-square" disabled title="全タブをプレーンテキストでコピー">
         <span class="btn-icon" data-icon="copy"></span>
@@ -336,8 +345,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.8.4"></script>
-  <script src="gemini.js?v=0.8.4"></script>
-  <script src="app.js?v=0.8.4"></script>
+  <script src="icons.js?v=0.8.5"></script>
+  <script src="gemini.js?v=0.8.5"></script>
+  <script src="app.js?v=0.8.5"></script>
 </body>
 </html>

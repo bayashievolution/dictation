@@ -90,6 +90,50 @@ html, body {
 }
 
 
+/* ───────── Titlebar ───────── */
+#titlebar {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.app-icon {
+  flex-shrink: 0;
+}
+
+.app-name {
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titlebar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
 .titlebar-btn {
   width: 28px;
   height: 24px;
