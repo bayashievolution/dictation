@@ -641,6 +641,22 @@ html, body {
   display: flex;
 }
 
+/* ───────── Pane transition (zemicale のスライド参考) ───────── */
+@keyframes paneEnterFromRight {
+  from { transform: translateX(40%); opacity: 0; }
+  to   { transform: translateX(0);   opacity: 1; }
+}
+@keyframes paneEnterFromLeft {
+  from { transform: translateX(-40%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.pane.enter-from-right {
+  animation: paneEnterFromRight 0.25s ease-out;
+}
+.pane.enter-from-left {
+  animation: paneEnterFromLeft 0.25s ease-out;
+}
+
 .pane-body {
   flex: 1;
   overflow-y: auto;

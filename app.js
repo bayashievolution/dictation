@@ -1515,16 +1515,27 @@ function applyAppZoom(v) {
   const app = document.getElementById('app');
   if (!app) return;
   const z = v / 100;
-  app.style.zoom = z;
-  // zoom > 100% のとき：ビューポート内に収めるため逆スケールで #app を小さく
-  // zoom < 100% のとき：逆スケールすると body を横にはみ出し clip されるため
-  //                     #app は 100% のまま（背景色は body と揃ってるので隙間は不可視）
   if (v > 100) {
+    // 拡大: zoom プロパティ（top-left原点でOK）＋ 逆スケールでビューポートに収める
+    app.style.zoom = z;
+    app.style.transform = '';
+    app.style.transformOrigin = '';
     app.style.height = (10000 / v) + 'vh';
     app.style.width  = (10000 / v) + '%';
+  } else if (v < 100) {
+    // 縮小: transform + top center で視覚的に中央寄せ
+    // （zoom は top-left 原点のため縮小時は左寄りに見えてしまう）
+    app.style.zoom = '';
+    app.style.transform = `scale(${z})`;
+    app.style.transformOrigin = 'top center';
+    app.style.width = '';
+    app.style.height = '';
   } else {
-    app.style.height = '100vh';
-    app.style.width  = '';
+    app.style.zoom = '';
+    app.style.transform = '';
+    app.style.transformOrigin = '';
+    app.style.width = '';
+    app.style.height = '';
   }
 }
 
@@ -2157,9 +2168,32 @@ function saveSettingsFromForm() {
 /* ───────── Inner pane switch ───────── */
 
 function switchInnerPane(paneId) {
+  if (state.activePane === paneId) return;
+
+  // 方向判定（zemicale パターン）: 並びの右へ移動 → 新ペインは右から入る、左へ → 左から入る
+  const order = state.settings.paneOrder || [];
+  const oldIdx = order.indexOf(state.activePane);
+  const newIdx = order.indexOf(paneId);
+  const direction = (oldIdx >= 0 && newIdx >= 0 && newIdx < oldIdx) ? 'left' : 'right';
+
   state.activePane = paneId;
   els.innerTabsContainer.querySelectorAll('.inner-tab').forEach(t => t.classList.toggle('active', t.dataset.pane === paneId));
-  [els.paneTranscript, els.paneMemo, els.paneSummary, els.paneChat].forEach(p => p.classList.toggle('active', p.id === paneId));
+  const panes = [els.paneTranscript, els.paneMemo, els.paneSummary, els.paneChat];
+  panes.forEach(p => {
+    p.classList.toggle('active', p.id === paneId);
+    p.classList.remove('enter-from-right', 'enter-from-left');
+  });
+
+  const newPane = document.getElementById(paneId);
+  if (newPane && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
+    // reflow で animation を確実に再発火
+    void newPane.offsetWidth;
+    newPane.classList.add(direction === 'right' ? 'enter-from-right' : 'enter-from-left');
+    setTimeout(() => {
+      newPane.classList.remove('enter-from-right', 'enter-from-left');
+    }, 280);
+  }
+
   if (paneId === 'pane-summary') {
     els.summaryEmpty.hidden = !!getSummaryText();
   }
