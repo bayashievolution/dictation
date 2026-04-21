@@ -54,11 +54,11 @@ const state = {
 const els = {
   btnToggle: document.getElementById('btn-toggle'),
   btnAi: document.getElementById('btn-ai'),
-  btnCopy: document.getElementById('btn-copy'),
+  btnCopyAllPlain: document.getElementById('btn-copy-all-plain'),
+  btnCopyAllMd: document.getElementById('btn-copy-all-md'),
   btnSaveJson: document.getElementById('btn-save-json'),
   btnLoadJson: document.getElementById('btn-load-json'),
-  btnExportMd: document.getElementById('btn-export-md'),
-  btnClear: document.getElementById('btn-clear'),
+  btnClearAll: document.getElementById('btn-clear-all'),
   btnSettings: document.getElementById('btn-settings'),
   btnScrollBottom: document.getElementById('btn-scroll-bottom'),
   fileLoad: document.getElementById('file-load'),
@@ -71,6 +71,7 @@ const els = {
   paneTranscript: document.getElementById('pane-transcript'),
   paneMemo: document.getElementById('pane-memo'),
   paneSummary: document.getElementById('pane-summary'),
+  paneTranscriptBody: document.querySelector('#pane-transcript .pane-body'),
   innerTabs: document.querySelectorAll('.inner-tab'),
   btnRegenSummary: document.getElementById('btn-regenerate-summary'),
   emptyHint: document.getElementById('empty-hint'),
@@ -138,14 +139,14 @@ function getActivePaneEl() {
 }
 
 function isPinnedToBottom() {
-  const pane = els.paneTranscript;
+  const pane = els.paneTranscriptBody;
   return pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 40;
 }
 
 function autoScroll(force = false) {
   if (state.activePane !== 'pane-transcript') return;
   if (force || !state.userScrolledUp) {
-    els.paneTranscript.scrollTop = els.paneTranscript.scrollHeight;
+    els.paneTranscriptBody.scrollTop = els.paneTranscriptBody.scrollHeight;
   }
 }
 
@@ -176,8 +177,8 @@ function hasAnyContent() {
 
 function updateActionButtons() {
   const has = hasAnyContent();
-  els.btnCopy.disabled = !has;
-  els.btnExportMd.disabled = !has;
+  els.btnCopyAllPlain.disabled = !has;
+  els.btnCopyAllMd.disabled = !has;
 }
 
 /* ───────── Paragraph rendering ───────── */
@@ -456,45 +457,112 @@ function stopRecording() {
 
 /* ───────── Actions ───────── */
 
-function copyAll() {
-  let text = '';
-  if (state.activePane === 'pane-transcript') text = getConfirmedText();
-  else if (state.activePane === 'pane-memo') text = getMemoText();
-  else text = getSummaryText();
-  if (!text) return;
-  navigator.clipboard.writeText(text).then(() => {
-    const icon = els.btnCopy.querySelector('.btn-icon');
-    const orig = icon.textContent;
-    const origTitle = els.btnCopy.title;
-    icon.textContent = '✓';
-    els.btnCopy.title = 'コピーしました';
-    setTimeout(() => {
-      icon.textContent = orig;
-      els.btnCopy.title = origTitle;
-    }, 1200);
-  }).catch(err => alert('コピー失敗: ' + err.message));
+function flashButton(btn, label = 'コピー完了') {
+  const origTitle = btn.title;
+  const origHtml = btn.innerHTML;
+  const iconSpan = btn.querySelector('.btn-icon');
+  if (iconSpan) {
+    const origIcon = iconSpan.textContent;
+    iconSpan.textContent = '✓';
+    btn.title = label;
+    setTimeout(() => { iconSpan.textContent = origIcon; btn.title = origTitle; }, 1200);
+  } else {
+    btn.innerHTML = '<span>✓</span><span>OK</span>';
+    btn.title = label;
+    setTimeout(() => { btn.innerHTML = origHtml; btn.title = origTitle; }, 1200);
+  }
 }
 
-function exportMarkdown() {
-  const transcript = getConfirmedText();
-  const memo = getMemoText();
-  const summary = getSummaryText();
-  if (!transcript && !memo && !summary) return;
+async function copyTextOnly(text, btn) {
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) flashButton(btn);
+  } catch (err) {
+    alert('コピー失敗: ' + err.message);
+  }
+}
 
+async function copyPane(paneId, btn) {
+  let text = '';
+  if (paneId === 'pane-transcript') text = getConfirmedText();
+  else if (paneId === 'pane-memo') text = getMemoText();
+  else if (paneId === 'pane-summary') text = getSummaryText();
+  if (!text) return;
+  await copyTextOnly(text, btn);
+}
+
+function buildCombinedPlain() {
+  const parts = [];
+  const t = getConfirmedText(); if (t) parts.push('【文字起こし】\n' + t);
+  const m = getMemoText();      if (m) parts.push('【メモ】\n' + m);
+  const s = getSummaryText();   if (s) parts.push('【要約】\n' + s);
+  return parts.join('\n\n──────────\n\n');
+}
+
+function buildCombinedMarkdown() {
+  const parts = [];
   const session = getActiveSession();
-  const title = session?.title || 'dictation';
-  const now = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
-  const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+  if (session?.title) parts.push(`# ${session.title}`);
+  const s = getSummaryText();   if (s) parts.push('## 要約\n\n' + s);
+  const m = getMemoText();      if (m) parts.push('## メモ\n\n' + m);
+  const t = getConfirmedText(); if (t) parts.push('## 文字起こし\n\n' + t);
+  return parts.join('\n\n');
+}
 
-  const md = [`# ${title} (${stamp})`];
-  if (summary) md.push('\n## 要約\n\n' + summary);
-  if (memo) md.push('\n## メモ\n\n' + memo);
-  if (transcript) md.push('\n## 文字起こし\n\n' + transcript);
+function buildCombinedHtmlForNotion() {
+  // Notion は <details> を toggle ブロックに変換する
+  const session = getActiveSession();
+  const title = session?.title ? `<h1>${escapeHtml(session.title)}</h1>` : '';
+  const sections = [];
 
-  const blob = new Blob([md.join('\n\n')], { type: 'text/markdown;charset=utf-8' });
-  triggerDownload(blob, `${safeTitle}-${stamp}.md`);
+  const addSection = (label, innerHtml, plainFallback) => {
+    if (!innerHtml && !plainFallback) return;
+    const body = innerHtml || `<p>${escapeHtml(plainFallback)}</p>`;
+    sections.push(`<details open><summary><strong>${escapeHtml(label)}</strong></summary>${body}</details>`);
+  };
+
+  addSection('要約', els.summary.innerHTML, getSummaryText());
+  addSection('メモ', els.memo.innerHTML, getMemoText());
+  addSection('文字起こし', els.confirmed.innerHTML, getConfirmedText());
+
+  return title + sections.join('\n');
+}
+
+async function copyAllPlain() {
+  const text = buildCombinedPlain();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    flashButton(els.btnCopyAllPlain);
+  } catch (err) {
+    alert('コピー失敗: ' + err.message);
+  }
+}
+
+async function copyAllMultiformat() {
+  const md = buildCombinedMarkdown();
+  if (!md) return;
+  try {
+    if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+      const html = buildCombinedHtmlForNotion();
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/plain': new Blob([md], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' }),
+      })]);
+    } else {
+      await navigator.clipboard.writeText(md);
+    }
+    flashButton(els.btnCopyAllMd);
+  } catch (err) {
+    console.error('multi-format copy failed, falling back to plain', err);
+    try {
+      await navigator.clipboard.writeText(md);
+      flashButton(els.btnCopyAllMd);
+    } catch (err2) {
+      alert('コピー失敗: ' + err2.message);
+    }
+  }
 }
 
 function saveSessionAsJson() {
@@ -558,25 +626,36 @@ function loadFromJson(file) {
   reader.readAsText(file);
 }
 
-function clearAll() {
-  if (!hasAnyContent()) return;
-  const paneName = state.activePane === 'pane-transcript' ? '文字起こし' : state.activePane === 'pane-memo' ? 'メモ' : '要約';
-  if (!confirm(`このタブの「${paneName}」をクリアしますか？`)) return;
-  if (state.activePane === 'pane-transcript') {
+function clearPane(paneId, { confirmFirst = true } = {}) {
+  const label = paneId === 'pane-transcript' ? '文字起こし' : paneId === 'pane-memo' ? 'メモ' : '要約';
+  const hasContent = paneId === 'pane-transcript' ? !!getConfirmedText()
+    : paneId === 'pane-memo' ? !!getMemoText()
+    : !!getSummaryText();
+  if (!hasContent) return;
+  if (confirmFirst && !confirm(`「${label}」をクリアしますか？`)) return;
+  if (paneId === 'pane-transcript') {
     els.confirmed.innerHTML = '';
     els.interim.textContent = '';
     state.pendingChunkEl = null;
     state.pendingChunkText = '';
     if (els.emptyHint) els.emptyHint.hidden = false;
-  } else if (state.activePane === 'pane-memo') {
+  } else if (paneId === 'pane-memo') {
     els.memo.innerHTML = '';
   } else {
     els.summary.innerHTML = '';
-    els.summaryEmpty.hidden = false;
+    if (els.summaryEmpty) els.summaryEmpty.hidden = false;
   }
   updateActionButtons();
   snapshotActiveToSession();
   persistSessions();
+}
+
+function clearAllPanes() {
+  if (!hasAnyContent()) return;
+  if (!confirm('このセッションの「文字起こし・メモ・要約」をすべてクリアしますか？')) return;
+  clearPane('pane-transcript', { confirmFirst: false });
+  clearPane('pane-memo', { confirmFirst: false });
+  clearPane('pane-summary', { confirmFirst: false });
 }
 
 function toggleAi() {
@@ -916,7 +995,8 @@ function startAutoSave() {
 
 els.btnToggle.addEventListener('click', () => state.isRecording ? stopRecording() : startRecording());
 els.btnAi.addEventListener('click', toggleAi);
-els.btnCopy.addEventListener('click', copyAll);
+els.btnCopyAllPlain.addEventListener('click', copyAllPlain);
+els.btnCopyAllMd.addEventListener('click', copyAllMultiformat);
 els.btnSaveJson.addEventListener('click', saveSessionAsJson);
 els.btnLoadJson.addEventListener('click', () => els.fileLoad.click());
 els.fileLoad.addEventListener('change', (e) => {
@@ -924,10 +1004,16 @@ els.fileLoad.addEventListener('change', (e) => {
   if (f) loadFromJson(f);
   e.target.value = '';
 });
-els.btnExportMd.addEventListener('click', exportMarkdown);
-els.btnClear.addEventListener('click', clearAll);
+els.btnClearAll.addEventListener('click', clearAllPanes);
 els.btnSettings.addEventListener('click', openSettings);
 els.btnRegenSummary.addEventListener('click', () => generateSummary({ silent: false }));
+
+document.querySelectorAll('[data-pane-copy]').forEach(btn => {
+  btn.addEventListener('click', () => copyPane(btn.dataset.paneCopy, btn));
+});
+document.querySelectorAll('[data-pane-clear]').forEach(btn => {
+  btn.addEventListener('click', () => clearPane(btn.dataset.paneClear));
+});
 
 els.innerTabs.forEach(t => {
   t.addEventListener('click', () => switchInnerPane(t.dataset.pane));
@@ -949,7 +1035,7 @@ els.confirmed.addEventListener('input', onEdit);
 els.memo.addEventListener('input', onEdit);
 els.summary.addEventListener('input', onEdit);
 
-els.paneTranscript.addEventListener('scroll', () => {
+els.paneTranscriptBody.addEventListener('scroll', () => {
   state.userScrolledUp = !isPinnedToBottom();
   els.btnScrollBottom.classList.toggle('hidden', !state.userScrolledUp);
 });

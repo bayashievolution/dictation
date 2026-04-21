@@ -25,8 +25,12 @@
       <button id="btn-ai" class="btn btn-ai btn-square active" title="AI整形 ON/OFF">
         <span class="btn-icon">✨</span>
       </button>
-      <button id="btn-copy" class="btn btn-secondary btn-square" disabled title="現在のタブをコピー">
+      <span class="controls-sep"></span>
+      <button id="btn-copy-all-plain" class="btn btn-secondary btn-square" disabled title="全タブをプレーンテキストでコピー">
         <span class="btn-icon">📋</span>
+      </button>
+      <button id="btn-copy-all-md" class="btn btn-secondary btn-square" disabled title="全タブをMarkdown形式でコピー（Notionは3トグルで復元）">
+        <span class="btn-icon">📘</span>
       </button>
       <button id="btn-save-json" class="btn btn-ghost btn-square" title="このセッションをJSON保存">
         <span class="btn-icon">💾</span>
@@ -34,10 +38,7 @@
       <button id="btn-load-json" class="btn btn-ghost btn-square" title="JSONから復元">
         <span class="btn-icon">📂</span>
       </button>
-      <button id="btn-export-md" class="btn btn-ghost btn-square" disabled title="Markdownでエクスポート">
-        <span class="btn-icon">📝</span>
-      </button>
-      <button id="btn-clear" class="btn btn-ghost btn-square" title="このタブをクリア">
+      <button id="btn-clear-all" class="btn btn-ghost btn-square" title="全タブをクリア">
         <span class="btn-icon">🗑</span>
       </button>
       <button id="btn-settings" class="btn btn-ghost btn-square" style="margin-left:auto" title="設定">
@@ -65,11 +66,21 @@
 
     <main id="main-area">
       <div id="pane-transcript" class="pane active">
-        <div id="confirmed" contenteditable="true" spellcheck="false"></div>
-        <div id="interim"></div>
-        <div id="empty-hint" class="empty-hint">
-          ▶ 録音開始を押すと文字起こしが始まります<br />
-          <small>※ 認識中も本文を直接編集できます。新しい認識結果は末尾に追加されます。</small>
+        <div class="pane-header">
+          <button class="pane-btn" data-pane-copy="pane-transcript" title="このタブだけコピー">
+            <span>📋</span><span>コピー</span>
+          </button>
+          <button class="pane-btn" data-pane-clear="pane-transcript" title="このタブだけクリア">
+            <span>🗑</span><span>クリア</span>
+          </button>
+        </div>
+        <div class="pane-body">
+          <div id="confirmed" contenteditable="true" spellcheck="false"></div>
+          <div id="interim"></div>
+          <div id="empty-hint" class="empty-hint">
+            ▶ 録音開始を押すと文字起こしが始まります<br />
+            <small>※ 認識中も本文を直接編集できます。新しい認識結果は末尾に追加されます。</small>
+          </div>
         </div>
         <button id="btn-scroll-bottom" class="scroll-bottom hidden" title="最新へ">
           <span>▼</span>
@@ -77,20 +88,37 @@
       </div>
 
       <div id="pane-memo" class="pane">
-        <div id="memo" contenteditable="true" spellcheck="false" data-placeholder="ここに自由にメモを書けます。録音中もいつでも。"></div>
+        <div class="pane-header">
+          <button class="pane-btn" data-pane-copy="pane-memo" title="このタブだけコピー">
+            <span>📋</span><span>コピー</span>
+          </button>
+          <button class="pane-btn" data-pane-clear="pane-memo" title="このタブだけクリア">
+            <span>🗑</span><span>クリア</span>
+          </button>
+        </div>
+        <div class="pane-body">
+          <div id="memo" contenteditable="true" spellcheck="false" data-placeholder="ここに自由にメモを書けます。録音中もいつでも。"></div>
+        </div>
       </div>
 
       <div id="pane-summary" class="pane">
-        <div class="summary-header">
-          <span class="summary-hint">録音停止時に自動生成 / 手動で再生成も可</span>
-          <button id="btn-regenerate-summary" class="btn btn-ghost btn-sm">
-            <span>✨ 要約を生成</span>
+        <div class="pane-header">
+          <button class="pane-btn" data-pane-copy="pane-summary" title="このタブだけコピー">
+            <span>📋</span><span>コピー</span>
+          </button>
+          <button class="pane-btn" data-pane-clear="pane-summary" title="このタブだけクリア">
+            <span>🗑</span><span>クリア</span>
+          </button>
+          <button id="btn-regenerate-summary" class="pane-btn pane-btn-action" style="margin-left:auto" title="文字起こしから要約を生成">
+            <span>✨</span><span>要約を生成</span>
           </button>
         </div>
-        <div id="summary" contenteditable="true" spellcheck="false"></div>
-        <div id="summary-empty" class="empty-hint">
-          要約はまだ生成されていません。<br />
-          <small>録音停止後に自動生成、または「要約を生成」ボタンで即生成できます。</small>
+        <div class="pane-body">
+          <div id="summary" contenteditable="true" spellcheck="false"></div>
+          <div id="summary-empty" class="empty-hint">
+            要約はまだ生成されていません。<br />
+            <small>録音停止後に自動生成、または「要約を生成」ボタンで即生成できます。</small>
+          </div>
         </div>
       </div>
     </main>
@@ -165,7 +193,7 @@
     </div>
   </div>
 
-  <script src="gemini.js?v=0.4.3"></script>
-  <script src="app.js?v=0.4.3"></script>
+  <script src="gemini.js?v=0.4.4"></script>
+  <script src="app.js?v=0.4.4"></script>
 </body>
 </html>
