@@ -1,5 +1,7 @@
 @echo off
 REM dictation 起動用ランチャー
-REM UNC パス（\\wsl.localhost\...）対策のため、electron へパスを明示的に渡す
+REM ローカルHTTPサーバー経由で Chrome に表示（マイク許可を永続化するため）
 
-electron \\wsl.localhost\Ubuntu\home\bayashi\dictation
+cd /d "%TEMP%"
+node "\\wsl.localhost\Ubuntu\home\bayashi\dictation\serve.js"
+pause

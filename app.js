@@ -117,6 +117,7 @@ function applyAiButtonState() {
 function setStatus(mode, label) {
   els.status.className = `status ${mode}`;
   els.status.textContent = label;
+  els.status.title = label;
 }
 
 function setRecordingUI(isRec) {
@@ -280,11 +281,12 @@ async function flushPendingToGemini() {
     console.error('Gemini refinement failed:', e);
     targetEl.className = 'paragraph';
     setParagraphContent(targetEl, rawText);
-    setStatus('error', 'AI整形失敗');
+    const msg = (e && e.message) ? e.message : String(e);
+    setStatus('error', 'AI整形失敗: ' + msg.slice(0, 80));
     setTimeout(() => {
       if (state.isRecording) setStatus('listening', '録音中');
       else setStatus('idle', '停止');
-    }, 3000);
+    }, 6000);
   } finally {
     autoScroll();
   }
