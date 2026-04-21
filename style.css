@@ -1798,7 +1798,8 @@ html, body {
   position: fixed;
   bottom: 18px;
   right: 12px;
-  transition: bottom 0.2s var(--ease-out), opacity 0.2s var(--ease-out);
+  /* bottom は瞬時に（フェード中に切替えるので見えない）、opacity はフェード */
+  transition: opacity 0.2s var(--ease-out);
   z-index: 50;
   display: flex;
   align-items: center;
@@ -1821,6 +1822,11 @@ html, body {
 /* チャットタブ時は入力欄と被らないよう zoom-bar を上に持ち上げる */
 body.chat-active #zoom-bar {
   bottom: 76px;
+}
+
+/* ペイン切替中のフェード */
+#zoom-bar.fading {
+  opacity: 0;
 }
 
 #zoom-bar input[type="range"] {

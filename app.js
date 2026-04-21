@@ -2206,7 +2206,21 @@ function saveSettingsFromForm() {
 
 function switchInnerPane(paneId) {
   if (state.activePane === paneId) return;
-  document.body.classList.toggle('chat-active', paneId === 'pane-chat');
+  // zoom-bar をフェードしながら位置切替（チャット入力欄との重なり回避）
+  const wasChat = document.body.classList.contains('chat-active');
+  const willBeChat = paneId === 'pane-chat';
+  if (wasChat !== willBeChat) {
+    const zb = els.zoomBar;
+    if (zb) {
+      zb.classList.add('fading');
+      setTimeout(() => {
+        document.body.classList.toggle('chat-active', willBeChat);
+        zb.classList.remove('fading');
+      }, 180);
+    } else {
+      document.body.classList.toggle('chat-active', willBeChat);
+    }
+  }
 
   // 方向判定（zemicale パターン）: 並びの右へ移動 → 新ペインは右から入る、左へ → 左から入る
   const order = state.settings.paneOrder || [];
