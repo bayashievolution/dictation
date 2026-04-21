@@ -173,6 +173,7 @@ const els = {
   btnEditTitle: document.getElementById('btn-edit-title'),
   btnRegenTitle: document.getElementById('btn-regen-title'),
   btnRegenSummary: document.getElementById('btn-regenerate-summary'),
+  btnAutoSummary: document.getElementById('btn-auto-summary'),
   btnRefineTranscript: document.getElementById('btn-refine-transcript'),
   emptyHint: document.getElementById('empty-hint'),
   settingsModal: document.getElementById('settings-modal'),
@@ -237,6 +238,11 @@ function applyAiButtonState() {
     els.btnRefineTranscript.classList.toggle('on', on);
     els.btnRefineTranscript.setAttribute('aria-pressed', on ? 'true' : 'false');
     els.btnRefineTranscript.classList.toggle('needs-key', on && !state.settings.apiKey);
+  }
+  if (els.btnAutoSummary) {
+    const on = !!state.settings.autoSummarize;
+    els.btnAutoSummary.classList.toggle('on', on);
+    els.btnAutoSummary.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
 }
 
@@ -2380,6 +2386,14 @@ els.fileLoad.addEventListener('change', (e) => {
 els.btnClearAll.addEventListener('click', clearAllPanes);
 els.btnSettings.addEventListener('click', openSettings);
 els.btnRegenSummary.addEventListener('click', () => generateSummary({ silent: false }));
+
+if (els.btnAutoSummary) {
+  els.btnAutoSummary.addEventListener('click', () => {
+    state.settings.autoSummarize = !state.settings.autoSummarize;
+    saveSettings();
+    applyAiButtonState();
+  });
+}
 
 document.querySelectorAll('[data-pane-copy]').forEach(btn => {
   btn.addEventListener('click', () => copyPane(btn.dataset.paneCopy, btn));

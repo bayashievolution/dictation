@@ -732,6 +732,29 @@ html, body {
   height: 13px;
 }
 
+/* コンパクト版トグル（ボタンと並べる用） */
+.toggle-switch.toggle-compact {
+  padding: 3px 8px 3px 6px;
+  gap: 6px;
+  font-size: 11px;
+}
+.toggle-switch.toggle-compact .toggle-track {
+  width: 22px;
+  height: 12px;
+}
+.toggle-switch.toggle-compact .toggle-knob {
+  width: 8px;
+  height: 8px;
+  top: 2px;
+  left: 2px;
+}
+.toggle-switch.toggle-compact.on .toggle-knob {
+  left: 12px;
+}
+.toggle-switch.toggle-compact .toggle-label {
+  font-size: 11px;
+}
+
 /* ───────── Per-pane font controls (Word風) ───────── */
 .pane-font-controls {
   display: inline-flex;
