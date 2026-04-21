@@ -181,7 +181,7 @@ const els = {
   btnEditTitle: document.getElementById('btn-edit-title'),
   btnRegenTitle: document.getElementById('btn-regen-title'),
   btnCopyTitle: document.getElementById('btn-copy-title'),
-  summaryDetailSwitch: document.getElementById('summary-detail-switch'),
+  summaryDetailSelect: document.getElementById('summary-detail-select'),
   btnSummaryCombo: document.getElementById('btn-summary-combo'),
   btnRefineTranscript: document.getElementById('btn-refine-transcript'),
   emptyHint: document.getElementById('empty-hint'),
@@ -3222,21 +3222,16 @@ if (els.btnCopyTitle) {
   });
 }
 
-// 要約のシンプルさ ピル型スイッチ
+// 要約の詳しさ ドロップダウン（詳細/バランス/概要）
 function applySummaryDetailSwitch() {
-  if (!els.summaryDetailSwitch) return;
+  if (!els.summaryDetailSelect) return;
   const detail = state.settings.summaryDetail || 'medium';
-  els.summaryDetailSwitch.querySelectorAll('button').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.detail === detail);
-  });
+  els.summaryDetailSelect.value = detail;
 }
-if (els.summaryDetailSwitch) {
-  els.summaryDetailSwitch.querySelectorAll('button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.settings.summaryDetail = btn.dataset.detail;
-      saveSettings();
-      applySummaryDetailSwitch();
-    });
+if (els.summaryDetailSelect) {
+  els.summaryDetailSelect.addEventListener('change', () => {
+    state.settings.summaryDetail = els.summaryDetailSelect.value;
+    saveSettings();
   });
 }
 
