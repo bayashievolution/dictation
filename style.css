@@ -932,6 +932,8 @@ html, body {
   min-width: 0;
 }
 
+/* .pane-select : ペインヘッダ用セレクトの共通ベース（サイズは個別指定） */
+.pane-select,
 .pane-font-select {
   height: 26px;
   padding: 0 6px;
@@ -941,20 +943,31 @@ html, body {
   border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 12px;
-  min-width: 150px;
-  max-width: 260px;
-  flex: 0 1 220px;
   cursor: pointer;
   outline: none;
   transition: border-color 0.12s;
 }
 
+/* フォント選択だけは長いフォント名に合わせて可変幅 */
+.pane-font-select {
+  min-width: 150px;
+  max-width: 260px;
+  flex: 0 1 220px;
+}
+
+.pane-select:hover,
 .pane-font-select:hover {
   border-color: #4a4a54;
 }
 
+.pane-select:focus,
 .pane-font-select:focus {
   border-color: var(--accent);
+}
+
+/* 要約詳しさは「バランス」＋矢印が収まるちょうどの幅 */
+#summary-detail-select {
+  width: 92px;
 }
 
 /* ───────── Number stepper (汎用 テーマ統一スピナー) ───────── */
@@ -1071,6 +1084,9 @@ html, body {
   transition: opacity 0.25s var(--ease-out), transform 0.25s var(--ease-out), margin 0.25s var(--ease-out), max-height 0.3s var(--ease-out);
   max-height: 400px;
   overflow: hidden;
+  /* 右端はヘルプアイコンの下くらい、左揃え（block×fit-contentで自然に左寄せ） */
+  width: fit-content;
+  max-width: 100%;
 }
 .memo-cheatsheet.hidden {
   opacity: 0;
