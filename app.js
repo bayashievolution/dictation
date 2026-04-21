@@ -2548,10 +2548,10 @@ function updateActiveTabIndicator() {
     bar.classList.remove('visible');
     return;
   }
-  const listRect = els.tabsList.getBoundingClientRect();
-  const tabRect = activeTab.getBoundingClientRect();
-  const x = tabRect.left - listRect.left;
-  const w = tabRect.width;
+  // offsetParent = #tabs-list（position:relative）からの整数pxで取る
+  // → getBoundingClientRect のサブピクセルズレを回避
+  const x = activeTab.offsetLeft;
+  const w = activeTab.offsetWidth;
 
   const firstShow = !bar.classList.contains('visible');
   if (firstShow) {
