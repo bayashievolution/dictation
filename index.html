@@ -104,6 +104,17 @@
           <input id="input-opacity" type="range" min="30" max="100" step="5" />
           <small class="field-hint">👻ボタンで半透明にしたときの濃さ。30%〜100%</small>
         </label>
+        <div class="field">
+          <span class="field-label">✕ボタンを押したとき</span>
+          <label class="field-row" style="margin-bottom:4px">
+            <input type="radio" name="close-behavior" id="close-quit" value="quit" />
+            <span>アプリを終了する</span>
+          </label>
+          <label class="field-row" style="margin-bottom:0">
+            <input type="radio" name="close-behavior" id="close-tray" value="tray" />
+            <span>タスクトレイに格納する（録音継続）</span>
+          </label>
+        </div>
       </div>
       <div class="modal-footer">
         <button id="btn-settings-save" class="btn btn-primary">保存</button>

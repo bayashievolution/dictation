@@ -19,6 +19,7 @@ const DEFAULT_SETTINGS = {
   autoStopSec: 120,
   autoStopEnabled: true,
   opacity: 0.75,
+  closeBehavior: 'quit',
 };
 
 const AUTOSAVE_INTERVAL_MS = 15000;
@@ -74,6 +75,8 @@ const els = {
   inputAutoStopSec: document.getElementById('input-auto-stop-sec'),
   inputOpacity: document.getElementById('input-opacity'),
   opacityValue: document.getElementById('opacity-value'),
+  closeQuit: document.getElementById('close-quit'),
+  closeTray: document.getElementById('close-tray'),
   tabsList: document.getElementById('tabs-list'),
   btnTabNew: document.getElementById('btn-tab-new'),
 };
@@ -490,6 +493,8 @@ function openSettings() {
   const opacityPct = Math.round((state.settings.opacity ?? 0.75) * 100);
   els.inputOpacity.value = opacityPct;
   if (els.opacityValue) els.opacityValue.textContent = `${opacityPct}%`;
+  if (state.settings.closeBehavior === 'tray') els.closeTray.checked = true;
+  else els.closeQuit.checked = true;
   els.settingsModal.classList.remove('hidden');
   setTimeout(() => els.inputApiKey.focus(), 80);
 }
@@ -506,6 +511,7 @@ function saveSettingsFromForm() {
   state.settings.autoStopSec = Math.max(30, Math.min(600, Number(els.inputAutoStopSec.value) || 120));
   const pct = Math.max(30, Math.min(100, Number(els.inputOpacity.value) || 75));
   state.settings.opacity = pct / 100;
+  state.settings.closeBehavior = els.closeTray.checked ? 'tray' : 'quit';
   saveSettings();
   applyAiButtonState();
   if (window.electronAPI) window.electronAPI.setOpacity(state.settings.opacity);
@@ -789,7 +795,11 @@ if (window.electronAPI) {
   els.btnClose.addEventListener('click', () => {
     snapshotActiveToSession();
     persistSessions();
-    window.electronAPI.close();
+    if (state.settings.closeBehavior === 'tray') {
+      window.electronAPI.hideToTray();
+    } else {
+      window.electronAPI.close();
+    }
   });
   window.electronAPI.getState().then(applyWindowState);
   window.electronAPI.onWindowState(applyWindowState);
