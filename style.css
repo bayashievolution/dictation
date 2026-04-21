@@ -1212,12 +1212,20 @@ html, body {
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  font-family: var(--chat-font);
-  font-size: var(--chat-size);
+  /* 入力欄はフォントサイズ設定の影響を受けない（固定13px） */
+  font-family: 'Noto Sans JP', -apple-system, sans-serif;
+  font-size: 13px;
   line-height: 1.5;
   resize: none;
   outline: none;
   transition: border-color 0.15s;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+#chat-input::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #chat-input:focus {
