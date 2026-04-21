@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.6.2" />
+  <link rel="stylesheet" href="style.css?v=0.6.3" />
 </head>
 <body>
   <div id="app">
@@ -25,9 +25,6 @@
       <button id="btn-toggle" class="btn btn-primary btn-square" title="録音開始（クリックで開始/停止）">
         <span class="btn-icon" data-icon="play" data-icon-size="18"></span>
       </button>
-      <button id="btn-ai" class="btn btn-ai btn-square active" title="AI整形 ON/OFF">
-        <span class="btn-icon" data-icon="sparkles"></span>
-      </button>
       <span class="controls-sep"></span>
       <button id="btn-copy-all-plain" class="btn btn-secondary btn-square" disabled title="全タブをプレーンテキストでコピー">
         <span class="btn-icon" data-icon="copy"></span>
@@ -44,7 +41,7 @@
       <button id="btn-clear-all" class="btn btn-ghost btn-square" title="全タブをクリア">
         <span class="btn-icon" data-icon="trash"></span>
       </button>
-      <button id="btn-settings" class="btn btn-ghost btn-square" style="margin-left:auto" title="設定">
+      <button id="btn-settings" class="btn btn-ghost btn-square" title="設定">
         <span class="btn-icon" data-icon="settings"></span>
       </button>
       <input type="file" id="file-load" accept=".html,.htm,.json" style="display:none" />
@@ -76,8 +73,9 @@
     <main id="main-area">
       <div id="pane-transcript" class="pane active">
         <div class="pane-header">
-          <button id="btn-refine-transcript" class="pane-btn pane-btn-action" title="今の文字起こしを一括整形（ペーストした素のテキストもまとめて整形）">
-            <span data-icon="sparkles"></span><span>文字起こしを整形</span>
+          <button id="btn-refine-transcript" class="toggle-switch" title="ONで録音中/ペースト時に自動整形。OFFなら生のまま。ONにした瞬間も現在の生テキストを整形">
+            <span class="toggle-track"><span class="toggle-knob"></span></span>
+            <span class="toggle-label"><span data-icon="sparkles"></span>文字起こし整形</span>
           </button>
           <button class="pane-btn" data-pane-copy="pane-transcript" title="このタブだけコピー">
             <span data-icon="copy"></span><span>コピー</span>
@@ -115,14 +113,14 @@
 
       <div id="pane-summary" class="pane">
         <div class="pane-header">
+          <button id="btn-regenerate-summary" class="pane-btn pane-btn-action" title="文字起こしから要約を生成">
+            <span data-icon="sparkles"></span><span>要約を生成</span>
+          </button>
           <button class="pane-btn" data-pane-copy="pane-summary" title="このタブだけコピー">
             <span data-icon="copy"></span><span>コピー</span>
           </button>
           <button class="pane-btn" data-pane-clear="pane-summary" title="このタブだけクリア">
             <span data-icon="trash"></span><span>クリア</span>
-          </button>
-          <button id="btn-regenerate-summary" class="pane-btn pane-btn-action" style="margin-left:auto" title="文字起こしから要約を生成">
-            <span data-icon="sparkles"></span><span>要約を生成</span>
           </button>
         </div>
         <div class="pane-body">
@@ -274,8 +272,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.6.2"></script>
-  <script src="gemini.js?v=0.6.2"></script>
-  <script src="app.js?v=0.6.2"></script>
+  <script src="icons.js?v=0.6.3"></script>
+  <script src="gemini.js?v=0.6.3"></script>
+  <script src="app.js?v=0.6.3"></script>
 </body>
 </html>

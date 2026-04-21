@@ -619,6 +619,81 @@ html, body {
   animation: spin 1.2s linear infinite;
 }
 
+/* ───────── Toggle switch (pane header) ───────── */
+.toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s var(--ease-snap);
+  user-select: none;
+}
+
+.toggle-switch:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.toggle-switch .toggle-track {
+  width: 28px;
+  height: 16px;
+  background: var(--border);
+  border-radius: 999px;
+  position: relative;
+  display: inline-block;
+  transition: background 0.2s var(--ease-out);
+  flex-shrink: 0;
+}
+
+.toggle-switch .toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: all 0.2s var(--ease-snap);
+}
+
+.toggle-switch.on {
+  background: #a78bfa1f;
+  color: #c4b5fd;
+  border-color: #a78bfa66;
+}
+
+.toggle-switch.on .toggle-track {
+  background: #a78bfa;
+}
+
+.toggle-switch.on .toggle-knob {
+  left: 14px;
+  background: #fff;
+}
+
+.toggle-switch:active .toggle-knob {
+  width: 14px;
+}
+
+.toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.toggle-label [data-icon] svg {
+  width: 13px;
+  height: 13px;
+}
+
 .controls-sep {
   width: 1px;
   height: 22px;

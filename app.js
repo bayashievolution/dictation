@@ -124,7 +124,6 @@ const state = {
 
 const els = {
   btnToggle: document.getElementById('btn-toggle'),
-  btnAi: document.getElementById('btn-ai'),
   btnCopyAllPlain: document.getElementById('btn-copy-all-plain'),
   btnCopyAllMd: document.getElementById('btn-copy-all-md'),
   btnSaveJson: document.getElementById('btn-save-json'),
@@ -211,7 +210,11 @@ function saveSettings() {
 }
 
 function applyAiButtonState() {
-  els.btnAi.classList.toggle('active', state.settings.aiEnabled && !!state.settings.apiKey);
+  if (els.btnRefineTranscript) {
+    const on = state.settings.aiEnabled && !!state.settings.apiKey;
+    els.btnRefineTranscript.classList.toggle('on', on);
+    els.btnRefineTranscript.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
 }
 
 /* ───────── UI helpers ───────── */
@@ -443,11 +446,6 @@ async function refineUnstructuredInTranscript({ force = false, showFeedback = tr
   updateActionButtons();
   autoScroll();
 
-  if (els.btnRefineTranscript) {
-    els.btnRefineTranscript.classList.add('spinning');
-    els.btnRefineTranscript.disabled = true;
-  }
-
   try {
     const refined = await refineWithGemini({
       apiKey: state.settings.apiKey,
@@ -468,10 +466,6 @@ async function refineUnstructuredInTranscript({ force = false, showFeedback = tr
       else setStatus('idle', '停止');
     }, 4000);
   } finally {
-    if (els.btnRefineTranscript) {
-      els.btnRefineTranscript.classList.remove('spinning');
-      els.btnRefineTranscript.disabled = false;
-    }
     updateActionButtons();
     autoScroll();
   }
@@ -1141,6 +1135,10 @@ function toggleAi() {
   state.settings.aiEnabled = !state.settings.aiEnabled;
   saveSettings();
   applyAiButtonState();
+  // ONにした瞬間、ペインの生テキストがあれば即整形
+  if (state.settings.aiEnabled) {
+    refineUnstructuredInTranscript({ showFeedback: false });
+  }
 }
 
 /* ───────── Display settings / pane order / inner tabs ───────── */
@@ -1829,7 +1827,6 @@ function startAutoSave() {
 /* ───────── Event wiring ───────── */
 
 els.btnToggle.addEventListener('click', () => state.isRecording ? stopRecording() : startRecording());
-els.btnAi.addEventListener('click', toggleAi);
 els.btnCopyAllPlain.addEventListener('click', copyAllPlain);
 els.btnCopyAllMd.addEventListener('click', copyAllMultiformat);
 els.btnSaveJson.addEventListener('click', saveSessionAsHtml);
@@ -1889,11 +1886,9 @@ els.confirmed.addEventListener('paste', () => {
   setTimeout(() => { refineUnstructuredInTranscript({ showFeedback: false }); }, 150);
 });
 
-// 文字起こし整形ボタン
+// 文字起こし整形トグル（aiEnabled のON/OFF、ONにした瞬間に生テキストも整形）
 if (els.btnRefineTranscript) {
-  els.btnRefineTranscript.addEventListener('click', () => {
-    refineUnstructuredInTranscript({ force: true, showFeedback: true });
-  });
+  els.btnRefineTranscript.addEventListener('click', toggleAi);
 }
 
 els.paneTranscriptBody.addEventListener('scroll', () => {
