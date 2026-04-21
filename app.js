@@ -33,6 +33,15 @@ const DEFAULT_SETTINGS = {
   memoSize: 15,
   summaryFont: 'sans',
   summarySize: 15,
+  chatFont: 'sans',
+  chatSize: 14,
+};
+
+const PANE_FONT_KEYS = {
+  'pane-transcript': { font: 'transcriptFont', size: 'transcriptSize' },
+  'pane-memo':       { font: 'memoFont',       size: 'memoSize' },
+  'pane-summary':    { font: 'summaryFont',    size: 'summarySize' },
+  'pane-chat':       { font: 'chatFont',       size: 'chatSize' },
 };
 
 const PANE_META = {
@@ -1153,7 +1162,67 @@ function applyDisplaySettings() {
   root.style.setProperty('--memo-size', (s.memoSize || 15) + 'px');
   root.style.setProperty('--summary-font', FONT_FAMILIES[s.summaryFont] || FONT_FAMILIES.sans);
   root.style.setProperty('--summary-size', (s.summarySize || 15) + 'px');
+  root.style.setProperty('--chat-font', FONT_FAMILIES[s.chatFont] || FONT_FAMILIES.sans);
+  root.style.setProperty('--chat-size', (s.chatSize || 14) + 'px');
   applyAppZoom(s.appZoom || 100);
+  syncPaneFontControls();
+}
+
+function syncPaneFontControls() {
+  document.querySelectorAll('.pane-font-select').forEach(sel => {
+    const paneId = sel.dataset.paneFont;
+    const keys = PANE_FONT_KEYS[paneId];
+    if (!keys) return;
+    sel.value = state.settings[keys.font];
+  });
+  document.querySelectorAll('.pane-size-input').forEach(inp => {
+    const paneId = inp.dataset.paneSize;
+    const keys = PANE_FONT_KEYS[paneId];
+    if (!keys) return;
+    inp.value = state.settings[keys.size];
+  });
+}
+
+function populatePaneFontSelects() {
+  document.querySelectorAll('.pane-font-select').forEach(select => {
+    select.innerHTML = '';
+    for (const group of FONT_OPTIONS) {
+      const og = document.createElement('optgroup');
+      og.label = group.group;
+      for (const item of group.items) {
+        const o = document.createElement('option');
+        o.value = item.value;
+        o.textContent = item.label;
+        og.appendChild(o);
+      }
+      select.appendChild(og);
+    }
+  });
+}
+
+function wirePaneFontControls() {
+  document.querySelectorAll('.pane-font-select').forEach(select => {
+    select.addEventListener('change', () => {
+      const paneId = select.dataset.paneFont;
+      const keys = PANE_FONT_KEYS[paneId];
+      if (!keys) return;
+      state.settings[keys.font] = select.value;
+      saveSettings();
+      applyDisplaySettings();
+    });
+  });
+  document.querySelectorAll('.pane-size-input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const paneId = inp.dataset.paneSize;
+      const keys = PANE_FONT_KEYS[paneId];
+      if (!keys) return;
+      const v = Math.max(10, Math.min(36, Number(inp.value) || 15));
+      state.settings[keys.size] = v;
+      inp.value = v;
+      saveSettings();
+      applyDisplaySettings();
+    });
+  });
 }
 
 function applyAppZoom(v) {
@@ -2167,6 +2236,8 @@ if (!SpeechRecognition) {
 
 loadSettings();
 populateFontSelects();
+populatePaneFontSelects();
+wirePaneFontControls();
 applyDisplaySettings();
 applyPaneOrder();
 renderInnerTabs();

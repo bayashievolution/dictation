@@ -26,6 +26,8 @@
   --memo-size: 15px;
   --summary-font: var(--font-sans);
   --summary-size: 15px;
+  --chat-font: var(--font-sans);
+  --chat-size: 14px;
 }
 
 * {
@@ -759,6 +761,64 @@ html, body {
   height: 13px;
 }
 
+/* ───────── Per-pane font controls (Word風) ───────── */
+.pane-font-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.pane-font-select {
+  padding: 3px 6px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 12px;
+  max-width: 150px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+.pane-font-select:hover {
+  border-color: #4a4a54;
+}
+
+.pane-font-select:focus {
+  border-color: var(--accent);
+}
+
+.pane-size-input {
+  width: 52px;
+  padding: 3px 4px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+.pane-size-input:focus {
+  border-color: var(--accent);
+}
+
+/* Chrome の number スピナーを少し調整（ダーク背景に溶け込ませる） */
+.pane-size-input::-webkit-inner-spin-button,
+.pane-size-input::-webkit-outer-spin-button {
+  opacity: 0.5;
+}
+.pane-size-input:hover::-webkit-inner-spin-button {
+  opacity: 1;
+}
+
 .controls-sep {
   width: 1px;
   height: 22px;
@@ -867,7 +927,8 @@ html, body {
   max-width: 86%;
   padding: 10px 14px;
   border-radius: 12px;
-  font-size: 14px;
+  font-family: var(--chat-font);
+  font-size: var(--chat-size);
   line-height: 1.7;
   word-break: break-word;
   animation: fadeInUp 0.25s var(--ease-out);
@@ -969,8 +1030,8 @@ html, body {
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  font-family: inherit;
-  font-size: 14px;
+  font-family: var(--chat-font);
+  font-size: var(--chat-size);
   line-height: 1.5;
   resize: none;
   outline: none;
