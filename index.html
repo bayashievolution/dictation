@@ -34,13 +34,17 @@
     </section>
 
     <main id="transcript">
-      <div id="confirmed"></div>
+      <div id="confirmed" contenteditable="true" spellcheck="false"></div>
       <div id="interim"></div>
       <div id="empty-hint" class="empty-hint">
         ▶ 録音開始を押すと文字起こしが始まります<br />
-        <small>※ Chromeで開いてください。初回はマイク許可を求められます。</small>
+        <small>※ 認識中も本文を直接編集できます。新しい認識結果は末尾に追加されます。</small>
       </div>
     </main>
+
+    <button id="btn-scroll-bottom" class="scroll-bottom hidden" title="最新へ">
+      <span>▼</span>
+    </button>
 
     <footer id="footer">
       <small id="session-info">Step 1 / Web Speech API 動作確認版</small>

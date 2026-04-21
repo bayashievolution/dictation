@@ -1,7 +1,7 @@
 /**
- * dictation — Step1 Web Speech API 動作確認版
- * v0.1 生の文字起こしを画面に表示する最小実装
- * 【修正履歴】v0.1 初期実装
+ * dictation — Step1.5 編集可能＋末尾append
+ * v0.2 contenteditable化、ユーザーが編集しても認識結果は常に末尾へ追加
+ * 【修正履歴】v0.1 初期実装, v0.2 編集可能化・スクロール制御・末尾append保証
  */
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -9,14 +9,15 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 const state = {
   recognition: null,
   isRecording: false,
-  confirmedText: '',
   shouldAutoRestart: false,
+  userScrolledUp: false,
 };
 
 const els = {
   btnToggle: document.getElementById('btn-toggle'),
   btnCopy: document.getElementById('btn-copy'),
   btnClear: document.getElementById('btn-clear'),
+  btnScrollBottom: document.getElementById('btn-scroll-bottom'),
   status: document.getElementById('status-indicator'),
   confirmed: document.getElementById('confirmed'),
   interim: document.getElementById('interim'),
@@ -41,8 +42,23 @@ function hideEmptyHint() {
   }
 }
 
-function autoScroll() {
-  els.transcript.scrollTop = els.transcript.scrollHeight;
+function isPinnedToBottom() {
+  const t = els.transcript;
+  return t.scrollTop + t.clientHeight >= t.scrollHeight - 40;
+}
+
+function autoScroll(force = false) {
+  if (force || !state.userScrolledUp) {
+    els.transcript.scrollTop = els.transcript.scrollHeight;
+  }
+}
+
+function getConfirmedText() {
+  return els.confirmed.innerText.replace(/\u00A0/g, ' ').trim();
+}
+
+function updateCopyButtonState() {
+  els.btnCopy.disabled = getConfirmedText().length === 0;
 }
 
 function appendConfirmed(text) {
@@ -52,8 +68,7 @@ function appendConfirmed(text) {
   p.className = 'paragraph';
   p.textContent = text;
   els.confirmed.appendChild(p);
-  state.confirmedText += (state.confirmedText ? '\n\n' : '') + text;
-  els.btnCopy.disabled = false;
+  updateCopyButtonState();
   autoScroll();
 }
 
@@ -73,9 +88,7 @@ function buildRecognition() {
   rec.continuous = true;
   rec.interimResults = true;
 
-  rec.onstart = () => {
-    setStatus('listening', '録音中');
-  };
+  rec.onstart = () => setStatus('listening', '録音中');
 
   rec.onresult = (event) => {
     let interim = '';
@@ -93,9 +106,7 @@ function buildRecognition() {
 
   rec.onerror = (event) => {
     console.error('SpeechRecognition error:', event.error, event);
-    if (event.error === 'no-speech') {
-      return;
-    }
+    if (event.error === 'no-speech') return;
     if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
       setStatus('error', 'マイク拒否');
       state.shouldAutoRestart = false;
@@ -111,7 +122,6 @@ function buildRecognition() {
       try {
         rec.start();
       } catch (e) {
-        console.warn('restart failed, retrying in 300ms', e);
         setTimeout(() => {
           if (state.isRecording) {
             try { rec.start(); } catch (err) { console.error(err); }
@@ -147,11 +157,7 @@ function stopRecording() {
   state.isRecording = false;
   state.shouldAutoRestart = false;
   if (state.recognition) {
-    try {
-      state.recognition.stop();
-    } catch (e) {
-      console.warn('stop failed', e);
-    }
+    try { state.recognition.stop(); } catch (e) { /* ignore */ }
   }
   setStatus('idle', '停止');
   setRecordingUI(false);
@@ -159,13 +165,13 @@ function stopRecording() {
 }
 
 function copyAll() {
-  if (!state.confirmedText) return;
-  navigator.clipboard.writeText(state.confirmedText).then(() => {
-    const origLabel = els.btnCopy.querySelector('.btn-label').textContent;
-    els.btnCopy.querySelector('.btn-label').textContent = 'コピーしました';
-    setTimeout(() => {
-      els.btnCopy.querySelector('.btn-label').textContent = origLabel;
-    }, 1500);
+  const text = getConfirmedText();
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    const label = els.btnCopy.querySelector('.btn-label');
+    const orig = label.textContent;
+    label.textContent = 'コピーしました';
+    setTimeout(() => { label.textContent = orig; }, 1500);
   }).catch(err => {
     console.error('copy failed', err);
     alert('コピーに失敗しました: ' + err.message);
@@ -173,12 +179,11 @@ function copyAll() {
 }
 
 function clearAll() {
-  if (!state.confirmedText && !els.interim.textContent) return;
+  if (!getConfirmedText() && !els.interim.textContent) return;
   if (!confirm('書き起こしをすべてクリアしますか？')) return;
-  state.confirmedText = '';
   els.confirmed.innerHTML = '';
   els.interim.textContent = '';
-  els.btnCopy.disabled = true;
+  updateCopyButtonState();
   if (els.emptyHint) els.emptyHint.hidden = false;
 }
 
@@ -189,6 +194,19 @@ els.btnToggle.addEventListener('click', () => {
 
 els.btnCopy.addEventListener('click', copyAll);
 els.btnClear.addEventListener('click', clearAll);
+
+els.confirmed.addEventListener('input', updateCopyButtonState);
+
+els.transcript.addEventListener('scroll', () => {
+  state.userScrolledUp = !isPinnedToBottom();
+  els.btnScrollBottom.classList.toggle('hidden', !state.userScrolledUp);
+});
+
+els.btnScrollBottom.addEventListener('click', () => {
+  state.userScrolledUp = false;
+  autoScroll(true);
+  els.btnScrollBottom.classList.add('hidden');
+});
 
 if (!SpeechRecognition) {
   setStatus('error', '未対応ブラウザ');
