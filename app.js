@@ -2640,9 +2640,40 @@ els.summary.addEventListener('input', onEdit);
 function memoGetCurrentBlock() {
   const sel = window.getSelection();
   if (!sel.rangeCount) return null;
-  let node = sel.getRangeAt(0).startContainer;
+  const range = sel.getRangeAt(0);
+  let node = range.startContainer;
+
+  // ケースA: テキストノードが memo 直下 → 自動で div で包んでブロックを作る
+  if (node.nodeType === Node.TEXT_NODE && node.parentNode === els.memo) {
+    const textNode = node;
+    const offset = range.startOffset;
+    const div = document.createElement('div');
+    els.memo.insertBefore(div, textNode);
+    div.appendChild(textNode);
+    // カーソル位置を保持
+    const r = document.createRange();
+    r.setStart(textNode, offset);
+    r.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    return div;
+  }
+
+  // ケースB: memo 自体の直下にカーソル（空の時など）
+  if (node === els.memo) {
+    let child = range.startContainer.childNodes[range.startOffset - 1] ||
+                range.startContainer.childNodes[range.startOffset];
+    if (child && child.nodeType === Node.ELEMENT_NODE) return child;
+    // ない場合は div を作る
+    const div = document.createElement('div');
+    div.innerHTML = '<br>';
+    els.memo.appendChild(div);
+    memoPlaceCaretAtEnd(div);
+    return div;
+  }
+
+  // 通常ケース: 直下の element まで遡る
   if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
-  // 直下の子になるまで遡る
   while (node && node !== els.memo && node.parentNode !== els.memo) {
     node = node.parentNode;
   }
@@ -2736,8 +2767,8 @@ els.memo.addEventListener('input', (e) => {
   // # 見出し
   let m = text.match(/^(#{1,3})\s(.*)$/);
   if (m) { memoTransformBlock(block, `h${m[1].length}`, m[2]); return; }
-  // - or * 箇条書き
-  m = text.match(/^[-*]\s(.*)$/);
+  // - or * or ・ 箇条書き
+  m = text.match(/^[-*・]\s?(.*)$/);
   if (m) { memoTransformToListItem(block, 'ul', m[1]); return; }
   // 1. 番号リスト
   m = text.match(/^\d+\.\s(.*)$/);
@@ -2757,13 +2788,13 @@ els.memo.addEventListener('input', (e) => {
 });
 
 els.memo.addEventListener('keydown', (e) => {
-  // Tab / Shift+Tab: リストのネスト増減
+  // Tab / Shift+Tab
   if (e.key === 'Tab') {
     const li = memoFindAncestor('LI');
     if (li) {
       e.preventDefault();
       if (e.shiftKey) {
-        // outdent
+        // outdent (li)
         const parentList = li.parentNode;
         const grandParent = parentList.parentNode;
         if (grandParent && grandParent.tagName === 'LI') {
@@ -2772,7 +2803,7 @@ els.memo.addEventListener('keydown', (e) => {
           memoPlaceCaretAtEnd(li);
         }
       } else {
-        // indent
+        // indent (li)
         const prev = li.previousElementSibling;
         if (prev && prev.tagName === 'LI') {
           const parentList = li.parentNode;
@@ -2785,6 +2816,16 @@ els.memo.addEventListener('keydown', (e) => {
           nested.appendChild(li);
           memoPlaceCaretAtEnd(li);
         }
+      }
+    } else {
+      // リスト外: インデントレベル（CSS padding-left）を増減
+      const block = memoGetCurrentBlock();
+      if (block) {
+        e.preventDefault();
+        const INDENT_PX = 24;
+        const cur = parseInt(block.style.paddingLeft, 10) || 0;
+        const next = e.shiftKey ? Math.max(0, cur - INDENT_PX) : Math.min(INDENT_PX * 8, cur + INDENT_PX);
+        block.style.paddingLeft = next ? next + 'px' : '';
       }
     }
     return;
