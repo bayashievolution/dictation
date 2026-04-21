@@ -2627,6 +2627,34 @@ const ONBOARDING_STEPS = [
 ];
 
 let onboardingIdx = 0;
+let onboardingLiftedTarget = null;
+let onboardingLiftedPrev = null;
+
+function onboardingLiftTarget(target) {
+  onboardingUnliftTarget();
+  if (!target) return;
+  const computed = getComputedStyle(target);
+  onboardingLiftedPrev = {
+    position: target.style.position,
+    zIndex: target.style.zIndex,
+    boxShadow: target.style.boxShadow,
+  };
+  if (computed.position === 'static') target.style.position = 'relative';
+  target.style.zIndex = '210';
+  target.style.boxShadow = '0 0 0 3px var(--accent), 0 0 22px 4px rgba(52, 211, 153, 0.6)';
+  onboardingLiftedTarget = target;
+}
+
+function onboardingUnliftTarget() {
+  if (!onboardingLiftedTarget) return;
+  const t = onboardingLiftedTarget;
+  t.style.position = onboardingLiftedPrev?.position ?? '';
+  t.style.zIndex = onboardingLiftedPrev?.zIndex ?? '';
+  t.style.boxShadow = onboardingLiftedPrev?.boxShadow ?? '';
+  onboardingLiftedTarget = null;
+  onboardingLiftedPrev = null;
+}
+
 function onboardingPosition() {
   const step = ONBOARDING_STEPS[onboardingIdx];
   if (!step) { closeOnboarding(); return; }
@@ -2639,31 +2667,34 @@ function onboardingPosition() {
   document.getElementById('onboarding-next-btn').textContent =
     onboardingIdx === ONBOARDING_STEPS.length - 1 ? '完了' : '次へ';
 
+  // 対象を前面に持ち上げ（暗幕の上に出して見やすく）
+  onboardingLiftTarget(target);
+
+  // spot はほぼ飾り（対象自体をハイライトするため非表示でもOK）
   if (!target) { spot.style.display = 'none'; return; }
-  spot.style.display = '';
+  spot.style.display = 'none'; // 対象自身の box-shadow でハイライトするのでスポットは不要
+
+  // html の zoom 値で座標補正（縮拡時に位置ズレを解消）
+  const z = parseFloat(document.documentElement.style.zoom) || 1;
   const rect = target.getBoundingClientRect();
-  const pad = 6;
-  spot.style.top = (rect.top - pad) + 'px';
-  spot.style.left = (rect.left - pad) + 'px';
-  spot.style.width = (rect.width + pad * 2) + 'px';
-  spot.style.height = (rect.height + pad * 2) + 'px';
 
   // bubble positioning: 下方に出す、はみ出すなら上方
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const bubbleW = Math.min(320, vw - 24);
-  bubble.style.maxWidth = bubbleW + 'px';
-  const rectBottom = rect.bottom + pad;
+  bubble.style.maxWidth = (bubbleW / z) + 'px';
   const bubbleHEst = 180;
-  let top, left;
-  if (rectBottom + bubbleHEst + 12 < vh) {
-    top = rectBottom + 12;
+  let topVisual, leftVisual;
+  const gap = 12;
+  if (rect.bottom + gap + bubbleHEst < vh) {
+    topVisual = rect.bottom + gap;
   } else {
-    top = Math.max(12, rect.top - pad - bubbleHEst - 12);
+    topVisual = Math.max(12, rect.top - gap - bubbleHEst);
   }
-  left = Math.max(12, Math.min(vw - bubbleW - 12, rect.left + rect.width / 2 - bubbleW / 2));
-  bubble.style.top = top + 'px';
-  bubble.style.left = left + 'px';
+  leftVisual = Math.max(12, Math.min(vw - bubbleW - 12, rect.left + rect.width / 2 - bubbleW / 2));
+  // fixed 要素も html zoom の影響を受けるので layout 値に変換
+  bubble.style.top = (topVisual / z) + 'px';
+  bubble.style.left = (leftVisual / z) + 'px';
 }
 
 function startOnboarding() {
@@ -2680,6 +2711,7 @@ function nextOnboarding() {
   onboardingPosition();
 }
 function closeOnboarding() {
+  onboardingUnliftTarget();
   document.getElementById('onboarding').classList.add('hidden');
 }
 const btnOnboarding = document.getElementById('btn-onboarding');
