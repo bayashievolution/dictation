@@ -35,6 +35,40 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* ───────── Scrollbar (dark theme) ───────── */
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+/* Chrome / Edge / Safari */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #5a5a66;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+/* 横スクロール（タブバー等）は一段細く */
+#tabs::-webkit-scrollbar,
+#inner-tabs::-webkit-scrollbar {
+  height: 4px;
+}
+
 html, body {
   height: 100%;
   background: var(--bg);
@@ -281,15 +315,7 @@ html, body {
   gap: 2px;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
   flex-shrink: 0;
-}
-
-#tabs::-webkit-scrollbar {
-  height: 4px;
-}
-#tabs::-webkit-scrollbar-thumb {
-  background: var(--border);
 }
 
 #tabs-list {
@@ -602,19 +628,6 @@ html, body {
   position: relative;
 }
 
-.pane-body::-webkit-scrollbar {
-  width: 8px;
-}
-.pane-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-.pane-body::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
-}
-.pane-body::-webkit-scrollbar-thumb:hover {
-  background: #4a4a54;
-}
 
 /* ───────── Pane header (per-tab actions) ───────── */
 .pane-header {
@@ -751,20 +764,6 @@ html, body {
   height: 22px;
   background: var(--border);
   margin: 0 2px;
-}
-
-.pane::-webkit-scrollbar {
-  width: 8px;
-}
-.pane::-webkit-scrollbar-track {
-  background: transparent;
-}
-.pane::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
-}
-.pane::-webkit-scrollbar-thumb:hover {
-  background: #4a4a54;
 }
 
 /* ───────── Memo ───────── */
