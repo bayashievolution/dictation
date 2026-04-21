@@ -1296,7 +1296,8 @@ html, body {
   align-items: flex-end;
 }
 
-#chat-input {
+/* チャット入力欄は本文フォント設定の影響を受けず、統一デザイン（質問タブ／クイック両方） */
+.chat-input-area textarea {
   flex: 1;
   min-height: 38px;
   max-height: 200px;
@@ -1305,7 +1306,6 @@ html, body {
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  /* 入力欄はフォントサイズ設定の影響を受けない（固定13px） */
   font-family: 'Noto Sans JP', -apple-system, sans-serif;
   font-size: 13px;
   line-height: 1.5;
@@ -1315,10 +1315,14 @@ html, body {
   white-space: nowrap;
   overflow-x: auto;
 }
-#chat-input::placeholder {
+.chat-input-area textarea:focus {
+  border-color: var(--accent);
+}
+.chat-input-area textarea::placeholder {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: var(--text-faint);
 }
 
 #chat-input:focus {
