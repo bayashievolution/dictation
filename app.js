@@ -437,15 +437,13 @@ async function flushPendingToGemini() {
     snapshotActiveToSession();
     persistSessions();
   } catch (e) {
-    console.error('Gemini refinement failed:', e);
-    targetEl.className = 'paragraph';
+    // 整形失敗は「後でまとめて再試行」できるよう、静かに needs-retry マークするだけ。
+    // 通信不安定・finishReason 空・短チャンク等で起きるが、録音を遮るほどの重大事ではない。
+    console.warn('[refine] skipped (marked for retry):', e.message || e);
+    targetEl.className = 'paragraph needs-retry';
     setParagraphContent(targetEl, rawText);
-    const msg = (e && e.message) ? e.message : String(e);
-    setStatus('error', 'AI整形失敗: ' + msg.slice(0, 80));
-    setTimeout(() => {
-      if (state.isRecording) setStatus('listening', '録音中');
-      else setStatus('idle', '停止');
-    }, 6000);
+    snapshotActiveToSession();
+    persistSessions();
   } finally {
     autoScroll();
   }
@@ -500,18 +498,59 @@ async function refineUnstructuredInTranscript({ force = false, showFeedback = tr
     snapshotActiveToSession();
     persistSessions();
   } catch (e) {
-    console.error('refine pasted failed:', e);
-    targetEl.className = 'paragraph';
+    // 貼り付け整形の失敗も needs-retry マークして、後で再試行可能に
+    console.warn('[refine pasted] skipped (marked for retry):', e.message || e);
+    targetEl.className = 'paragraph needs-retry';
     setParagraphContent(targetEl, rawText);
-    if (showFeedback) setStatus('error', '整形失敗: ' + (e.message || '').slice(0, 60));
-    setTimeout(() => {
-      if (state.isRecording) setStatus('listening', '録音中');
-      else setStatus('idle', '停止');
-    }, 4000);
+    snapshotActiveToSession();
+    persistSessions();
   } finally {
     updateActionButtons();
     autoScroll();
   }
+}
+
+/**
+ * 過去に整形失敗した .paragraph.needs-retry をまとめて再試行する。
+ * 「今すぐ整形」ボタン押下時に呼ばれる。
+ */
+async function retryPendingRefinements({ showFeedback = true } = {}) {
+  if (!state.settings.apiKey) return { tried: 0, ok: 0, failed: 0 };
+  const pending = Array.from(els.confirmed.querySelectorAll('.paragraph.needs-retry'));
+  if (pending.length === 0) return { tried: 0, ok: 0, failed: 0 };
+  let ok = 0, failed = 0;
+  for (const p of pending) {
+    const rawText = p.innerText.trim();
+    if (!rawText) { p.remove(); continue; }
+    p.className = 'paragraph refining';
+    try {
+      const refined = await refineWithGemini({
+        apiKey: state.settings.apiKey,
+        context: getContextForGemini(),
+        newChunk: rawText,
+      });
+      p.className = 'paragraph refined';
+      setParagraphContent(p, refined || rawText);
+      ok++;
+    } catch (e) {
+      console.warn('[retry refine] still failing:', e.message || e);
+      p.className = 'paragraph needs-retry';
+      setParagraphContent(p, rawText);
+      failed++;
+    }
+  }
+  snapshotActiveToSession();
+  persistSessions();
+  updateActionButtons();
+  autoScroll();
+  if (showFeedback && failed > 0) {
+    setStatus('error', `${failed}件の整形は失敗（後でまた再試行可）`);
+    setTimeout(() => {
+      if (state.isRecording) setStatus('listening', '録音中');
+      else setStatus('idle', '停止');
+    }, 4000);
+  }
+  return { tried: pending.length, ok, failed };
 }
 
 /* ───────── Silence timers ───────── */
@@ -3238,7 +3277,9 @@ if (els.btnRefineTranscript) {
       if (!state.settings.apiKey) { openSettings(); return; }
       els.btnRefineTranscript.classList.add('firing');
       try {
+        // 貼付け等の未整形テキストを先に整形、その後に needs-retry のパラグラフを再試行
         await refineUnstructuredInTranscript({ force: true, showFeedback: true });
+        await retryPendingRefinements({ showFeedback: true });
       } finally {
         els.btnRefineTranscript.classList.remove('firing');
       }

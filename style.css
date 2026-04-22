@@ -1608,6 +1608,27 @@ html, body {
   animation: fadeInReplace 0.4s var(--ease-out);
 }
 
+/* 整形失敗: 静かに「未整形」マーク。あとで「今すぐ整形」で再試行される */
+.paragraph.needs-retry {
+  color: var(--text-muted);
+  position: relative;
+  padding: 0 10px 0 10px;
+  border-left: 2px solid #d4a256; /* 控えめなオレンジ */
+  background: rgba(212, 162, 86, 0.04);
+  border-radius: 0 4px 4px 0;
+}
+.paragraph.needs-retry::after {
+  content: '未整形';
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  font-size: 10px;
+  color: #d4a256;
+  opacity: 0.7;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
