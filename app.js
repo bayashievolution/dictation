@@ -18,6 +18,94 @@ const SETTINGS_KEY = 'dictation:settings';
 const SESSIONS_KEY = 'dictation:sessions';
 const ACTIVE_TAB_KEY = 'dictation:activeTab';
 
+/* ───────── 診断ログ（最新N件を保持・設定モーダルでビューアに表示） ───────── */
+const DIAG_LOG_MAX = 120;
+const diagLog = {
+  entries: [], // { ts, level: 'info'|'warn'|'error', msg: string }
+  install() {
+    const wrap = (level, original) => (...args) => {
+      try {
+        const msg = args.map(a => {
+          if (a instanceof Error) return (a.stack || a.message || String(a));
+          if (typeof a === 'object') { try { return JSON.stringify(a); } catch { return String(a); } }
+          return String(a);
+        }).join(' ');
+        diagLog.entries.push({ ts: Date.now(), level, msg });
+        while (diagLog.entries.length > DIAG_LOG_MAX) diagLog.entries.shift();
+        // ビューアが開いている時だけ追記
+        const viewer = document.getElementById('diag-log-viewer');
+        if (viewer && !document.getElementById('settings-modal')?.classList.contains('hidden')) {
+          diagLog.renderInto(viewer);
+        }
+      } catch {}
+      return original.apply(console, args);
+    };
+    console.warn  = wrap('warn',  console.warn.bind(console));
+    console.error = wrap('error', console.error.bind(console));
+    // 未処理エラーもキャプチャ（try/catchを通らないクラッシュ用）
+    window.addEventListener('error', (e) => {
+      try {
+        diagLog.entries.push({
+          ts: Date.now(), level: 'error',
+          msg: `[uncaught] ${e.message || ''} @ ${e.filename || '?'}:${e.lineno || '?'}`
+        });
+        while (diagLog.entries.length > DIAG_LOG_MAX) diagLog.entries.shift();
+      } catch {}
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      try {
+        const r = e.reason;
+        const msg = r instanceof Error ? (r.stack || r.message) : String(r);
+        diagLog.entries.push({ ts: Date.now(), level: 'error', msg: `[unhandled] ${msg}` });
+        while (diagLog.entries.length > DIAG_LOG_MAX) diagLog.entries.shift();
+      } catch {}
+    });
+  },
+  /**
+   * アプリの内部イベント（エラーでない）を記録。
+   * 録音開始/停止、BG切替、チャンク送信、リトライ、発火タイマーなど。
+   * 設定→診断ログでこれを見ることで、DevToolsが開けない環境でも挙動が追える。
+   */
+  info(msg) {
+    diagLog.entries.push({ ts: Date.now(), level: 'info', msg: String(msg) });
+    while (diagLog.entries.length > DIAG_LOG_MAX) diagLog.entries.shift();
+    const viewer = document.getElementById('diag-log-viewer');
+    if (viewer && !document.getElementById('settings-modal')?.classList.contains('hidden')) {
+      diagLog.renderInto(viewer);
+    }
+  },
+  formatTs(ts) {
+    const d = new Date(ts);
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  },
+  renderInto(el) {
+    if (!el) return;
+    if (diagLog.entries.length === 0) {
+      el.innerHTML = '';
+      return;
+    }
+    el.innerHTML = diagLog.entries.slice().reverse().map(e =>
+      `<span class="diag-log-line ${e.level}"><span class="diag-ts">${diagLog.formatTs(e.ts)}</span><span class="diag-level">${e.level}</span>${escapeHtmlSimple(e.msg)}</span>`
+    ).join('');
+  },
+  toPlainText() {
+    return diagLog.entries.map(e =>
+      `[${new Date(e.ts).toLocaleString()}] ${e.level.toUpperCase()}: ${e.msg}`
+    ).join('\n');
+  },
+  clear() {
+    diagLog.entries = [];
+    const v = document.getElementById('diag-log-viewer');
+    if (v) v.innerHTML = '';
+  },
+};
+function escapeHtmlSimple(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+diagLog.install();
+window.diagLog = diagLog; // gemini.js 等から info() を呼べるように公開
+
 const DEFAULT_SETTINGS = {
   apiKey: '',
   silenceSec: 3,
@@ -39,6 +127,7 @@ const DEFAULT_SETTINGS = {
   inputMode: 'web-speech',
   audioDeviceId: '',
   audioChunkSec: 12,
+  audioMinChunkBytes: 400, // 旧1200から感度↑。小さい発話（小声・短語）もGeminiへ送る
 };
 
 const PANE_FONT_KEYS = {
@@ -139,7 +228,51 @@ const state = {
   activeId: null,
   activePane: 'pane-transcript',
   isSummarizing: false,
+
+  // バックグラウンド録音: recordingSessionId は録音対象セッション。
+  // activeId !== recordingSessionId の間は、文字起こしは bgTranscriptEl (detached) に流れる。
+  recordingSessionId: null,
+  bgTranscriptEl: null,
+
+  // ミドル整形（短チャンクの遅延コンソリデーション）用
+  isConsolidatingShortChunks: false,
+  midChunkWatchdog: null,
+
+  // 複数タブ選択（Ctrl+クリック=追加/除外、Shift+クリック=範囲選択、一括ドラッグ移動）
+  selectedTabIds: new Set(),
+  selectionAnchorId: null, // Shift+クリックの基準
 };
+
+/**
+ * 文字起こしの書き込み先コンテナを返す。
+ * - 通常: els.confirmed（DOM）
+ * - バックグラウンド録音中: 切り離された <div>（録音対象セッションの transcript HTML をロード済）
+ */
+function getWriteContainer() {
+  if (!state.isRecording) return els.confirmed;
+  if (!state.recordingSessionId || state.recordingSessionId === state.activeId) return els.confirmed;
+  // BG mode
+  if (!state.bgTranscriptEl) {
+    const s = state.sessions.find(x => x.id === state.recordingSessionId);
+    state.bgTranscriptEl = document.createElement('div');
+    state.bgTranscriptEl.innerHTML = s?.transcript || '';
+  }
+  return state.bgTranscriptEl;
+}
+
+/** BG コンテナの innerHTML を録音対象セッションのデータへ書き戻す */
+function syncBgToSession() {
+  if (!state.bgTranscriptEl) return;
+  const s = state.sessions.find(x => x.id === state.recordingSessionId);
+  if (!s) return;
+  s.transcript = state.bgTranscriptEl.innerHTML;
+  s.updatedAt = Date.now();
+}
+
+/** BG モードか判定 */
+function isBgRecording() {
+  return state.isRecording && state.recordingSessionId && state.recordingSessionId !== state.activeId;
+}
 
 const els = {
   btnToggle: document.getElementById('btn-toggle'),
@@ -204,6 +337,7 @@ const els = {
   modeGemini: document.getElementById('mode-gemini'),
   inputAudioDevice: document.getElementById('input-audio-device'),
   inputChunkSec: document.getElementById('input-chunk-sec'),
+  inputMinChunkBytes: document.getElementById('input-min-chunk-bytes'),
   zoomBar: document.getElementById('zoom-bar'),
   zoomRange: document.getElementById('zoom-range'),
   zoomPercent: document.getElementById('zoom-percent'),
@@ -387,22 +521,27 @@ function setParagraphContent(pEl, refinedText) {
 
 function appendRawChunk(text) {
   if (!text || !text.trim()) return;
-  hideEmptyHint();
-  if (!state.pendingChunkEl) {
+  const container = getWriteContainer();
+  const inBg = container !== els.confirmed;
+  if (!inBg) hideEmptyHint();
+  if (!state.pendingChunkEl || !container.contains(state.pendingChunkEl)) {
     state.pendingChunkEl = createParagraphEl(text, 'paragraph raw');
-    els.confirmed.appendChild(state.pendingChunkEl);
+    container.appendChild(state.pendingChunkEl);
     state.pendingChunkText = text;
   } else {
     state.pendingChunkText += ' ' + text;
     const body = state.pendingChunkEl.querySelector('.p-body');
     if (body) body.textContent = state.pendingChunkText;
   }
-  autoScroll();
+  if (inBg) syncBgToSession();
+  else autoScroll();
   updateActionButtons();
 }
 
 function getContextForGemini() {
-  const paragraphs = els.confirmed.querySelectorAll('.paragraph:not(.raw):not(.refining)');
+  // 録音対象コンテナから直近の整形済み3段落を使う（BG録音中はBG側から）
+  const container = getWriteContainer();
+  const paragraphs = container.querySelectorAll('.paragraph:not(.raw):not(.refining)');
   const last = Array.from(paragraphs).slice(-3);
   return last.map(p => p.innerText.trim()).filter(Boolean).join('\n\n');
 }
@@ -415,11 +554,18 @@ async function flushPendingToGemini() {
   state.pendingChunkEl = null;
   state.pendingChunkText = '';
 
+  // 書き込み先がBG（detached）か els.confirmed かで、永続化手段が異なる
+  const inBg = state.bgTranscriptEl && state.bgTranscriptEl.contains(targetEl);
+  const persist = () => {
+    if (inBg) syncBgToSession();
+    else snapshotActiveToSession();
+    persistSessions();
+  };
+
   if (!state.settings.aiEnabled || !state.settings.apiKey) {
     targetEl.className = 'paragraph';
     setParagraphContent(targetEl, rawText);
-    snapshotActiveToSession();
-    persistSessions();
+    persist();
     return;
   }
 
@@ -434,18 +580,14 @@ async function flushPendingToGemini() {
     targetEl.className = 'paragraph refined';
     setParagraphContent(targetEl, refined || rawText);
     updateActionButtons();
-    snapshotActiveToSession();
-    persistSessions();
+    persist();
   } catch (e) {
-    // 整形失敗は「後でまとめて再試行」できるよう、静かに needs-retry マークするだけ。
-    // 通信不安定・finishReason 空・短チャンク等で起きるが、録音を遮るほどの重大事ではない。
     console.warn('[refine] skipped (marked for retry):', e.message || e);
     targetEl.className = 'paragraph needs-retry';
     setParagraphContent(targetEl, rawText);
-    snapshotActiveToSession();
-    persistSessions();
+    persist();
   } finally {
-    autoScroll();
+    if (!inBg) autoScroll();
   }
 }
 
@@ -553,6 +695,73 @@ async function retryPendingRefinements({ showFeedback = true } = {}) {
   return { tried: pending.length, ok, failed };
 }
 
+/* ───────── ミドル整形（短チャンクを蓄積→文脈込みで再整形＋見出し付与） ─────────
+ * Geminiオーディオ録音の短チャンクは個別に文字起こしされるが、見出しが付かず
+ * 誤字が残ることがある。3段落溜まるか 60秒経ったら refineWithGemini で
+ * 文脈込みに統合 + 見出し追加 で整形しなおす。 */
+
+const MID_CHUNK_THRESHOLD = 3;      // 何段落溜まったら発火
+const MID_TIME_THRESHOLD_MS = 60000; // 最初の短チャンクから何ms経ったら発火
+
+function maybeConsolidateShortChunks() {
+  if (state.isConsolidatingShortChunks) return; // 多重実行防止
+  if (!state.settings.aiEnabled || !state.settings.apiKey) return;
+  const container = getWriteContainer();
+  if (!container) return;
+  const shortParas = Array.from(container.querySelectorAll('.paragraph.short-refined'));
+  if (shortParas.length === 0) return;
+
+  const firstTs = parseInt(shortParas[0].dataset.shortTs || '0', 10);
+  const elapsed = firstTs ? Date.now() - firstTs : 0;
+
+  if (shortParas.length < MID_CHUNK_THRESHOLD && elapsed < MID_TIME_THRESHOLD_MS) return;
+
+  consolidateShortChunks(shortParas);
+}
+
+async function consolidateShortChunks(shortParas) {
+  if (!shortParas || shortParas.length === 0) return;
+  state.isConsolidatingShortChunks = true;
+  const container = shortParas[0].parentElement;
+  const inBg = container !== els.confirmed;
+
+  const firstPara = shortParas[0];
+  const rawText = shortParas.map(p => p.innerText.trim()).filter(Boolean).join('\n\n');
+
+  // 先頭を refining に、2つ目以降は削除
+  firstPara.className = 'paragraph refining';
+  setParagraphContent(firstPara, '（文脈整形中…）');
+  for (let i = 1; i < shortParas.length; i++) {
+    shortParas[i].remove();
+  }
+  if (inBg) syncBgToSession(); else snapshotActiveToSession();
+  persistSessions();
+
+  diagLog.info(`ミドル整形開始 ${shortParas.length}段落・${rawText.length}字`);
+
+  try {
+    const refined = await refineWithGemini({
+      apiKey: state.settings.apiKey,
+      context: getContextForGemini(),
+      newChunk: rawText,
+    });
+    firstPara.className = 'paragraph refined';
+    setParagraphContent(firstPara, refined || rawText);
+    diagLog.info(`ミドル整形完了 → ${(refined || rawText).length}字`);
+  } catch (e) {
+    console.warn('[consolidate] failed:', e.message || e);
+    firstPara.className = 'paragraph needs-retry';
+    setParagraphContent(firstPara, rawText);
+  } finally {
+    state.isConsolidatingShortChunks = false;
+    if (inBg) syncBgToSession(); else snapshotActiveToSession();
+    persistSessions();
+    if (!inBg) { updateActionButtons(); autoScroll(); }
+    // 途中でさらに短チャンクが溜まっていれば再度チェック
+    setTimeout(maybeConsolidateShortChunks, 50);
+  }
+}
+
 /* ───────── Silence timers ───────── */
 
 function resetSilenceTimer() {
@@ -579,6 +788,7 @@ function clearAllTimers() {
 }
 
 function showSilenceDialog() {
+  diagLog.info(`無音停止ダイアログ発火（${state.settings.autoStopSec}秒無音と判定）`);
   els.silenceDialog.classList.remove('hidden');
   state.silenceCountdownLeft = 30;
   updateSilenceCountdown();
@@ -631,8 +841,15 @@ function buildRecognition() {
         interim += text;
       }
     }
-    els.interim.textContent = interim;
-    if (interim || gotFinal) hideEmptyHint();
+    // BG録音中（録音対象セッションが非表示）は共有の#interimに書かない。
+    // 書くと別セッション（表示中のタブ）の文字起こしエリアに漏れて見える。
+    if (isBgRecording()) {
+      els.interim.textContent = '';
+    } else {
+      els.interim.textContent = interim;
+      if (interim || gotFinal) hideEmptyHint();
+      if (gotFinal || interim) autoScroll();
+    }
     if (gotFinal || interim) {
       resetSilenceTimer();
       resetLongSilenceTimer();
@@ -640,30 +857,56 @@ function buildRecognition() {
         hideSilenceDialog();
       }
     }
-    autoScroll();
   };
 
   rec.onerror = (event) => {
-    console.error('SpeechRecognition error:', event.error);
-    if (event.error === 'no-speech') return;
-    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+    const err = event.error;
+    if (err === 'no-speech') return;
+    if (err === 'not-allowed' || err === 'service-not-allowed') {
+      // マイク拒否: 完全停止
+      console.error('SpeechRecognition error:', err);
       setStatus('error', 'マイク拒否');
       state.shouldAutoRestart = false;
       state.isRecording = false;
       setRecordingUI(false);
-      showMicDeniedGuide(event.error);
-    } else {
-      setStatus('error', `エラー: ${event.error}`);
+      showMicDeniedGuide(err);
+      return;
     }
+    if (err === 'network' || err === 'aborted' || err === 'audio-capture') {
+      // 過渡的エラー: 赤バナーは出さず、diagLogに記録。onendで自動再接続が走る。
+      // Chromeは長時間録音で約5分ごとに 'network' を返すことがある既知仕様。
+      diagLog.info(`SpeechRecognition 過渡エラー(${err}) → 自動再接続待ち`);
+      return;
+    }
+    // その他の未知エラーだけ赤バナー表示
+    console.error('SpeechRecognition error:', err);
+    setStatus('error', `エラー: ${err}`);
   };
 
   rec.onend = () => {
     els.interim.textContent = '';
     if (state.shouldAutoRestart && state.isRecording) {
-      try { rec.start(); }
-      catch {
-        setTimeout(() => { if (state.isRecording) try { rec.start(); } catch {} }, 300);
-      }
+      // 即再start()は失敗しやすいので、少し遅延してからリトライ
+      const tryRestart = (attempt = 0) => {
+        if (!state.isRecording) return;
+        try {
+          rec.start();
+          if (attempt > 0) diagLog.info(`SpeechRecognition 再接続成功 (attempt=${attempt + 1})`);
+        } catch (e) {
+          if (attempt < 4 && state.isRecording) {
+            // 指数バックオフ: 200ms → 400ms → 800ms → 1600ms
+            const delay = 200 * Math.pow(2, attempt);
+            diagLog.info(`SpeechRecognition 再接続リトライ ${attempt + 1} in ${delay}ms (${e.message || e.name || 'error'})`);
+            setTimeout(() => tryRestart(attempt + 1), delay);
+          } else {
+            diagLog.info(`SpeechRecognition 再接続失敗（上限到達）`);
+            console.error('SpeechRecognition restart failed:', e);
+            setStatus('error', '再接続失敗');
+          }
+        }
+      };
+      // 少しだけ待ってから再スタート（連続start()でのInvalidStateErrorを避ける）
+      setTimeout(() => tryRestart(0), 120);
     } else {
       setStatus('idle', '停止');
       setRecordingUI(false);
@@ -731,6 +974,8 @@ async function startRecording() {
   if (!state.recognition) return;
   state.isRecording = true;
   state.shouldAutoRestart = true;
+  state.recordingSessionId = state.activeId; // BG録音用に固定
+  diagLog.info(`録音開始 (Web Speech) session=${state.recordingSessionId?.slice(-6)}`);
   try {
     state.recognition.start();
     setRecordingUI(true);
@@ -740,13 +985,19 @@ async function startRecording() {
     setStatus('error', '開始失敗: ' + e.message);
     state.isRecording = false;
     state.shouldAutoRestart = false;
+    state.recordingSessionId = null;
     setRecordingUI(false);
   }
 }
 
 function stopRecording() {
+  // 停止処理 = 「録音対象セッション（recordingSessionId）」に対して行う。
+  // 現在のactiveIdはBG録音でズレている可能性があるので固定して使う。
+  const recSessionId = state.recordingSessionId || state.activeId;
+  diagLog.info(`録音停止 session=${recSessionId?.slice(-6)}`);
   state.isRecording = false;
   state.shouldAutoRestart = false;
+  if (state.midChunkWatchdog) { clearInterval(state.midChunkWatchdog); state.midChunkWatchdog = null; }
   if (state.settings.inputMode === 'gemini-audio') {
     stopGeminiAudioRecording();
   } else {
@@ -759,11 +1010,29 @@ function stopRecording() {
   setRecordingUI(false);
   clearAllTimers();
   flushPendingToGemini().finally(async () => {
-    snapshotActiveToSession();
+    // 録音停止時に、残っている short-refined パラグラフを強制的に
+    // ミドル整形（refineWithGemini で見出し付け＋文脈統合）してからサマリ化
+    const container = (state.bgTranscriptEl && recSessionId !== state.activeId)
+      ? state.bgTranscriptEl : els.confirmed;
+    const remainingShort = Array.from(container.querySelectorAll('.paragraph.short-refined'));
+    if (remainingShort.length > 0 && state.settings.aiEnabled && state.settings.apiKey) {
+      await consolidateShortChunks(remainingShort);
+    }
+    // BGモードの場合、flushPendingToGemini は bgTranscriptEl に書き込んだ後 syncBgToSession で
+    // session.transcript に反映済み。foreground なら snapshot が必要。
+    const inBgAtEnd = state.bgTranscriptEl && recSessionId !== state.activeId;
+    if (inBgAtEnd) {
+      syncBgToSession();
+      state.bgTranscriptEl = null;
+    } else {
+      snapshotActiveToSession();
+    }
+    state.recordingSessionId = null;
     persistSessions();
+    renderTabs(); // 録音中の赤線消去
     if (state.settings.autoSummarize && state.settings.aiEnabled && state.settings.apiKey) {
-      await generateSummary({ silent: true });
-      await autoGenerateTitle();
+      await generateSummary({ silent: true, sessionId: recSessionId });
+      await autoGenerateTitle({ sessionId: recSessionId });
     }
   });
 }
@@ -808,7 +1077,16 @@ async function startGeminiAudioRecording() {
     state.audioChunks = [];
     if (chunks.length > 0) {
       const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
-      if (blob.size > 1200) sendAudioChunkToGemini(blob);
+      // 設定の minChunkBytes 未満は無音と見なしてスキップ（デフォ400: 従来1200より感度↑）
+      const minBytes = Number.isFinite(state.settings.audioMinChunkBytes) ? state.settings.audioMinChunkBytes : 400;
+      if (blob.size > minBytes) {
+        // 発話あり（と推定） → 長無音タイマーをリセット
+        resetLongSilenceTimer();
+        diagLog.info(`音声チャンク送信 ${blob.size}B (>${minBytes})`);
+        sendAudioChunkToGemini(blob);
+      } else {
+        diagLog.info(`音声チャンクスキップ ${blob.size}B (<=${minBytes}, 無音判定)`);
+      }
     }
     // 録音継続中なら再スタート
     if (state.isRecording && state.mediaRecorder === recorder) {
@@ -834,6 +1112,8 @@ async function startGeminiAudioRecording() {
 
   state.isRecording = true;
   state.shouldAutoRestart = true;
+  state.recordingSessionId = state.activeId; // BG録音用に固定
+  diagLog.info(`録音開始 (Gemini) session=${state.recordingSessionId?.slice(-6)} chunkSec=${state.settings.audioChunkSec || 12}`);
   setRecordingUI(true);
   setStatus('listening', '録音中 (Gemini)');
   resetLongSilenceTimer();
@@ -845,6 +1125,10 @@ async function startGeminiAudioRecording() {
       state.mediaRecorder.stop(); // onstop で送信＋再スタート
     }
   }, intervalMs);
+
+  // 時間しきい値（60秒経過）だけでも発火できるよう、ウォッチドッグを常駐させる
+  if (state.midChunkWatchdog) clearInterval(state.midChunkWatchdog);
+  state.midChunkWatchdog = setInterval(maybeConsolidateShortChunks, 15 * 1000);
 }
 
 function stopGeminiAudioRecording() {
@@ -865,10 +1149,19 @@ function stopGeminiAudioRecording() {
 
 async function sendAudioChunkToGemini(blob) {
   state.audioInFlightCount++;
-  hideEmptyHint();
+  const container = getWriteContainer();
+  const inBg = container !== els.confirmed;
+  if (!inBg) hideEmptyHint();
   const targetEl = createParagraphEl('（文字起こし中…）', 'paragraph refining');
-  els.confirmed.appendChild(targetEl);
-  autoScroll();
+  container.appendChild(targetEl);
+  if (inBg) syncBgToSession();
+  else autoScroll();
+
+  const persist = () => {
+    if (inBg) syncBgToSession();
+    else snapshotActiveToSession();
+    persistSessions();
+  };
 
   try {
     const text = await transcribeAudioWithGemini({
@@ -877,26 +1170,33 @@ async function sendAudioChunkToGemini(blob) {
       contextHint: getContextForGemini(),
     });
     if (text && text.trim()) {
-      targetEl.className = 'paragraph refined';
+      // Geminiオーディオ経由の短チャンクは `.short-refined` とマーク。
+      // このあと maybeConsolidateShortChunks() が 3つ溜まったら
+      // refineWithGemini（見出し付き）でまとめて整形する。
+      targetEl.className = 'paragraph short-refined';
+      targetEl.dataset.shortTs = String(Date.now());
       setParagraphContent(targetEl, text);
-      snapshotActiveToSession();
-      persistSessions();
+      if (state.isRecording) resetLongSilenceTimer();
+      persist();
+      // 遅延ミドル整形をチェック
+      maybeConsolidateShortChunks();
     } else {
-      targetEl.remove(); // 無音チャンクは捨てる
+      // 空テキストも「需再試行」として残す（消さない）
+      // 「音声不明瞭の可能性。後で整形ボタンから再試行できます」
+      targetEl.className = 'paragraph needs-retry';
+      setParagraphContent(targetEl, '（音声不明瞭・再試行可）');
+      persist();
     }
   } catch (e) {
-    console.error('audio transcription failed:', e);
-    targetEl.className = 'paragraph';
+    // 通信エラー等も黙って needs-retry に落とす（赤バナーは出さない）
+    console.warn('[audio transcribe] skipped (marked for retry):', e.message || e);
+    targetEl.className = 'paragraph needs-retry';
     setParagraphContent(targetEl, '[文字起こし失敗: ' + (e.message || '').slice(0, 60) + ']');
-    setStatus('error', 'Gemini Audio失敗: ' + (e.message || '').slice(0, 60));
-    setTimeout(() => {
-      if (state.isRecording) setStatus('listening', '録音中 (Gemini)');
-      else setStatus('idle', '停止');
-    }, 5000);
+    persist();
   } finally {
     state.audioInFlightCount--;
     updateActionButtons();
-    autoScroll();
+    if (!inBg) autoScroll();
   }
 }
 
@@ -1336,6 +1636,272 @@ function saveSessionAsHtml() {
   flashButton(els.btnSaveJson, 'HTML保存完了');
 }
 
+/**
+ * 全セッションを1つのHTMLファイルに。各セッションは <details> 折り畳みで
+ * 独立して展開できる。pane はユーザー設定の並び順を尊重。
+ */
+function buildAllSessionsExportHtml() {
+  const fmt = (ts) => {
+    const d = new Date(ts);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const sessionsHtml = state.sessions.map((session, idx) => {
+    const sections = [];
+    for (const paneId of state.settings.paneOrder) {
+      const meta = PANE_META[paneId];
+      let innerHtml = '';
+      if (paneId === 'pane-transcript') innerHtml = session.transcript || '';
+      else if (paneId === 'pane-memo') innerHtml = session.memo || '';
+      else if (paneId === 'pane-summary') innerHtml = session.summary || '';
+      else if (paneId === 'pane-chat') {
+        const chat = (session.chat || []).filter(m => !m.thinking);
+        if (chat.length === 0) continue;
+        innerHtml = chat.map(m => {
+          const who = m.role === 'user' ? 'あなた' : 'Gemini';
+          const body = m.role === 'assistant' ? renderMarkdown(m.content)
+                      : '<p>' + escapeHtml(m.content).replace(/\n/g, '<br>') + '</p>';
+          return `<div class="chat-block ${m.role}"><div class="chat-who">${who}</div>${body}</div>`;
+        }).join('\n');
+      }
+      if (!innerHtml || !innerHtml.trim()) continue;
+      const iconGlyph = paneId === 'pane-transcript' ? '🎙' : paneId === 'pane-memo' ? '📝' : paneId === 'pane-summary' ? '📄' : '💬';
+      sections.push(`<section class="pane-section">
+    <h3><span class="sec-icon">${iconGlyph}</span>${escapeHtml(meta.label)}</h3>
+    <div class="sec-body">${innerHtml}</div>
+  </section>`);
+    }
+    const hasContent = sections.length > 0;
+    const summaryPreview = hasContent ? '' : ' <span class="empty-flag">（空）</span>';
+    const sessId = `sess-${idx + 1}`;
+    return `<details class="sess" id="${sessId}">
+  <summary>
+    <span class="sess-num">${idx + 1}.</span>
+    <span class="sess-title">${escapeHtml(session.title || '(無題)')}</span>
+    <span class="sess-meta">${fmt(session.createdAt)}</span>${summaryPreview}
+  </summary>
+  <div class="sess-body">
+    ${sections.length > 0 ? sections.join('\n    ') : '<p class="empty-note">このセッションは空です。</p>'}
+  </div>
+</details>`;
+  }).join('\n\n');
+
+  // TOCリンク
+  const tocLinks = state.sessions.map((s, idx) =>
+    `<li><a href="#sess-${idx + 1}">${idx + 1}. ${escapeHtml(s.title || '(無題)')}</a></li>`
+  ).join('\n      ');
+
+  const now = new Date();
+  const exportedAt = fmt(now.getTime());
+  const pageTitle = `dictation — 全セッション (${state.sessions.length}件) ${exportedAt}`;
+
+  // 再インポート用の JSON データを末尾 <script> に埋め込む（単体版と同じ方式の複数版）
+  const multiData = {
+    format: 'dictation-multi/v1',
+    exportedAt: now.toISOString(),
+    sessions: state.sessions.map(s => ({
+      title: s.title,
+      aiTitle: s.aiTitle || null,
+      titleIsManual: !!s.titleIsManual,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      transcript: s.transcript || '',
+      memo: s.memo || '',
+      summary: s.summary || '',
+      chat: Array.isArray(s.chat) ? s.chat.filter(m => !m.thinking) : [],
+    })),
+  };
+  // </script> を閉じないようにエスケープ
+  const embeddedMulti = JSON.stringify(multiData).replace(/<\/(script)/gi, '<\\/$1');
+
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="dictation:format" content="dictation-multi/v1">
+<title>${escapeHtml(pageTitle)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #1a1a1f;
+  --bg-elevated: #23232a;
+  --bg-subtle: #2d2d36;
+  --border: #3a3a44;
+  --text: #e8e8eb;
+  --text-muted: #9b9ba5;
+  --text-faint: #6b6b73;
+  --accent: #34d399;
+  --heading: #7dd3fc;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 15px;
+  line-height: 1.8;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 860px; margin: 0 auto; padding: 48px 20px 80px; }
+header.doc-head { margin-bottom: 28px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.brand {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-faint);
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.brand::before { content: '🎙'; font-size: 14px; }
+h1.doc-title { font-size: 26px; font-weight: 600; margin: 8px 0 6px; }
+.doc-meta { font-size: 12px; color: var(--text-muted); }
+.doc-controls {
+  margin: 18px 0 10px;
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.doc-controls button {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+.doc-controls button:hover { background: var(--bg-subtle); border-color: #4a4a54; }
+.toc {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+}
+.toc summary {
+  cursor: pointer; font-weight: 600; color: var(--accent);
+  padding: 2px 0; outline: none;
+}
+.toc ol { margin: 10px 0 2px; padding-left: 24px; font-size: 13px; color: var(--text-muted); }
+.toc ol li { margin: 2px 0; }
+.toc ol a { color: var(--text-muted); text-decoration: none; }
+.toc ol a:hover { color: var(--accent); }
+
+details.sess {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 10px;
+  padding: 0;
+  scroll-margin-top: 20px;
+}
+details.sess > summary {
+  cursor: pointer;
+  padding: 14px 20px;
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 15px;
+  outline: none;
+  user-select: none;
+}
+details.sess > summary::-webkit-details-marker { display: none; }
+details.sess > summary::before {
+  content: '▶';
+  color: var(--text-faint);
+  font-size: 10px;
+  transition: transform 0.2s;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 14px;
+}
+details.sess[open] > summary::before { transform: rotate(90deg); color: var(--accent); }
+details.sess:hover { border-color: #4a4a54; }
+details.sess[open] { border-color: var(--accent); }
+.sess-num { color: var(--text-faint); font-weight: 500; min-width: 2.5em; flex-shrink: 0; }
+.sess-title { font-weight: 600; flex: 1; word-break: break-word; }
+.sess-meta { font-size: 11px; color: var(--text-faint); flex-shrink: 0; }
+.empty-flag { font-size: 11px; color: var(--text-faint); margin-left: 6px; }
+.empty-note { color: var(--text-faint); font-style: italic; margin: 0; }
+
+.sess-body {
+  padding: 4px 20px 20px;
+  border-top: 1px solid var(--border);
+}
+.sess-body .pane-section { margin: 18px 0 0; }
+.sess-body .pane-section:first-child { margin-top: 16px; }
+.sess-body .pane-section h3 {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 600;
+  color: var(--accent);
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.sec-icon { font-size: 14px; }
+.sec-body .paragraph { margin: 0 0 1em; }
+.sec-body .paragraph:last-child { margin-bottom: 0; }
+.sec-body .paragraph h2 { color: var(--heading); font-size: 16px; font-weight: 600; margin: 0 0 0.4em; padding: 0; border: none; }
+.sec-body .p-body { color: var(--text); }
+.sec-body h1 { font-size: 1.4em; font-weight: 700; margin: 0.5em 0 0.3em; color: var(--text); }
+.sec-body h2 { color: var(--heading); font-size: 16px; font-weight: 600; margin: 1em 0 0.3em; padding-top: 0.2em; border-top: 1px solid var(--border); }
+.sec-body h2:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.sec-body p { margin: 0.3em 0; }
+.sec-body ul, .sec-body ol { padding-left: 1.3em; margin: 0.3em 0; }
+.sec-body li { margin: 0.15em 0; }
+.chat-block { margin: 10px 0; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); }
+.chat-block.user { background: rgba(52, 211, 153, 0.08); border-color: rgba(52, 211, 153, 0.35); margin-left: 24px; }
+.chat-block.assistant { background: var(--bg-subtle); margin-right: 24px; }
+.chat-who { font-size: 10px; color: var(--text-faint); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; }
+footer.doc-foot { margin-top: 36px; text-align: center; font-size: 11px; color: var(--text-faint); letter-spacing: 0.06em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="doc-head">
+    <span class="brand">dictation</span>
+    <h1 class="doc-title">全セッション一覧 (${state.sessions.length}件)</h1>
+    <div class="doc-meta">書き出し: ${exportedAt}</div>
+    <div class="doc-controls">
+      <button type="button" onclick="document.querySelectorAll('details.sess').forEach(d => d.open = true)">すべて展開</button>
+      <button type="button" onclick="document.querySelectorAll('details.sess').forEach(d => d.open = false)">すべて折りたたみ</button>
+    </div>
+  </header>
+  <details class="toc" open>
+    <summary>目次 (${state.sessions.length}件)</summary>
+    <ol>
+      ${tocLinks}
+    </ol>
+  </details>
+
+  ${sessionsHtml}
+
+  <footer class="doc-foot">generated by dictation — 全セッション一括書き出し</footer>
+</div>
+<script type="application/json" id="dictation-multi-data">${embeddedMulti}</script>
+</body>
+</html>
+`;
+}
+
+function saveAllSessionsAsHtml() {
+  snapshotActiveToSession();
+  if (state.sessions.length === 0) {
+    alert('書き出すセッションがありません');
+    return;
+  }
+  const html = buildAllSessionsExportHtml();
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+  triggerDownload(blob, `dictation-all-${state.sessions.length}sessions-${stamp}.html`);
+  flashButton(els.btnSaveJson, `${state.sessions.length}件 一括保存完了`);
+}
+
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1366,6 +1932,93 @@ function importSessionData(s) {
   loadActiveSessionIntoDOM();
 }
 
+/** 全セッション一括HTMLから読み取ったセッション配列を現状に追加インポート */
+function importMultipleSessions(sessions) {
+  if (!Array.isArray(sessions) || sessions.length === 0) {
+    alert('インポートするセッションがありません');
+    return;
+  }
+  if (!confirm(`${sessions.length}個のセッションをインポートします。現在のタブに追加されます。よろしいですか？`)) {
+    return;
+  }
+  if (state.isRecording) stopRecording();
+  snapshotActiveToSession();
+  persistSessions();
+
+  let firstCreatedId = null;
+  for (const s of sessions) {
+    const title = (s.title || 'インポート').toString();
+    const session = createSession({ activate: false, title, skipSave: true });
+    session.transcript = s.transcript || s.html || '';
+    session.memo = s.memo || '';
+    session.summary = s.summary || '';
+    session.chat = Array.isArray(s.chat) ? s.chat : [];
+    session.aiTitle = s.aiTitle || null;
+    session.titleIsManual = !!s.titleIsManual;
+    session.createdAt = s.createdAt || Date.now();
+    session.updatedAt = Date.now();
+    if (!firstCreatedId) firstCreatedId = session.id;
+  }
+  if (firstCreatedId) state.activeId = firstCreatedId;
+  persistSessions();
+  renderTabs();
+  loadActiveSessionIntoDOM();
+  setTimeout(() => {
+    if (typeof scrollActiveTabIntoView === 'function') scrollActiveTabIntoView();
+  }, 50);
+}
+
+/** JSON 埋込が無い旧形式の全件HTMLから、DOM構造を読んでセッション配列を復元 */
+function parseMultiSessionsFromDom(doc) {
+  const sessions = [];
+  const sessDetails = doc.querySelectorAll('details.sess');
+  sessDetails.forEach(el => {
+    const titleEl = el.querySelector('summary .sess-title');
+    const metaEl = el.querySelector('summary .sess-meta');
+    const title = titleEl ? (titleEl.textContent || '').trim() : '(無題)';
+    const s = {
+      title,
+      transcript: '',
+      memo: '',
+      summary: '',
+      chat: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    el.querySelectorAll('section.pane-section').forEach(sec => {
+      const h3 = sec.querySelector('h3');
+      const body = sec.querySelector('.sec-body');
+      if (!h3 || !body) return;
+      const label = (h3.textContent || '').trim();
+      if (/文字起こし/.test(label)) s.transcript = body.innerHTML;
+      else if (/メモ/.test(label)) s.memo = body.innerHTML;
+      else if (/要約/.test(label)) s.summary = body.innerHTML;
+      else if (/質問|チャット/.test(label)) {
+        const chat = [];
+        body.querySelectorAll('.chat-block').forEach(cb => {
+          const role = cb.classList.contains('user') ? 'user' : 'assistant';
+          const clone = cb.cloneNode(true);
+          const who = clone.querySelector('.chat-who');
+          if (who) who.remove();
+          const content = (clone.textContent || '').trim();
+          if (content) chat.push({ role, content, ts: Date.now() });
+        });
+        s.chat = chat;
+      }
+    });
+    // summary の日時テキストから createdAt を推定
+    if (metaEl) {
+      const m = (metaEl.textContent || '').match(/(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})/);
+      if (m) {
+        const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+        if (!isNaN(d.getTime())) s.createdAt = d.getTime();
+      }
+    }
+    sessions.push(s);
+  });
+  return sessions;
+}
+
 async function loadFromFile(file) {
   try {
     const text = await file.text();
@@ -1376,23 +2029,51 @@ async function loadFromFile(file) {
       const parser = new DOMParser();
       const doc = parser.parseFromString(text, 'text/html');
       const meta = doc.querySelector('meta[name="dictation:format"]');
-      if (!meta || !String(meta.getAttribute('content') || '').startsWith('dictation-session/')) {
-        alert('これは dictation の保存ファイルではありません。\n\ndictation で「保存」したHTMLファイルか、旧JSONファイルだけを読み込めます。');
+      const fmt = meta ? String(meta.getAttribute('content') || '') : '';
+
+      // 全セッション一括 HTML（新旧どちらも対応）
+      if (fmt.startsWith('dictation-multi/')) {
+        // 新形式: <script id="dictation-multi-data"> に JSON 埋め込み
+        const script = doc.querySelector('script[type="application/json"]#dictation-multi-data');
+        if (script && script.textContent.trim()) {
+          const data = JSON.parse(script.textContent);
+          importMultipleSessions(data.sessions || []);
+          return;
+        }
+        // 旧形式（JSON 埋め込み無し）: DOM 構造から復元
+        const sessions = parseMultiSessionsFromDom(doc);
+        if (sessions.length === 0) {
+          alert('このHTMLからセッションデータを読み取れませんでした。\n構造が想定と異なる可能性があります。');
+          return;
+        }
+        importMultipleSessions(sessions);
         return;
       }
-      const script = doc.querySelector('script[type="application/json"]#dictation-data');
-      if (!script || !script.textContent.trim()) {
-        alert('HTMLファイルにセッションデータが埋め込まれていません。\n別の dictation ファイルを試してください。');
+
+      // 単体セッション HTML
+      if (fmt.startsWith('dictation-session/')) {
+        const script = doc.querySelector('script[type="application/json"]#dictation-data');
+        if (!script || !script.textContent.trim()) {
+          alert('HTMLファイルにセッションデータが埋め込まれていません。\n別の dictation ファイルを試してください。');
+          return;
+        }
+        const data = JSON.parse(script.textContent);
+        importSessionData(data.session || data);
         return;
       }
-      const data = JSON.parse(script.textContent);
-      importSessionData(data.session || data);
+
+      alert('これは dictation の保存ファイルではありません。\n\ndictation で「保存」したHTMLファイルか、旧JSONファイルだけを読み込めます。');
       return;
     }
 
     // JSON (legacy)
     if (name.endsWith('.json') || text.trimStart().startsWith('{')) {
       const data = JSON.parse(text);
+      // 複数セッション JSON も受け付ける
+      if (data && Array.isArray(data.sessions)) {
+        importMultipleSessions(data.sessions);
+        return;
+      }
       importSessionData(data.session || data);
       return;
     }
@@ -1738,8 +2419,21 @@ function formatDatePart(ts) {
   return `${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-async function autoGenerateTitle({ silent = true, force = false } = {}) {
-  const session = getActiveSession();
+/**
+ * セッションの transcript/summary HTML からプレーンテキストを取り出す
+ * （アクティブセッションは DOM から、それ以外はストアされた HTML から）
+ */
+function htmlToPlain(html) {
+  if (!html) return '';
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  return (tmp.innerText || tmp.textContent || '').trim();
+}
+
+async function autoGenerateTitle({ silent = true, force = false, sessionId = null } = {}) {
+  // 対象セッションをIDで固定（非同期中に activeId が変わっても誤適用しない）
+  const targetId = sessionId || state.activeId;
+  let session = state.sessions.find(s => s.id === targetId);
   if (!session) return;
   if (!force && session.titleIsManual) return;
   if (!state.settings.apiKey) {
@@ -1748,8 +2442,13 @@ async function autoGenerateTitle({ silent = true, force = false } = {}) {
   }
   // auto（録音停止時等）は aiEnabled に従う。手動再生成（force）は常に実行。
   if (!force && !state.settings.aiEnabled) return;
-  const transcript = getConfirmedText();
-  const summary = getSummaryText();
+  // 対象セッションが現在表示中ならDOMから、そうでなければストアHTMLから読む
+  const transcript = (targetId === state.activeId)
+    ? getConfirmedText()
+    : htmlToPlain(session.transcript);
+  const summary = (targetId === state.activeId)
+    ? getSummaryText()
+    : htmlToPlain(session.summary);
   if (!transcript && !summary) {
     if (!silent) alert('タイトル生成の素材がありません（文字起こし・要約が空）');
     return;
@@ -1764,12 +2463,17 @@ async function autoGenerateTitle({ silent = true, force = false } = {}) {
       if (!silent) alert('タイトルが空で返ってきました');
       return;
     }
+    // 非同期から戻ってきた時点でセッションがまだ存在するか再確認
+    session = state.sessions.find(s => s.id === targetId);
+    if (!session) return;
     session.aiTitle = aiTitle;
     session.title = `${aiTitle}(${formatDatePart(session.createdAt)})`;
     session.titleIsManual = false;
     session.updatedAt = Date.now();
     persistSessions();
     renderTabs();
+    // 表示中ならタイトルバーも更新
+    if (targetId === state.activeId) renderTitleBar();
   } catch (e) {
     console.warn('auto title failed:', e);
     if (!silent) alert('タイトル生成に失敗しました: ' + (e.message || String(e)));
@@ -1778,9 +2482,15 @@ async function autoGenerateTitle({ silent = true, force = false } = {}) {
 
 /* ───────── Summary generation ───────── */
 
-async function generateSummary({ silent = false } = {}) {
+async function generateSummary({ silent = false, sessionId = null } = {}) {
   if (state.isSummarizing) return;
-  const transcript = getConfirmedText();
+  // 対象セッションをIDで固定（非同期中にタブ切替されても安全に）
+  const targetId = sessionId || state.activeId;
+  let session = state.sessions.find(s => s.id === targetId);
+  if (!session) return;
+  const transcript = (targetId === state.activeId)
+    ? getConfirmedText()
+    : htmlToPlain(session.transcript);
   if (!transcript) {
     if (!silent) alert('文字起こしが空です。要約を生成できません。');
     return;
@@ -1790,33 +2500,50 @@ async function generateSummary({ silent = false } = {}) {
     return;
   }
   state.isSummarizing = true;
-  els.summary.classList.add('generating');
-  els.summaryEmpty.hidden = true;
-  if (els.btnSummaryCombo) els.btnSummaryCombo.classList.add('firing');
+  // 表示中のセッションだった場合のみ UI にローディング表示
+  const wasActive = (targetId === state.activeId);
+  if (wasActive) {
+    els.summary.classList.add('generating');
+    els.summaryEmpty.hidden = true;
+    if (els.btnSummaryCombo) els.btnSummaryCombo.classList.add('firing');
+  }
   setStatus('listening', '要約生成中');
   try {
-    const session = getActiveSession();
     const summary = await summarizeWithGemini({
       apiKey: state.settings.apiKey,
       transcript,
       title: session?.title,
       detail: state.settings.summaryDetail || 'medium',
     });
-    els.summary.innerHTML = renderMarkdown(summary);
-    snapshotActiveToSession();
+    // 非同期戻り後にセッションが生きているか再確認
+    session = state.sessions.find(s => s.id === targetId);
+    if (!session) return;
+    const summaryHtml = renderMarkdown(summary);
+    // セッションデータに直接書く（DOMは現在のactiveIdのものなので使わない）
+    session.summary = summaryHtml;
+    session.updatedAt = Date.now();
     persistSessions();
-    updateActionButtons();
-    if (!silent) {
-      switchInnerPane('pane-summary');
-      autoGenerateTitle();
+    // 対象セッションが今も表示中ならDOMにも反映
+    if (targetId === state.activeId) {
+      els.summary.innerHTML = summaryHtml;
+      els.summaryEmpty.hidden = true;
+      updateActionButtons();
+      if (!silent) {
+        switchInnerPane('pane-summary');
+        autoGenerateTitle({ sessionId: targetId });
+      }
     }
+    // silent モードの場合、呼び出し側（stopRecording 等）が
+    // 明示的に autoGenerateTitle を呼ぶのでここでは呼ばない
   } catch (e) {
     console.error('Summary generation failed:', e);
     if (!silent) alert('要約生成に失敗しました: ' + e.message);
   } finally {
     state.isSummarizing = false;
-    els.summary.classList.remove('generating');
-    if (els.btnSummaryCombo) els.btnSummaryCombo.classList.remove('firing');
+    if (wasActive && targetId === state.activeId) {
+      els.summary.classList.remove('generating');
+      if (els.btnSummaryCombo) els.btnSummaryCombo.classList.remove('firing');
+    }
     setStatus(state.isRecording ? 'listening' : 'idle', state.isRecording ? '録音中' : '停止');
   }
 }
@@ -1978,8 +2705,19 @@ function enablePointerDragSort(list, opts) {
     activeItem = item;
     isDragging = true;
     didReorder = false;
-    item.classList.add('dragging');
+    // グループ決定（単体 or 複数選択）
+    const getGroup = getOpts().getDragGroup;
+    const group = getGroup ? getGroup(item) : [item];
+    activeItem.__dragGroup = group;
+    group.forEach(el => el.classList.add('dragging'));
     ghost = createGhost(item);
+    // 複数選択のドラッグならゴーストに件数バッジを表示
+    if (group.length > 1) {
+      const badge = document.createElement('span');
+      badge.className = 'drag-ghost-badge';
+      badge.textContent = '× ' + group.length;
+      ghost.appendChild(badge);
+    }
     try { list.setPointerCapture(pointerId); } catch {}
   }
 
@@ -2009,12 +2747,16 @@ function enablePointerDragSort(list, opts) {
   function endDrag(e) {
     if (!activeItem) return;
     if (ghost) { try { document.body.removeChild(ghost); } catch {} ghost = null; }
-    activeItem.classList.remove('dragging');
+    const group = activeItem.__dragGroup || [activeItem];
+    group.forEach(el => el.classList.remove('dragging'));
 
     ghost = null;
     const hovered = document.elementFromPoint(e.clientX, e.clientY);
-    const target = hovered ? hovered.closest(itemSelector) : null;
-    if (target && target !== activeItem && list.contains(target)) {
+    let target = hovered ? hovered.closest(itemSelector) : null;
+    // グループ内のタブは drop target にできない（自分自身への移動は無意味）
+    if (target && group.includes(target)) target = null;
+
+    if (target && list.contains(target)) {
       // FLIP: First ── 並べ替え前の位置を記録
       const itemsBefore = Array.from(list.querySelectorAll(itemSelector));
       const firstRects = new Map();
@@ -2025,8 +2767,16 @@ function enablePointerDragSort(list, opts) {
       const before = horiz
         ? e.clientX < r.left + r.width / 2
         : e.clientY < r.top + r.height / 2;
-      if (before) list.insertBefore(activeItem, target);
-      else list.insertBefore(activeItem, target.nextSibling);
+
+      // グループを一旦外して、ターゲット位置に挿入（グループの並び順は保持）
+      group.forEach(el => el.remove());
+      const insertRef = before ? target : target.nextSibling;
+      // insertBefore(item, ref) は item を ref の直前に挿入。
+      // グループを順番に insertBefore すると、各要素が ref の直前に積み重なる形で
+      // 結果として group[0], group[1], ..., ref の順に並ぶ。
+      for (const el of group) {
+        list.insertBefore(el, insertRef);
+      }
 
       // FLIP: Last/Invert ── 新しい位置を測り、差分だけ過去位置へ飛ばす
       const itemsAfter = Array.from(list.querySelectorAll(itemSelector));
@@ -2060,6 +2810,12 @@ function enablePointerDragSort(list, opts) {
       didReorder = true;
       const cb = getOpts().onReorder;
       if (cb) cb(newOrder);
+
+      // ドラッグで並び順が変わったら、アクティブ線（下のスライド指示線）の
+      // 位置が古いままになるので、FLIPアニメ完了後に再計算
+      if (typeof updateActiveTabIndicator === 'function') {
+        setTimeout(() => updateActiveTabIndicator(), 340);
+      }
     }
     clearHighlights();
     try { list.releasePointerCapture(pointerId); } catch {}
@@ -2070,6 +2826,7 @@ function enablePointerDragSort(list, opts) {
       document.addEventListener('click', suppress, { capture: true, once: true });
     }
 
+    if (activeItem) activeItem.__dragGroup = null;
     activeItem = null;
     pointerId = null;
     isDragging = false;
@@ -2080,6 +2837,8 @@ function enablePointerDragSort(list, opts) {
     if (!item || !list.contains(item)) return;
     // ボタン/入力欄クリックはドラッグ発動しない
     if (e.target !== item && e.target.closest('button, input, textarea, select, [contenteditable="true"]')) return;
+    // 左クリック（主ボタン）以外はドラッグ対象外（右クリックは contextmenu に任せる）
+    if (e.button !== undefined && e.button !== 0) return;
 
     startX = e.clientX;
     startY = e.clientY;
@@ -2233,6 +2992,7 @@ function openSettings() {
     els.modeWebSpeech.checked = true;
   }
   els.inputChunkSec.value = state.settings.audioChunkSec || 12;
+  if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
   populateAudioDevices();
   applyGeminiOnlyVisibility(/* animated */ false);
   els.fontTranscript.value = state.settings.transcriptFont;
@@ -2243,6 +3003,9 @@ function openSettings() {
   els.sizeSummary.value = state.settings.summarySize;
   settingsWorkingOrder = state.settings.paneOrder.slice();
   renderPaneOrderList();
+  // 診断ログビューアを最新状態で描画
+  const diagViewer = document.getElementById('diag-log-viewer');
+  if (diagViewer) diagLog.renderInto(diagViewer);
   els.settingsModal.classList.remove('hidden');
   setTimeout(() => els.inputApiKey.focus(), 80);
 }
@@ -2264,6 +3027,7 @@ function saveSettingsFromForm() {
   state.settings.inputMode = els.modeGemini.checked ? 'gemini-audio' : 'web-speech';
   state.settings.audioDeviceId = els.inputAudioDevice ? els.inputAudioDevice.value : '';
   state.settings.audioChunkSec = Math.max(5, Math.min(60, Number(els.inputChunkSec.value) || 12));
+  if (els.inputMinChunkBytes) state.settings.audioMinChunkBytes = Math.max(100, Math.min(5000, Number(els.inputMinChunkBytes.value) || 400));
   state.settings.transcriptFont = els.fontTranscript.value;
   state.settings.transcriptSize = Math.max(10, Math.min(36, Number(els.sizeTranscript.value) || 17));
   state.settings.memoFont = els.fontMemo.value;
@@ -2396,7 +3160,11 @@ function createSession({ activate = true, title = null, skipSave = false } = {})
   if (activate) state.activeId = id;
   if (!skipSave) persistSessions();
   renderTabs();
-  if (activate) loadActiveSessionIntoDOM();
+  if (activate) {
+    loadActiveSessionIntoDOM();
+    // 新規タブを画面内に収めるよう自動スクロール
+    requestAnimationFrame(scrollActiveTabIntoView);
+  }
   return session;
 }
 
@@ -2451,13 +3219,69 @@ function switchSession(id) {
   const newIdx = state.sessions.findIndex(s => s.id === id);
   const direction = (oldIdx >= 0 && newIdx >= 0 && newIdx < oldIdx) ? 'left' : 'right';
 
-  if (state.isRecording) stopRecording();
-  snapshotActiveToSession();
+  // ===== BG録音対応: 録音は止めず、書き込み先を切替える =====
+  const oldActiveId = state.activeId;
+  const leavingRecordingSession = state.isRecording && state.recordingSessionId === oldActiveId && id !== state.recordingSessionId;
+  const enteringRecordingSession = state.isRecording && state.recordingSessionId === id && oldActiveId !== state.recordingSessionId;
+
+  if (leavingRecordingSession) diagLog.info(`BG録音開始（録音中のまま他タブへ）rec=${state.recordingSessionId?.slice(-6)} → view=${id?.slice(-6)}`);
+  if (enteringRecordingSession) diagLog.info(`BG録音→FG復帰 rec=${state.recordingSessionId?.slice(-6)}`);
+
+  if (leavingRecordingSession) {
+    // FG → BG へ遷移: 現在のDOMを録音セッションに保存し、以降はBG要素に書き込む
+    snapshotActiveToSession(); // recSessionに保存
+    // DOM内容を bgTranscriptEl に移す（pendingChunkElも一緒に追従）
+    if (!state.bgTranscriptEl) {
+      state.bgTranscriptEl = document.createElement('div');
+    }
+    // els.confirmed の全子要素を bg に移動（pendingChunkEl の DOM参照はそのまま有効）
+    while (els.confirmed.firstChild) {
+      state.bgTranscriptEl.appendChild(els.confirmed.firstChild);
+    }
+    // bg の内容をセッションへ反映
+    syncBgToSession();
+    // pendingChunkEl/Text を一時退避（loadActiveSessionIntoDOM で null化されるのを回避）
+    state._bgPendingChunkEl = state.pendingChunkEl;
+    state._bgPendingChunkText = state.pendingChunkText;
+  } else if (enteringRecordingSession) {
+    // BG → FG へ遷移: 先に現DOMを現activeセッションに保存
+    snapshotActiveToSession();
+    // bgTranscriptEl の内容を録音セッションに同期（最新を持ってる）
+    syncBgToSession();
+    // bg は後で loadActiveSessionIntoDOM が session.transcript を els.confirmed に復元するので、破棄する
+    state.bgTranscriptEl = null;
+  } else {
+    // 通常の切替（録音中でもFG録音中でない場合 or 録音外）
+    snapshotActiveToSession();
+  }
   persistSessions();
+
   state.activeId = id;
   persistSessions();
   renderTabs();
   loadActiveSessionIntoDOM();
+
+  // FG→BG遷移時: loadActiveSessionIntoDOM が pendingChunkEl を null化するので、
+  // 退避していた bg上の pendingChunkEl を復元（以降の appendRawChunk が同じ raw 段落に追記できる）
+  if (leavingRecordingSession) {
+    state.pendingChunkEl = state._bgPendingChunkEl || null;
+    state.pendingChunkText = state._bgPendingChunkText || '';
+    delete state._bgPendingChunkEl;
+    delete state._bgPendingChunkText;
+  }
+
+  // BG→FG遷移時: 録音対象セッションに戻ったので、els.confirmed に入った内容から
+  // pendingChunkEl を再検出する（raw クラスの末尾要素）
+  if (enteringRecordingSession) {
+    const raws = els.confirmed.querySelectorAll('.paragraph.raw');
+    state.pendingChunkEl = raws[raws.length - 1] || null;
+    if (state.pendingChunkEl) {
+      const body = state.pendingChunkEl.querySelector('.p-body');
+      state.pendingChunkText = body ? body.textContent.trim() : '';
+    } else {
+      state.pendingChunkText = '';
+    }
+  }
 
   // アクティブタブが見切れないよう横スクロール（renderTabs後の次フレームで）
   requestAnimationFrame(scrollActiveTabIntoView);
@@ -2480,7 +3304,8 @@ function closeSession(id) {
   const hasContent = session.transcript || session.memo || session.summary;
   if (hasContent && !confirm(`「${session.title}」を閉じます。この内容は削除されます。よろしいですか？`)) return;
   const wasActive = state.activeId === id;
-  if (wasActive && state.isRecording) stopRecording();
+  // 録音対象セッションが閉じられるなら（BGでも）録音を止める
+  if (state.isRecording && state.recordingSessionId === id) stopRecording();
   state.sessions.splice(idx, 1);
   if (state.sessions.length === 0) {
     createSession({ activate: true, skipSave: true });
@@ -2490,6 +3315,150 @@ function closeSession(id) {
   }
   persistSessions();
   renderTabs();
+}
+
+/* ───────── タブの一括閉じ（Chrome タブ風） ───────── */
+
+/** 指定したIDのリストを一括削除。中身ありは件数付きまとめ確認 */
+function closeMultipleSessions(ids, { skipConfirm = false } = {}) {
+  const targets = ids.map(id => state.sessions.find(s => s.id === id)).filter(Boolean);
+  if (targets.length === 0) return;
+  const withContent = targets.filter(s => s.transcript || s.memo || s.summary);
+  if (!skipConfirm && withContent.length > 0) {
+    const msg = withContent.length === targets.length
+      ? `${targets.length}個のタブを閉じます。内容はすべて削除されます。よろしいですか？`
+      : `${targets.length}個のタブを閉じます（うち${withContent.length}個に内容あり、削除されます）。よろしいですか？`;
+    if (!confirm(msg)) return;
+  }
+  // 録音対象が含まれるなら先に停止
+  if (state.isRecording && targets.some(s => s.id === state.recordingSessionId)) {
+    stopRecording();
+  }
+  const activeIsTarget = targets.some(s => s.id === state.activeId);
+  const idSet = new Set(targets.map(s => s.id));
+  state.sessions = state.sessions.filter(s => !idSet.has(s.id));
+  if (state.sessions.length === 0) {
+    createSession({ activate: true, skipSave: true });
+  } else if (activeIsTarget) {
+    // 活性なセッションが消えたら、なるべく近い位置のタブを活性化
+    state.activeId = state.sessions[0].id;
+    loadActiveSessionIntoDOM();
+  }
+  state.selectedTabIds = new Set();
+  state.selectionAnchorId = null;
+  persistSessions();
+  renderTabs();
+}
+
+function closeTabsToLeft(pivotId) {
+  const idx = state.sessions.findIndex(s => s.id === pivotId);
+  if (idx <= 0) return;
+  closeMultipleSessions(state.sessions.slice(0, idx).map(s => s.id));
+}
+
+function closeTabsToRight(pivotId) {
+  const idx = state.sessions.findIndex(s => s.id === pivotId);
+  if (idx < 0 || idx >= state.sessions.length - 1) return;
+  closeMultipleSessions(state.sessions.slice(idx + 1).map(s => s.id));
+}
+
+function closeOtherTabs(pivotId) {
+  const others = state.sessions.filter(s => s.id !== pivotId).map(s => s.id);
+  if (others.length === 0) return;
+  closeMultipleSessions(others);
+}
+
+function closeAllTabs() {
+  const all = state.sessions.map(s => s.id);
+  if (all.length === 0) return;
+  closeMultipleSessions(all);
+}
+
+/* ───────── タブ右クリック／長押しのコンテキストメニュー ───────── */
+
+function hideTabContextMenu() {
+  const menu = document.getElementById('tab-context-menu');
+  if (menu) menu.classList.add('hidden');
+}
+
+// メニューを開いた瞬間の event がそのまま document まで伝播して
+// 外側リスナーが「外でクリック/右クリックされた」と誤認して即閉じする問題を防ぐガード。
+let _tabCtxMenuOpening = false;
+
+function showTabContextMenu(sessionId, clientX, clientY) {
+  // 開いたイベントと同じバブリング中の外側リスナーの誤発火を無効化
+  _tabCtxMenuOpening = true;
+  setTimeout(() => { _tabCtxMenuOpening = false; }, 0);
+
+  let menu = document.getElementById('tab-context-menu');
+  if (!menu) {
+    menu = document.createElement('div');
+    menu.id = 'tab-context-menu';
+    menu.className = 'context-menu hidden';
+    document.body.appendChild(menu);
+    // 初回だけ外側クリック/Escで閉じるリスナーを設置
+    document.addEventListener('click', (e) => {
+      if (_tabCtxMenuOpening) return;
+      if (!menu.contains(e.target)) hideTabContextMenu();
+    }, true);
+    document.addEventListener('contextmenu', (e) => {
+      if (_tabCtxMenuOpening) return; // 開いた直後のイベントは無視
+      if (!menu.contains(e.target)) hideTabContextMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !menu.classList.contains('hidden')) hideTabContextMenu();
+    });
+  }
+  const idx = state.sessions.findIndex(s => s.id === sessionId);
+  const hasLeft = idx > 0;
+  const hasRight = idx >= 0 && idx < state.sessions.length - 1;
+  const hasOthers = state.sessions.length > 1;
+
+  const items = [
+    { label: 'このタブを閉じる', icon: 'x', onClick: () => closeSession(sessionId) },
+    { sep: true },
+    { label: '左のタブをすべて閉じる', icon: 'chevron-left', disabled: !hasLeft, onClick: () => closeTabsToLeft(sessionId) },
+    { label: '右のタブをすべて閉じる', icon: 'chevron-right', disabled: !hasRight, onClick: () => closeTabsToRight(sessionId) },
+    { label: '他のタブをすべて閉じる', icon: 'trash', disabled: !hasOthers, onClick: () => closeOtherTabs(sessionId) },
+    { sep: true },
+    { label: 'すべてのタブを閉じる', icon: 'trash', onClick: () => closeAllTabs(), danger: true },
+  ];
+
+  menu.innerHTML = '';
+  for (const it of items) {
+    if (it.sep) {
+      const sep = document.createElement('div');
+      sep.className = 'context-menu-sep';
+      menu.appendChild(sep);
+      continue;
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'context-menu-item' + (it.danger ? ' danger' : '');
+    btn.disabled = !!it.disabled;
+    btn.innerHTML = `<span class="cm-icon" data-icon="${it.icon}"></span><span class="cm-label">${it.label}</span>`;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideTabContextMenu();
+      if (!it.disabled) it.onClick();
+    });
+    menu.appendChild(btn);
+  }
+  renderIcons(menu);
+
+  // 画面端を超えないよう位置を調整
+  menu.style.visibility = 'hidden';
+  menu.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    const rect = menu.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let x = clientX, y = clientY;
+    if (x + rect.width > vw - 4) x = Math.max(4, vw - rect.width - 4);
+    if (y + rect.height > vh - 4) y = Math.max(4, vh - rect.height - 4);
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    menu.style.visibility = '';
+  });
 }
 
 function renameSession(id, title) {
@@ -2503,11 +3472,21 @@ function renameSession(id, title) {
 }
 
 function renderTabs() {
+  // セッションから消えたIDはselectedから除く
+  state.selectedTabIds = new Set(Array.from(state.selectedTabIds).filter(id =>
+    state.sessions.some(s => s.id === id)
+  ));
+
   els.tabsList.innerHTML = '';
   for (const session of state.sessions) {
     const tab = document.createElement('div');
     tab.className = 'tab' + (session.id === state.activeId ? ' active' : '');
-    if (state.isRecording && session.id === state.activeId) tab.classList.add('recording');
+    // 録音中はアクティブ/非アクティブ問わず録音対象セッションを赤で示す
+    if (state.isRecording && session.id === state.recordingSessionId) tab.classList.add('recording');
+    // 複数選択中の非アクティブタブにハイライト（単体選択時は表示しない＝.active の線で十分）
+    if (state.selectedTabIds.size > 1 && state.selectedTabIds.has(session.id)) {
+      tab.classList.add('selected');
+    }
     tab.dataset.id = session.id;
 
     const title = document.createElement('span');
@@ -2525,8 +3504,40 @@ function renderTabs() {
       closeSession(session.id);
     });
 
-    tab.addEventListener('click', () => {
+    // 右クリック（またはタッチ長押し後のcontextmenu）でタブメニュー
+    tab.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showTabContextMenu(session.id, e.clientX, e.clientY);
+    });
+
+    tab.addEventListener('click', (e) => {
       if (title.getAttribute('contenteditable') === 'true') return;
+      // Ctrl/Cmd+クリック: 選択に追加/除外（アクティブセッションは切り替えない）
+      if (e.ctrlKey || e.metaKey) {
+        if (state.selectedTabIds.has(session.id)) state.selectedTabIds.delete(session.id);
+        else state.selectedTabIds.add(session.id);
+        state.selectionAnchorId = session.id;
+        renderTabs();
+        return;
+      }
+      // Shift+クリック: アンカーから範囲選択
+      if (e.shiftKey) {
+        const anchorId = state.selectionAnchorId || state.activeId;
+        const ids = state.sessions.map(s => s.id);
+        const a = ids.indexOf(anchorId);
+        const b = ids.indexOf(session.id);
+        if (a < 0 || b < 0) {
+          state.selectedTabIds = new Set([session.id]);
+        } else {
+          const [lo, hi] = a <= b ? [a, b] : [b, a];
+          state.selectedTabIds = new Set(ids.slice(lo, hi + 1));
+        }
+        renderTabs();
+        return;
+      }
+      // 通常クリック: 選択をこのタブだけにリセットして、セッション切替
+      state.selectedTabIds = new Set([session.id]);
+      state.selectionAnchorId = session.id;
       switchSession(session.id);
     });
 
@@ -2567,6 +3578,16 @@ function renderTabs() {
     itemSelector: '.tab',
     idAttr: 'id',
     onReorder: reorderSessions,
+    // 複数選択中のタブを掴んだら、そのグループ全体をまとめて移動させる
+    getDragGroup: (item) => {
+      const id = item.dataset.id;
+      if (state.selectedTabIds.size >= 2 && state.selectedTabIds.has(id)) {
+        // 現在のDOM並び順を尊重（選択解除されたら普通に1個ドラッグ）
+        return Array.from(els.tabsList.querySelectorAll('.tab'))
+          .filter(el => state.selectedTabIds.has(el.dataset.id));
+      }
+      return [item];
+    },
   });
   // ◀ ▶ ボタンの端っこ到達時グレーアウト
   const activeIdx = state.sessions.findIndex(s => s.id === state.activeId);
@@ -2699,7 +3720,72 @@ function startAutoSave() {
 els.btnToggle.addEventListener('click', () => state.isRecording ? stopRecording() : startRecording());
 els.btnCopyAllPlain.addEventListener('click', copyAllPlain);
 els.btnCopyAllMd.addEventListener('click', copyAllMultiformat);
-els.btnSaveJson.addEventListener('click', saveSessionAsHtml);
+/**
+ * クリック＋長押し（タッチ対応）両対応のハンドラを要素に取り付ける。
+ * 用途: 保存ボタンの「通常=単体 / Shift+クリック or 長押し=全件」のように
+ *       同じUIで主/副アクションを切り替えたいとき。
+ *
+ * 挙動:
+ * - デスクトップ: 通常クリック → onClick、Shift+クリック → onLongPress
+ * - タッチ / マウス長押し (〜600ms): onLongPress（触覚フィードバック付き）
+ * - ドラッグで10px以上動いたら長押しキャンセル
+ * - キーボード(Enter) からのクリックは onClick として扱う
+ */
+function attachLongPressClick(el, { onClick, onLongPress, threshold = 600, moveTolerance = 10 } = {}) {
+  let longFired = false;
+  let longTimer = null;
+  let downX = 0, downY = 0;
+
+  const cancelLong = () => {
+    if (longTimer) { clearTimeout(longTimer); longTimer = null; }
+  };
+
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== undefined && e.button !== 0) return; // 左クリック/主ボタンのみ
+    longFired = false;
+    downX = e.clientX; downY = e.clientY;
+    cancelLong();
+    longTimer = setTimeout(() => {
+      longTimer = null;
+      longFired = true;
+      // 触覚フィードバック（モバイル Chrome 等）
+      try { navigator.vibrate && navigator.vibrate(30); } catch {}
+      onLongPress && onLongPress(e);
+    }, threshold);
+  });
+
+  el.addEventListener('pointermove', (e) => {
+    if (!longTimer) return;
+    if (Math.hypot(e.clientX - downX, e.clientY - downY) > moveTolerance) {
+      cancelLong();
+    }
+  });
+  el.addEventListener('pointerup', cancelLong);
+  el.addEventListener('pointercancel', cancelLong);
+  el.addEventListener('pointerleave', cancelLong);
+
+  el.addEventListener('click', (e) => {
+    // 長押しが既に発火していたら、後続のclickは抑止（二重実行防止）
+    if (longFired) {
+      longFired = false;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    // Shift+クリック = 長押しと等価（デスクトップ用ショートカット）
+    if (e.shiftKey) {
+      onLongPress && onLongPress(e);
+      return;
+    }
+    onClick && onClick(e);
+  });
+}
+
+// 保存ボタン: 通常=単体セッション、長押し/Shift=全セッション
+attachLongPressClick(els.btnSaveJson, {
+  onClick: saveSessionAsHtml,
+  onLongPress: saveAllSessionsAsHtml,
+});
 els.btnLoadJson.addEventListener('click', () => els.fileLoad.click());
 els.fileLoad.addEventListener('change', (e) => {
   const f = e.target.files?.[0];
@@ -2838,6 +3924,27 @@ function closeOnboarding() {
 }
 const btnOnboarding = document.getElementById('btn-onboarding');
 if (btnOnboarding) btnOnboarding.addEventListener('click', startOnboarding);
+
+/* ライブ字幕（OSD）ウィンドウを開く。
+ * Chrome拡張の場合は chrome-extension://ID/captions.html、
+ * 一般Webの場合は相対パス captions.html で開く。 */
+const btnCaptions = document.getElementById('btn-captions');
+if (btnCaptions) {
+  btnCaptions.addEventListener('click', () => {
+    // 現在のセッションを先に保存しておかないと字幕側が古いまま表示
+    snapshotActiveToSession();
+    persistSessions();
+    const url = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL)
+      ? chrome.runtime.getURL('captions.html')
+      : 'captions.html';
+    // 別ウィンドウとして開く。ユーザーが手動で別モニタに移動できるよう、通常タブ扱い
+    const w = window.open(url, 'dictation-captions',
+      'popup=yes,width=960,height=540,resizable=yes,scrollbars=yes');
+    if (!w) {
+      alert('ポップアップがブロックされました。ブラウザのポップアップ許可を確認してください。');
+    }
+  });
+}
 document.getElementById('onboarding-next-btn')?.addEventListener('click', nextOnboarding);
 document.querySelector('#onboarding .onboarding-skip')?.addEventListener('click', closeOnboarding);
 document.querySelector('#onboarding .onboarding-overlay')?.addEventListener('click', closeOnboarding);
@@ -2873,6 +3980,21 @@ document.querySelectorAll('[data-pane-clear]').forEach(btn => {
 });
 
 els.btnSettingsSave.addEventListener('click', saveSettingsFromForm);
+
+// 診断ログ: コピー／クリア
+document.getElementById('btn-diag-copy')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const text = diagLog.toPlainText() || '（ログなし）';
+  try {
+    await navigator.clipboard.writeText(text);
+    flashButton(btn, 'コピー完了');
+  } catch (err) {
+    alert('コピー失敗: ' + err.message);
+  }
+});
+document.getElementById('btn-diag-clear')?.addEventListener('click', () => {
+  diagLog.clear();
+});
 
 // モード切替で Gemini 専用フィールドの表示/非表示をアニメーション
 if (els.modeWebSpeech) els.modeWebSpeech.addEventListener('change', () => applyGeminiOnlyVisibility(true));
@@ -3277,8 +4399,13 @@ if (els.btnRefineTranscript) {
       if (!state.settings.apiKey) { openSettings(); return; }
       els.btnRefineTranscript.classList.add('firing');
       try {
-        // 貼付け等の未整形テキストを先に整形、その後に needs-retry のパラグラフを再試行
+        // 貼付け等の未整形テキストを先に整形
         await refineUnstructuredInTranscript({ force: true, showFeedback: true });
+        // ショートチャンク（Geminiオーディオ由来）を強制的に統合整形（見出し付け）
+        const container = getWriteContainer();
+        const shorts = Array.from(container.querySelectorAll('.paragraph.short-refined'));
+        if (shorts.length > 0) await consolidateShortChunks(shorts);
+        // 失敗した needs-retry の再試行
         await retryPendingRefinements({ showFeedback: true });
       } finally {
         els.btnRefineTranscript.classList.remove('firing');
@@ -3309,10 +4436,26 @@ document.addEventListener('keydown', (e) => {
 });
 
 els.btnTabNew.addEventListener('click', () => {
-  if (state.isRecording) stopRecording();
-  snapshotActiveToSession();
-  persistSessions();
-  createSession({ activate: true });
+  // 新タブ作成時は複数選択をクリア（旧選択のハイライトが残るのを防ぐ）
+  state.selectedTabIds = new Set();
+  state.selectionAnchorId = null;
+  // BG録音対応: 録音は止めず、新セッションを作ってから switchSession で遷移させる
+  // （switchSession内でBG→FG/FG→BGの切替処理が走る）
+  const wasRecording = state.isRecording;
+  if (wasRecording) {
+    // createSession({activate:true}) は loadActiveSessionIntoDOM を呼んで pendingChunkEl を消すため、
+    // 録音中は「activate:false で作ってから switchSession」で切替処理を正しく通す
+    snapshotActiveToSession();
+    persistSessions();
+    const s = createSession({ activate: false, skipSave: true });
+    state.selectedTabIds = new Set([s.id]);
+    state.selectionAnchorId = s.id;
+    switchSession(s.id);
+  } else {
+    snapshotActiveToSession();
+    persistSessions();
+    createSession({ activate: true });
+  }
 });
 
 /* 左右タブ送り: 現在のタブから前後へ1つ移動 */

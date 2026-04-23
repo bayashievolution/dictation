@@ -25,9 +25,183 @@ const SYSTEM_PROMPT = `あなたは講義・会議の音声認識結果を読み
  * @param {string} args.newChunk - 整形したい生の音声認識テキスト
  * @returns {Promise<string>} 整形後テキスト
  */
+/**
+ * 非同期スリープ（リトライ間隔用）
+ */
+function _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+/**
+ * Gemini generateContent の薄い呼び出し。
+ * - 429(レート制限) / 5xx / Failed to fetch は指数バックオフでリトライ
+ * - 4xx系（401, 400など）は即時throw
+ * - 応答が空（finishReason付き）も throw（呼び出し側でneeds-retry化）
+ */
+/**
+ * モデル由来の汚染（思考モード漏れ・繰り返しハルシネーション・メタテキスト）を
+ * 出力テキストから剥がすサニタイザ。
+ *
+ * 対処する既知パターン:
+ *  - 【思考開始】...【思考終了】 ブロック
+ *  - 【思考開始】のみで終了マーカーなし（ハルシネーションで壊れた応答）
+ *  - 「音声内容の確認:」「詳細な確認と整形:」等のメタ見出し
+ *  - 「- 「xxx」 -> 「yyy」」形式の思考的箇条書き
+ *  - 「最終的な整形案:」マーカー（以降を採用）
+ *  - 「のののの…」「を、からしに、を、からしに…」等の繰り返しループ
+ */
+function _stripThinkingArtifacts(text) {
+  if (!text) return text;
+  let t = text;
+  const originalLen = t.length;
+  const events = [];
+
+  // 1. 【思考開始】〜【思考終了】 ブロック削除
+  const thinkBlockRe = /【思考[^】]*】[\s\S]*?【思考[^】]*(?:終了|終わり|ここまで|end)[^】]*】\s*:?／?/g;
+  if (thinkBlockRe.test(t)) {
+    t = t.replace(thinkBlockRe, '');
+    events.push('思考ブロック除去');
+  }
+
+  // 2. 「最終的な整形案」マーカーがあればそれ以降を本文採用、手前は原則破棄
+  const finalRe = /(?:最終(?:的な?)?(?:整形案|出力|回答|結果|テキスト)|【出力】|【回答】|【整形結果】)\s*[:：]?\s*\n?/;
+  const fm = t.match(finalRe);
+  if (fm) {
+    const idx = t.indexOf(fm[0]);
+    const before = t.slice(0, idx).trim();
+    const after  = t.slice(idx + fm[0].length).trim();
+    // 手前が思考メタのみなら捨てる、そうでなければ連結
+    if (/音声内容の確認|詳細な確認|これで.*(?:ルール|問題)|問題なさそう/.test(before) || before.length < 40) {
+      t = after;
+    } else {
+      t = before + '\n' + after;
+    }
+    events.push('最終マーカー採用');
+  }
+
+  // 3. 【思考開始】だけあって終了マーカーがない場合 → 開始以降を切り捨て
+  if (/【思考/.test(t)) {
+    t = t.replace(/【思考[^】]*】[\s\S]*$/, '').trim();
+    events.push('思考開始以降を切り捨て');
+  }
+
+  // 4. メタ見出し行（「音声内容の確認:」等）を削除
+  const metaHeadRe = /^\s*(?:音声内容の確認|詳細な確認と整形|これで(?:ルール|問題)[^\n]*(?:確認|問題)|問題なさそう。?|ルールを適用して整形する。?|最終的な整形案)\s*[:：]?\s*$/gm;
+  if (metaHeadRe.test(t)) {
+    t = t.replace(metaHeadRe, '');
+    events.push('メタ見出し除去');
+  }
+
+  // 5. 思考の箇条書き "- 「xxx」 -> 「yyy」" を削除
+  const bulletRe = /^\s*-\s*「[^」]*」\s*(?:->|→)\s*「[^」]*」\s*$/gm;
+  if (bulletRe.test(t)) {
+    t = t.replace(bulletRe, '');
+    events.push('思考箇条書き除去');
+  }
+
+  // 6. 繰り返しハルシネーション検出: 1〜20文字の短句が15回以上連続
+  //    「のののの...」「を、からしに、を、からしに...」「ああああ...」等
+  const repeatRe = /(.{1,20}?)\1{14,}/g;
+  const repeatMatches = t.match(repeatRe);
+  if (repeatMatches) {
+    t = t.replace(repeatRe, (m, p1) => {
+      const sample = p1.replace(/\s+/g, '').slice(0, 12);
+      return `\n…[モデルが「${sample}」を繰り返して出力破綻。区間省略]…\n`;
+    });
+    events.push(`繰り返し検出×${repeatMatches.length}`);
+  }
+
+  // 7. 連続改行の圧縮
+  t = t.replace(/\n{3,}/g, '\n\n');
+  t = t.trim();
+
+  // 8. 健全性: サニタイズで大きく削られた/ほぼ空になった場合は診断ログで通知
+  if (window.diagLog && (events.length > 0 || Math.abs(t.length - originalLen) > 100)) {
+    window.diagLog.info(`Gemini出力クリーニング: ${events.join(', ')} (${originalLen}→${t.length}字)`);
+  }
+
+  // 空になったら空文字を返す → 呼び出し側でneeds-retry扱い
+  if (t.length < 3) return '';
+  // 繰り返し検出「省略」マーカーしか残らなかった場合も空扱い
+  if (/^(?:…\[[^\]]*\]…\s*)+$/.test(t)) return '';
+  return t;
+}
+
+async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800 } = {}) {
+  // 思考モードの出力混入を防ぐため、明示的に無効化。
+  // thinkingBudget:0 だけだとまれに漏れるので includeThoughts:false も併用。
+  if (!body.generationConfig) body.generationConfig = {};
+  if (body.generationConfig.thinkingConfig === undefined) {
+    body.generationConfig.thinkingConfig = {
+      thinkingBudget: 0,
+      includeThoughts: false,
+    };
+  }
+  const url = `${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        const err = new Error(`Gemini API エラー (${res.status}): ${errText.slice(0, 300)}`);
+        err.status = res.status;
+        // 429 / 500 / 502 / 503 / 504 はリトライ候補
+        if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
+          lastErr = err;
+          if (window.diagLog) window.diagLog.info(`Gemini リトライ ${attempt+1}/${maxRetries} (status=${res.status})`);
+          await _sleep(retryBaseMs * Math.pow(2, attempt) + Math.random() * 200);
+          continue;
+        }
+        throw err;
+      }
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const reason = data?.candidates?.[0]?.finishReason || '';
+      if (!text) {
+        // SAFETY / RECITATION は即 throw（再試行しても同じ結果）
+        // それ以外（STOP 空・OTHER 等）はリトライしてみる
+        const err = new Error(`Gemini 応答が空です（finishReason: ${reason || 'unknown'}）`);
+        err.finishReason = reason;
+        if (reason !== 'SAFETY' && reason !== 'RECITATION' && attempt < maxRetries) {
+          lastErr = err;
+          if (window.diagLog) window.diagLog.info(`Gemini リトライ ${attempt+1}/${maxRetries} (empty, reason=${reason || 'none'})`);
+          await _sleep(retryBaseMs * Math.pow(2, attempt) + Math.random() * 200);
+          continue;
+        }
+        throw err;
+      }
+      // 思考モードの漏れを保険サニタイズ
+      const cleaned = _stripThinkingArtifacts(text);
+      if (cleaned !== text && window.diagLog) {
+        window.diagLog.info(`Gemini 思考トークンを後処理で除去 (${text.length}→${cleaned.length}字)`);
+      }
+      return cleaned;
+    } catch (e) {
+      // ネットワーク層のエラー（TypeError: Failed to fetch 等）もリトライ候補
+      if ((e.name === 'TypeError' || /Failed to fetch|NetworkError/i.test(e.message || '')) && attempt < maxRetries) {
+        lastErr = e;
+        if (window.diagLog) window.diagLog.info(`Gemini リトライ ${attempt+1}/${maxRetries} (network)`);
+        await _sleep(retryBaseMs * Math.pow(2, attempt) + Math.random() * 200);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr || new Error('Gemini 呼び出し失敗（リトライ上限）');
+}
+
 async function refineWithGemini({ apiKey, context, newChunk }) {
   if (!apiKey) throw new Error('Gemini API キーが設定されていません');
   if (!newChunk || !newChunk.trim()) return '';
+
+  // 極端に短いチャンク（15文字未満）はそのまま生テキストを返す。
+  // Gemini が空レスを返しやすく、整形しても情報が増えない。
+  if (newChunk.trim().length < 15) {
+    return newChunk.trim();
+  }
 
   const userPrompt = [
     '【直前の整形済み文脈】',
@@ -55,24 +229,7 @@ async function refineWithGemini({ apiKey, context, newChunk }) {
     },
   };
 
-  const url = `${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`Gemini API エラー (${res.status}): ${errText.slice(0, 300)}`);
-  }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    const reason = data?.candidates?.[0]?.finishReason || 'unknown';
-    throw new Error(`Gemini 応答が空です（finishReason: ${reason}）`);
-  }
+  const text = await _callGemini(body, apiKey);
   return text.trim();
 }
 
@@ -160,21 +317,7 @@ async function summarizeWithGemini({ apiKey, transcript, title, detail }) {
     },
   };
 
-  const url = `${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`Gemini API エラー (${res.status}): ${errText.slice(0, 300)}`);
-  }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('要約の応答が空です');
+  const text = await _callGemini(body, apiKey);
   return text.trim();
 }
 
@@ -219,21 +362,7 @@ async function generateTitleWithGemini({ apiKey, summary, transcript }) {
     },
   };
 
-  const url = `${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`Gemini API エラー (${res.status}): ${errText.slice(0, 300)}`);
-  }
-
-  const data = await res.json();
-  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!raw) throw new Error('タイトルの応答が空です');
+  const raw = await _callGemini(body, apiKey);
 
   // AI が誤って改行や装飾を含めても安全に1行のタイトル文字列に整形する
   let cleaned = raw.trim()
@@ -312,22 +441,7 @@ async function chatWithGemini({ apiKey, contextSources, history, question }) {
     },
   };
 
-  const url = `${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`Gemini API エラー (${res.status}): ${errText.slice(0, 300)}`);
-  }
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    const reason = data?.candidates?.[0]?.finishReason || 'unknown';
-    throw new Error(`Gemini 応答が空です（finishReason: ${reason}）`);
-  }
+  const text = await _callGemini(body, apiKey);
   return text.trim();
 }
 
@@ -376,19 +490,17 @@ async function transcribeAudioWithGemini({ apiKey, audioBlob, contextHint }) {
     },
   };
 
-  const url = `${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`Gemini Audio エラー (${res.status}): ${errText.slice(0, 300)}`);
+  // 音声文字起こしは finishReason 空＝本当に無音の場合があるので、
+  // _callGemini の「空レスでリトライ」を無効化して即空文字列を返す
+  try {
+    const text = await _callGemini(body, apiKey, { maxRetries: 1 });
+    return (text || '').trim();
+  } catch (e) {
+    // finishReason 空のとき（純粋な無音）は空文字列扱い
+    if (e.message && /応答が空/.test(e.message) && !e.finishReason) return '';
+    if (e.finishReason === 'STOP' || e.finishReason === 'OTHER') return '';
+    throw e;
   }
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  return (text || '').trim();
 }
 
 function blobToBase64(blob) {

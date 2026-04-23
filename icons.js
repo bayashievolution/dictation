@@ -30,6 +30,8 @@ const ICON_DEFS = {
   // zemicale のロボットアイコン（シンプルな四角ボディ＋アンテナ）
   'bot': '<rect x="4" y="8" width="16" height="12" rx="2"/><circle cx="9" cy="14" r="1.5"/><circle cx="15" cy="14" r="1.5"/><line x1="12" y1="4" x2="12" y2="8"/><circle cx="12" cy="3" r="1"/>',
   'help-circle': '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  // ライブ字幕（OSD）用。モニター＋キャプション線のイメージ
+  'captions': '<rect x="3" y="5" width="18" height="14" rx="2"/><line x1="7" y1="11" x2="11" y2="11"/><line x1="7" y1="14" x2="11" y2="14"/><line x1="14" y1="11" x2="17" y2="11"/><line x1="14" y1="14" x2="17" y2="14"/>',
 };
 
 function icon(name, size = 16) {

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.9.38" />
+  <link rel="stylesheet" href="style.css?v=0.11.0" />
 </head>
 <body>
   <div id="app">
@@ -32,7 +32,7 @@
       <button id="btn-copy-all-md" class="btn btn-secondary btn-square" disabled title="全タブをMarkdown形式でコピー（Notionは3トグルで復元）">
         <span class="btn-icon" data-icon="book"></span>
       </button>
-      <button id="btn-save-json" class="btn btn-ghost btn-square" title="HTMLで保存（ダブルクリックで綺麗に読める、再インポート可）">
+      <button id="btn-save-json" class="btn btn-ghost btn-square" title="HTMLで保存（クリック=このセッションのみ／Shift+クリックor長押し=全セッション一括・展開可）">
         <span class="btn-icon" data-icon="save"></span>
       </button>
       <button id="btn-load-json" class="btn btn-ghost btn-square" title="HTML/JSONから読み込み">
@@ -43,6 +43,9 @@
       </button>
       <button id="btn-settings" class="btn btn-ghost btn-square" title="設定">
         <span class="btn-icon" data-icon="settings"></span>
+      </button>
+      <button id="btn-captions" class="btn btn-ghost btn-square" title="ライブ字幕を別ウィンドウで開く（聴覚障害のある方向け・大画面表示）">
+        <span class="btn-icon" data-icon="captions"></span>
       </button>
       <button id="btn-onboarding" class="btn btn-ghost btn-square" title="使い方ガイド">
         <span class="btn-icon" data-icon="help-circle"></span>
@@ -328,6 +331,17 @@
                 </div>
                 <small class="field-hint">この秒数ごとに音声を Gemini へ送信。長いほど精度アップ・遅延増、短いほど反応速い。既定 12 秒。</small>
               </label>
+              <label class="field">
+                <span class="field-label">音声送信しきい値（バイト）</span>
+                <div class="number-stepper">
+                  <input id="input-min-chunk-bytes" type="number" min="100" max="5000" step="50" />
+                  <div class="number-stepper-btns">
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-min-chunk-bytes" data-stepper-delta="50" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-min-chunk-bytes" data-stepper-delta="-50" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">このサイズ未満の音声チャンクは無音とみなしてスキップ。小声も拾いたいなら下げる（既定 400）／無駄送信を減らすなら上げる。</small>
+              </label>
             </div>
           </div>
         </div>
@@ -406,6 +420,25 @@
           </div>
         </div>
 
+        <div class="field-group">
+          <h3 class="field-group-title">診断ログ</h3>
+          <div class="field">
+            <div class="diag-log-head">
+              <span class="field-label">最近の警告・エラー（最新50件）</span>
+              <div class="diag-log-actions">
+                <button type="button" id="btn-diag-copy" class="pane-btn" title="全件をクリップボードへ">
+                  <span data-icon="copy"></span><span>コピー</span>
+                </button>
+                <button type="button" id="btn-diag-clear" class="pane-btn" title="ログをクリア">
+                  <span data-icon="trash"></span><span>クリア</span>
+                </button>
+              </div>
+            </div>
+            <div id="diag-log-viewer" class="diag-log-viewer" aria-live="polite"></div>
+            <small class="field-hint">整形失敗・通信エラー等のトラブル時に中身を開発者に送ると原因が絞れます</small>
+          </div>
+        </div>
+
       </div>
       <div class="modal-footer">
         <button id="btn-settings-save" class="btn btn-primary">保存</button>
@@ -467,8 +500,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.9.38"></script>
-  <script src="gemini.js?v=0.9.38"></script>
-  <script src="app.js?v=0.9.38"></script>
+  <script src="icons.js?v=0.11.0"></script>
+  <script src="gemini.js?v=0.11.0"></script>
+  <script src="app.js?v=0.11.0"></script>
 </body>
 </html>

@@ -1,0 +1,399 @@
+/**
+ * dictation — ライブ字幕（captions）ウィンドウ専用スタイル
+ * 聴覚障害のある受講者向け。フォント・色・縁取り等は全てユーザー設定可能。
+ */
+:root {
+  --cap-bg: #000;          /* 外枠背景（字幕以外の部分） */
+  --cap-ui: #1a1a1f;
+  --cap-ui-soft: #23232a;
+  --cap-border: #3a3a44;
+  --cap-text: #e8e8eb;
+  --cap-text-muted: #9b9ba5;
+  --cap-accent: #34d399;
+  --cap-danger: #f87171;
+
+  /* 以下は JS が設定で上書きする変数群 */
+  --cap-font-size: 64px;
+  --cap-font-family: 'Noto Sans JP', sans-serif;
+  --cap-font-weight: 600;
+  --cap-font-color: #ffffff;
+  --cap-bg-color: rgba(0, 0, 0, 0.7);
+  --cap-line-height: 1.4;
+  --cap-text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+  --cap-stroke: none;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--cap-bg);
+  color: var(--cap-text);
+  font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.cap-body {
+  display: block;
+  position: relative;
+}
+
+/* 字幕が置かれるキャンバス（全画面） */
+#cap-canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* 字幕ボックス: ドラッグ移動、四隅でリサイズ可能 */
+.cap-box {
+  position: absolute;
+  left: 50%;
+  bottom: 60px;
+  transform: translateX(-50%);
+  min-width: 200px;
+  min-height: 60px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 120px);
+  width: 80%;
+  padding: 28px 36px;
+  background: var(--cap-bg-color);
+  border-radius: 14px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  cursor: grab;
+  touch-action: none;
+  /* スクロールバー */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.3) transparent;
+  transition: outline 0.15s;
+}
+.cap-box::-webkit-scrollbar { width: 8px; height: 8px; }
+.cap-box::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 4px; }
+.cap-box::-webkit-scrollbar-track { background: transparent; }
+.cap-box:active { cursor: grabbing; }
+.cap-box.resizing { cursor: nwse-resize !important; }
+.cap-box:hover { outline: 1px dashed rgba(255, 255, 255, 0.25); outline-offset: -1px; }
+
+#cap-box-text {
+  font-family: var(--cap-font-family);
+  font-size: var(--cap-font-size);
+  font-weight: var(--cap-font-weight);
+  color: var(--cap-font-color);
+  line-height: var(--cap-line-height);
+  text-shadow: var(--cap-text-shadow);
+  -webkit-text-stroke: var(--cap-stroke);
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+#cap-box-text p { margin: 0 0 0.35em; }
+#cap-box-text p:last-child { margin-bottom: 0; }
+#cap-box-text .cap-para.latest {
+  /* 最新段落は不透明度MAX、過去段落はやや薄く */
+  opacity: 1;
+}
+#cap-box-text .cap-para:not(.latest) {
+  opacity: 0.7;
+}
+#cap-box-text:empty::before {
+  content: '（発話を待っています…）';
+  color: var(--cap-font-color);
+  opacity: 0.4;
+  font-weight: 400;
+  font-size: 0.6em;
+}
+
+/* リサイズハンドル（四隅） */
+.cap-resize {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 0.15s;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+.cap-box:hover .cap-resize { opacity: 1; }
+.cap-resize-tl { top: 4px; left: 4px; cursor: nwse-resize; }
+.cap-resize-tr { top: 4px; right: 4px; cursor: nesw-resize; }
+.cap-resize-bl { bottom: 4px; left: 4px; cursor: nesw-resize; }
+.cap-resize-br { bottom: 4px; right: 4px; cursor: nwse-resize; }
+
+/* ツールバー（上部） */
+.cap-toolbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 10;
+  padding: 8px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.8), rgba(0,0,0,0));
+  color: var(--cap-text);
+  pointer-events: none; /* 子要素で再有効化 */
+  opacity: 0.35;
+  transition: opacity 0.2s;
+}
+.cap-toolbar:hover { opacity: 1; }
+.cap-tool-left, .cap-tool-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.cap-status {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--cap-text-muted);
+  user-select: none;
+}
+.cap-status.listening { background: rgba(52, 211, 153, 0.2); color: var(--cap-accent); }
+.cap-status.error { background: rgba(248, 113, 113, 0.2); color: var(--cap-danger); }
+.cap-session-title {
+  font-size: 12px;
+  color: var(--cap-text-muted);
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cap-tool-btn {
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--cap-text);
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.12s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+.cap-tool-btn:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.4); }
+.cap-tool-btn:active { transform: scale(0.94); }
+
+/* 設定パネル（右側ドロワー） */
+.cap-settings {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: min(360px, 92vw);
+  background: var(--cap-ui);
+  border-left: 1px solid var(--cap-border);
+  color: var(--cap-text);
+  z-index: 20;
+  overflow-y: auto;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.5);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s;
+}
+.cap-settings.hidden { transform: translateX(100%); opacity: 0; pointer-events: none; }
+
+.cap-settings-head {
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--cap-border);
+  background: var(--cap-ui-soft);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.cap-settings-head h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cap-accent);
+  letter-spacing: 0.04em;
+  margin: 0;
+}
+.cap-settings-body {
+  padding: 14px 18px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cap-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cap-field-row { flex-direction: row; align-items: center; justify-content: space-between; }
+.cap-label {
+  font-size: 12px;
+  color: var(--cap-text-muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.cap-label output {
+  color: var(--cap-accent);
+  font-family: 'Source Code Pro', monospace;
+  font-size: 11px;
+}
+.cap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cap-indent { padding-left: 20px; }
+.cap-inline { font-size: 11px; color: var(--cap-text-muted); }
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--cap-accent);
+}
+input[type="color"] {
+  width: 36px;
+  height: 30px;
+  border: 1px solid var(--cap-border);
+  border-radius: 4px;
+  background: var(--cap-ui-soft);
+  cursor: pointer;
+  padding: 2px;
+}
+select {
+  background: var(--cap-ui-soft);
+  color: var(--cap-text);
+  border: 1px solid var(--cap-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+}
+select:focus { border-color: var(--cap-accent); }
+
+.cap-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+.cap-toggle input[type="checkbox"] { accent-color: var(--cap-accent); width: 16px; height: 16px; cursor: pointer; }
+
+.cap-btn-ghost {
+  background: transparent;
+  border: 1px solid var(--cap-border);
+  color: var(--cap-text-muted);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.cap-btn-ghost:hover { background: var(--cap-ui-soft); color: var(--cap-text); border-color: var(--cap-accent); }
+
+.cap-field-footer { margin-top: 14px; border-top: 1px solid var(--cap-border); padding-top: 14px; }
+
+.hidden { display: none !important; }
+
+/* 設定パネルが hidden の時はパネル自体は非表示だが、トランジションで transform 使うので
+ * display: none で消すと効かない。上書きで transform のみ。 */
+.cap-settings.hidden { display: block !important; transform: translateX(100%); opacity: 0; pointer-events: none; }
+
+/* 全画面時は余分な余白を削る */
+:fullscreen body.cap-body, body.cap-body:fullscreen {
+  background: #000;
+}
+
+/* ───────── 配信モード（OBS用） ─────────
+ * body 全体をキー色（既定マゼンタ）にして、OBSのカラーキーで抜けば
+ * 透過背景 + 文字 + 影 だけが残る。ただしUIパーツ（ツールバー等）は
+ * 利用者が操作できる状態にしつつ、OBSのキャプチャには写り込まないよう
+ * キー色を塗っておく。 */
+body.broadcast-mode {
+  background: var(--cap-key-color, #ff00ff);
+}
+body.broadcast-mode .cap-box {
+  background: var(--cap-key-color, #ff00ff) !important;
+  /* 不透明にしないとキー色と干渉してまだら抜けになる */
+  cursor: default;
+}
+body.broadcast-mode .cap-box:hover {
+  outline: none;
+}
+body.broadcast-mode .cap-resize {
+  display: none;
+}
+/* 配信モードではツールバーもキー色の帯にする（マウスは拾える状態で、OBS側では抜かれる） */
+body.broadcast-mode .cap-toolbar {
+  background: var(--cap-key-color, #ff00ff);
+  opacity: 0.001; /* 操作できる透明度。hoverで戻す */
+  transition: opacity 0.2s;
+}
+body.broadcast-mode .cap-toolbar:hover {
+  opacity: 1;
+  /* hoverで出した時はUIが見えるよう背景を戻す */
+  background: linear-gradient(to bottom, rgba(0,0,0,0.85), rgba(0,0,0,0.2));
+}
+body.broadcast-mode .cap-session-title {
+  display: none; /* 配信時は邪魔 */
+}
+
+/* 配信モード中の目印（ユーザーにだけ見える、配信には映らない） */
+body.broadcast-mode::before {
+  content: '配信モード ON (OBSでカラーキー抜き用)';
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.4);
+  padding: 6px 14px;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 5;
+  letter-spacing: 0.05em;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+body.broadcast-mode:hover::before {
+  opacity: 1;
+}
+
+/* 配信モード中、テキスト自体はユーザー設定のまま（bg-color は無視される形） */
+body.broadcast-mode #cap-box-text {
+  text-shadow: var(--cap-text-shadow) !important;
+}
+
+/* 配信モード用設定セクション */
+.cap-broadcast-section {
+  border-top: 1px solid var(--cap-border);
+  padding-top: 14px;
+  margin-top: 4px;
+}
+.cap-broadcast-toggle {
+  font-size: 14px;
+}
+.cap-broadcast-toggle strong {
+  color: var(--cap-accent);
+}
+.cap-hint {
+  font-size: 11px;
+  color: var(--cap-text-muted);
+  line-height: 1.6;
+  padding-left: 20px;
+  margin-top: 4px;
+  display: block;
+}
+.cap-hint strong {
+  color: var(--cap-text);
+  font-weight: 600;
+}

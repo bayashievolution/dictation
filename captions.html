@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>字幕（ライブキャプション）— ばっさんディクテーション</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;900&family=Noto+Serif+JP:wght@400;600;700&family=M+PLUS+1p:wght@400;500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600;700&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="captions.css?v=0.11.0" />
+</head>
+<body class="cap-body">
+  <div id="cap-canvas">
+    <div id="cap-box" class="cap-box">
+      <div id="cap-box-text">録音を開始すると字幕が表示されます</div>
+      <!-- リサイズハンドル -->
+      <div class="cap-resize cap-resize-br" data-resize="br"></div>
+      <div class="cap-resize cap-resize-tl" data-resize="tl"></div>
+      <div class="cap-resize cap-resize-tr" data-resize="tr"></div>
+      <div class="cap-resize cap-resize-bl" data-resize="bl"></div>
+    </div>
+  </div>
+
+  <div id="cap-toolbar" class="cap-toolbar">
+    <div class="cap-tool-left">
+      <span id="cap-status" class="cap-status idle">● 待機</span>
+      <span id="cap-session-title" class="cap-session-title"></span>
+    </div>
+    <div class="cap-tool-right">
+      <button id="cap-btn-settings" class="cap-tool-btn" title="表示設定">⚙</button>
+      <button id="cap-btn-fullscreen" class="cap-tool-btn" title="全画面">⛶</button>
+      <button id="cap-btn-reset-pos" class="cap-tool-btn" title="字幕ボックスの位置とサイズをリセット">⟳</button>
+    </div>
+  </div>
+
+  <!-- 設定パネル（ドロワー） -->
+  <aside id="cap-settings" class="cap-settings hidden">
+    <div class="cap-settings-head">
+      <h2>表示設定</h2>
+      <button id="cap-settings-close" class="cap-tool-btn">×</button>
+    </div>
+    <div class="cap-settings-body">
+
+      <div class="cap-field">
+        <label class="cap-label">フォントサイズ <output id="cap-font-size-out">64px</output></label>
+        <input type="range" id="cap-font-size" min="16" max="240" step="2" value="64" />
+      </div>
+
+      <div class="cap-field">
+        <label class="cap-label">フォント種類</label>
+        <select id="cap-font-family">
+          <option value="'Noto Sans JP', sans-serif">ゴシック (Noto Sans JP)</option>
+          <option value="'M PLUS 1p', sans-serif">丸ゴ (M PLUS 1p)</option>
+          <option value="'Zen Kaku Gothic New', sans-serif">Zen 角ゴ</option>
+          <option value="'Kosugi Maru', sans-serif">小杉丸ゴ</option>
+          <option value="'Sawarabi Gothic', sans-serif">さわらびゴ</option>
+          <option value="'Klee One', sans-serif">クレー（手書き風）</option>
+          <option value="'Yomogi', sans-serif">よもぎ（手書き）</option>
+          <option value="'Noto Serif JP', serif">明朝 (Noto Serif JP)</option>
+          <option value="'Shippori Mincho', serif">しっぽり明朝</option>
+          <option value="'Source Code Pro', monospace">等幅 (Source Code)</option>
+        </select>
+      </div>
+
+      <div class="cap-field cap-field-row">
+        <label class="cap-label">太さ</label>
+        <select id="cap-font-weight">
+          <option value="400">通常 400</option>
+          <option value="500">中 500</option>
+          <option value="600" selected>やや太 600</option>
+          <option value="700">太字 700</option>
+          <option value="900">極太 900</option>
+        </select>
+      </div>
+
+      <div class="cap-field cap-field-row">
+        <label class="cap-label">文字色</label>
+        <input type="color" id="cap-color" value="#ffffff" />
+      </div>
+
+      <div class="cap-field">
+        <label class="cap-label">背景色 <output id="cap-bg-alpha-out">70%</output></label>
+        <div class="cap-row">
+          <input type="color" id="cap-bg-color" value="#000000" />
+          <input type="range" id="cap-bg-alpha" min="0" max="100" step="5" value="70" />
+        </div>
+      </div>
+
+      <div class="cap-field">
+        <label class="cap-toggle">
+          <input type="checkbox" id="cap-stroke-on" />
+          <span>縁取り</span>
+        </label>
+        <div class="cap-row cap-indent">
+          <input type="color" id="cap-stroke-color" value="#000000" />
+          <label class="cap-inline">太さ <output id="cap-stroke-width-out">2px</output></label>
+          <input type="range" id="cap-stroke-width" min="1" max="12" step="1" value="2" />
+        </div>
+      </div>
+
+      <div class="cap-field">
+        <label class="cap-toggle">
+          <input type="checkbox" id="cap-shadow-on" checked />
+          <span>影</span>
+        </label>
+        <div class="cap-row cap-indent">
+          <input type="color" id="cap-shadow-color" value="#000000" />
+          <label class="cap-inline">ぼかし <output id="cap-shadow-blur-out">6px</output></label>
+          <input type="range" id="cap-shadow-blur" min="0" max="24" step="1" value="6" />
+        </div>
+      </div>
+
+      <div class="cap-field">
+        <label class="cap-label">行間 <output id="cap-lh-out">1.4</output></label>
+        <input type="range" id="cap-line-height" min="10" max="25" step="1" value="14" />
+      </div>
+
+      <div class="cap-field">
+        <label class="cap-label">表示する段落数</label>
+        <select id="cap-para-count">
+          <option value="1">最新1段落のみ（最大に大きく）</option>
+          <option value="2" selected>最新2段落</option>
+          <option value="3">最新3段落</option>
+          <option value="5">最新5段落（履歴多め）</option>
+        </select>
+      </div>
+
+      <div class="cap-field cap-field-row">
+        <label class="cap-toggle">
+          <input type="checkbox" id="cap-follow-live" checked />
+          <span>新しい発話で自動スクロール</span>
+        </label>
+      </div>
+
+      <div class="cap-field cap-broadcast-section">
+        <label class="cap-toggle cap-broadcast-toggle">
+          <input type="checkbox" id="cap-broadcast-mode" />
+          <span><strong>配信モード (OBS向け)</strong></span>
+        </label>
+        <div class="cap-row cap-indent">
+          <label class="cap-inline">キー色</label>
+          <input type="color" id="cap-key-color" value="#ff00ff" />
+          <span class="cap-inline" id="cap-key-color-name">マゼンタ</span>
+        </div>
+        <small class="cap-hint">
+          背景をキー色（既定：マゼンタ #ff00ff）にして、OBSのウィンドウキャプチャに
+          「<strong>カラーキー</strong>」フィルタを当てて抜くと、<strong>文字＋影だけ</strong>が透過で残ります。
+          シャドウは純黒・縁取りOFFが自動適用されます。
+        </small>
+      </div>
+
+      <div class="cap-field-footer">
+        <button id="cap-btn-reset" class="cap-btn-ghost">すべて初期値に戻す</button>
+      </div>
+    </div>
+  </aside>
+
+  <script src="captions.js?v=0.11.0"></script>
+</body>
+</html>
