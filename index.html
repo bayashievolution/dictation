@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.11.0" />
+  <link rel="stylesheet" href="style.css?v=0.13.29" />
 </head>
 <body>
   <div id="app">
@@ -41,10 +41,13 @@
       <button id="btn-clear-all" class="btn btn-ghost btn-square" title="全タブをクリア">
         <span class="btn-icon" data-icon="trash"></span>
       </button>
+      <button id="btn-search" class="btn btn-ghost btn-square" title="検索＆置換（Ctrl+F）">
+        <span class="btn-icon" data-icon="search"></span>
+      </button>
       <button id="btn-settings" class="btn btn-ghost btn-square" title="設定">
         <span class="btn-icon" data-icon="settings"></span>
       </button>
-      <button id="btn-captions" class="btn btn-ghost btn-square" title="ライブ字幕を別ウィンドウで開く（聴覚障害のある方向け・大画面表示）">
+      <button id="btn-captions" class="btn btn-ghost btn-square" title="字幕設定">
         <span class="btn-icon" data-icon="captions"></span>
       </button>
       <button id="btn-onboarding" class="btn btn-ghost btn-square" title="使い方ガイド">
@@ -90,9 +93,15 @@
     <main id="main-area">
       <div id="pane-transcript" class="pane active">
         <div class="pane-header">
-          <button id="btn-refine-transcript" class="toggle-switch toggle-with-action" title="ON=録音中・ペースト時に自動整形／OFF=生のまま／本体クリックでいつでも今すぐ整形">
+          <button id="btn-refine-transcript" class="toggle-switch toggle-with-action" title="ノブ=録音中の自動整形ON/OFF／本体の『文字起こし整形』クリック=トグル状態に関わらず上から下まで全体を文脈込みで整形＋見出し付け">
             <span class="toggle-track" data-role="toggle"><span class="toggle-knob"></span></span>
             <span class="toggle-label" data-role="action"><span data-icon="sparkles"></span>文字起こし整形</span>
+          </button>
+          <button class="pane-btn pane-btn-icon" data-pane-undo="pane-transcript" disabled title="この タブの変更を戻す（Ctrl+Z）">
+            <span data-icon="undo"></span>
+          </button>
+          <button class="pane-btn pane-btn-icon" data-pane-redo="pane-transcript" disabled title="この タブの変更をやり直す（Ctrl+Shift+Z）">
+            <span data-icon="redo"></span>
           </button>
           <button class="pane-btn" data-pane-copy="pane-transcript" title="このタブだけコピー">
             <span data-icon="copy"></span><span>コピー</span>
@@ -126,6 +135,15 @@
 
       <div id="pane-memo" class="pane">
         <div class="pane-header">
+          <button id="btn-memo-refine-selection" class="pane-btn" title="選択範囲を整形（箇条書きの文章化・誤字脱字訂正、訂正箇所を一時ハイライト）">
+            <span data-icon="sparkles"></span><span>選択範囲を整形</span>
+          </button>
+          <button class="pane-btn pane-btn-icon" data-pane-undo="pane-memo" disabled title="メモの変更を戻す（Ctrl+Z）">
+            <span data-icon="undo"></span>
+          </button>
+          <button class="pane-btn pane-btn-icon" data-pane-redo="pane-memo" disabled title="メモの変更をやり直す（Ctrl+Shift+Z）">
+            <span data-icon="redo"></span>
+          </button>
           <button class="pane-btn" data-pane-copy="pane-memo" title="このタブだけコピー">
             <span data-icon="copy"></span><span>コピー</span>
           </button>
@@ -187,6 +205,12 @@
             <option value="medium">バランス</option>
             <option value="high">概要</option>
           </select>
+          <button class="pane-btn pane-btn-icon" data-pane-undo="pane-summary" disabled title="要約の変更を戻す（Ctrl+Z）">
+            <span data-icon="undo"></span>
+          </button>
+          <button class="pane-btn pane-btn-icon" data-pane-redo="pane-summary" disabled title="要約の変更をやり直す（Ctrl+Shift+Z）">
+            <span data-icon="redo"></span>
+          </button>
           <button class="pane-btn" data-pane-copy="pane-summary" title="このタブだけコピー">
             <span data-icon="copy"></span><span>コピー</span>
           </button>
@@ -267,17 +291,28 @@
           <label class="field">
             <span class="field-label">Gemini API キー</span>
             <input id="input-api-key" type="password" placeholder="AIza..." autocomplete="off" spellcheck="false" />
-            <small class="field-hint">
-              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で取得。無料枠内で運用できます。
-            </small>
+            <span class="field-hint">
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で取得（無料枠内で運用できます）
+            </span>
           </label>
           <label class="field field-row">
             <input id="input-ai-enabled" type="checkbox" />
-            <span>AI整形を有効にする</span>
+            <span>リアルタイムAI文字起こし整形</span>
+          </label>
+          <label class="field">
+            <span class="field-label">リアルタイムAI文字起こし整形のタイミング（秒）</span>
+            <div class="number-stepper">
+              <input id="input-silence-sec" type="number" min="1" max="30" step="1" />
+              <div class="number-stepper-btns">
+                <button type="button" class="number-stepper-btn" data-stepper-target="input-silence-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button type="button" class="number-stepper-btn" data-stepper-target="input-silence-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+              </div>
+            </div>
+            <small class="field-hint">無音状態が設定した秒数継続したら、発話を Gemini に送って整形</small>
           </label>
           <label class="field field-row">
             <input id="input-auto-summarize" type="checkbox" />
-            <span>録音停止時に要約とタイトルを自動生成する</span>
+            <span>録音停止時にAI要約・タイトル生成</span>
           </label>
           <div class="field">
             <span class="field-label">要約の詳しさ</span>
@@ -302,23 +337,79 @@
             <span class="field-label">入力モード</span>
             <label class="field-row" style="margin-bottom:4px">
               <input type="radio" name="input-mode" id="mode-webspeech" value="web-speech" />
-              <span><strong>Web Speech</strong> — 速い・無料。システム既定マイクのみ</span>
+              <span><strong>Web Speech</strong> — 速い・無料・システム既定マイクのみ</span>
             </label>
             <label class="field-row" style="margin-bottom:0">
               <input type="radio" name="input-mode" id="mode-gemini" value="gemini-audio" />
-              <span><strong>Gemini Audio</strong> — 10〜15秒遅延。任意のデバイス選択可（Zoom/Meet等）</span>
+              <span><strong>Gemini Audio</strong> — 小さい声に強い・10〜15秒遅延・任意のデバイス選択可</span>
             </label>
+            <small class="field-hint" style="margin-top:8px;display:block">
+              Zoom/Meet の音声を取り込むには
+              <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener">VB-Cable</a>
+              などの仮想オーディオケーブルをインストール
+            </small>
           </div>
-          <div class="field-conditional" id="gemini-only-fields">
+          <div class="field-conditional is-hidden" id="webspeech-only-fields">
+            <div class="field-conditional-inner">
+              <!-- v0.13.22: Web Speech チャンク間隔（強制 commit）は望む動作達成の鍵
+                   （v0.13.20 撤去ミスで判明）。N 秒ごとに recognition.stop() を呼んで
+                   字幕の「ちょうどいい塊感」を作る。話し手のリズムで調整可能。-->
+              <label class="field">
+                <span class="field-label">Web Speech チャンク間隔（秒）</span>
+                <select id="input-webspeech-commit-sec">
+                  <option value="0">OFF（WebSpeech 任せ）</option>
+                  <option value="6" selected>6（既定）</option>
+                  <option value="8">8</option>
+                  <option value="10">10</option>
+                </select>
+                <small class="field-hint">文字起こしを下書きから確定するまでの時間</small>
+              </label>
+
+              <!-- v0.13.31: ここから下は字幕／オーバーレイ用設定。文字起こしペインは触らない。
+                   完全分離（dictation:liveCaption キー経由）。 -->
+              <h3 class="field-group-title">字幕用設定</h3>
+
+              <!-- v0.13.31: 真の「改行」方式。recognition.stop() を呼ばずに、
+                   interim を N 字単位にカットして新段落として字幕／オーバーレイに流す。
+                   stop しない＝Web Speech は走り続ける＝ブロック間の言葉が失われない。
+                   v0.13.30 の「stop で final 化」誤翻訳のやり直し。
+                   ↑↓ は design-system principles.md「ネイティブ装飾は appearance:none」に従い、
+                   汎用 .number-stepper（wireNumberSteppers）を使う。 -->
+              <label class="field">
+                <span class="field-label">字幕一行あたりの最大文字数（10〜100）</span>
+                <div class="number-stepper">
+                  <input type="number" id="input-webspeech-slice-chars" min="10" max="100" step="1" value="30">
+                  <div class="number-stepper-btns">
+                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
+                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">文字起こしの下書きがこの字数になると字幕エリアに表示される。話者のリズム・読みやすさで調整（既定 30）</small>
+              </label>
+
+              <!-- v0.13.31: 無音 stop。30 字に達しない短い発話を、
+                   既存の時間ベース 6 秒を待たずに字幕へ流すための補完。
+                   interim の「中身」が変化していない時間で判定するので、
+                   v0.13.30 の誤発火（喋り中も onresult が空く問題）は起きない。
+                   0=OFF。 -->
+              <label class="field">
+                <span class="field-label">強制字幕表示時間（秒、0=OFF）</span>
+                <div class="number-stepper">
+                  <input type="number" id="input-webspeech-silence-stop-sec" min="0" max="10" step="1" value="3">
+                  <div class="number-stepper-btns">
+                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
+                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">文字起こしの下書きが指定文字数に足りず、無言の場合、強制的に字幕エリアに表示するまでの時間。0 で OFF</small>
+              </label>
+            </div>
+          </div>
+          <div class="field-conditional is-hidden" id="gemini-only-fields">
             <div class="field-conditional-inner">
               <label class="field">
                 <span class="field-label">音声入力デバイス</span>
                 <select id="input-audio-device"></select>
-                <small class="field-hint">
-                  Zoom/Meet の音声を取り込むには
-                  <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener">VB-Cable</a>
-                  などの仮想オーディオケーブルを入れ、会議アプリの音声出力を仮想入力に回してから、ここで選択。
-                </small>
               </label>
               <label class="field">
                 <span class="field-label">Geminiチャンク間隔（秒）</span>
@@ -347,18 +438,7 @@
         </div>
 
         <div class="field-group">
-          <h3 class="field-group-title">動作</h3>
-          <label class="field">
-            <span class="field-label">無音検出時間（秒）</span>
-            <div class="number-stepper">
-              <input id="input-silence-sec" type="number" min="1" max="30" step="1" />
-              <div class="number-stepper-btns">
-                <button type="button" class="number-stepper-btn" data-stepper-target="input-silence-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
-                <button type="button" class="number-stepper-btn" data-stepper-target="input-silence-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
-              </div>
-            </div>
-            <small class="field-hint">この秒数だけ静かになったら、溜めた発話を Gemini に送って整形します。</small>
-          </label>
+          <h3 class="field-group-title">停止条件</h3>
           <label class="field field-row">
             <input id="input-auto-stop" type="checkbox" />
             <span>長時間無音で停止確認ダイアログを出す</span>
@@ -416,7 +496,7 @@
                 </div>
               </div><span class="unit">px</span>
             </div>
-            <small class="field-hint">Google Fonts から日本語フォントを読み込んでいます（要ネット接続）</small>
+            <small class="field-hint">Google Fonts から日本語フォントを読み込み（要ネット接続）</small>
           </div>
         </div>
 
@@ -443,6 +523,23 @@
       <div class="modal-footer">
         <button id="btn-settings-save" class="btn btn-primary">保存</button>
         <button class="btn btn-ghost" data-dismiss>キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- v0.13.31: 字幕設定モーダル。
+       ライブキャプションウィンドウ廃止に伴い、設定 UI 一式を本モーダル内に集約。
+       実体は captions.html?settingsOnly=1 を iframe で読み込み（既存の captions.js
+       のロジック・Native Messaging 連携をそのまま流用するため）。 -->
+  <div id="captions-modal" class="modal hidden">
+    <div class="modal-backdrop" data-dismiss></div>
+    <div class="modal-card modal-wide modal-captions">
+      <div class="modal-header">
+        <h2>字幕設定</h2>
+        <button class="modal-close" data-dismiss><span data-icon="x"></span></button>
+      </div>
+      <div class="modal-body modal-body-iframe">
+        <iframe id="captions-modal-iframe" title="字幕設定"></iframe>
       </div>
     </div>
   </div>
@@ -480,6 +577,30 @@
     </div>
   </div>
 
+  <!-- 検索＆置換バー（Ctrl+F / 検索アイコンで開く） -->
+  <div id="search-bar" class="search-bar hidden" role="dialog" aria-label="検索と置換">
+    <div class="search-row">
+      <span class="search-icon" data-icon="search"></span>
+      <input id="search-input" type="text" placeholder="検索（Enter=次へ / Shift+Enter=前へ）" spellcheck="false" />
+      <span id="search-counter" class="search-counter">0件</span>
+      <button id="search-prev" class="search-btn" title="前へ (Shift+Enter)">◀</button>
+      <button id="search-next" class="search-btn" title="次へ (Enter)">▶</button>
+      <button id="search-case" class="search-btn search-toggle" title="大文字小文字を区別">Aa</button>
+      <button id="search-regex" class="search-btn search-toggle" title="正規表現">.*</button>
+      <button id="search-toggle-replace" class="search-btn" title="置換欄の表示/非表示">
+        <span data-icon="replace"></span>
+      </button>
+      <button id="search-close" class="search-btn" title="閉じる (Esc)">×</button>
+    </div>
+    <div id="search-replace-row" class="search-row search-replace-row hidden">
+      <span class="search-icon" data-icon="replace"></span>
+      <input id="search-replace" type="text" placeholder="置換" spellcheck="false" />
+      <button id="search-replace-one" class="search-btn search-action" title="現在の一致を置換">置換</button>
+      <button id="search-replace-all" class="search-btn search-action" title="すべて置換">全置換</button>
+    </div>
+    <div class="search-scope" id="search-scope"></div>
+  </div>
+
   <!-- 無音停止確認ダイアログ -->
   <div id="silence-dialog" class="modal hidden">
     <div class="modal-backdrop"></div>
@@ -500,8 +621,8 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.11.0"></script>
-  <script src="gemini.js?v=0.11.0"></script>
-  <script src="app.js?v=0.11.0"></script>
+  <script src="icons.js?v=0.13.29"></script>
+  <script src="gemini.js?v=0.13.29"></script>
+  <script src="app.js?v=0.13.29"></script>
 </body>
 </html>

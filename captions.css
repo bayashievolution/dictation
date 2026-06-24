@@ -2,6 +2,60 @@
  * dictation — ライブ字幕（captions）ウィンドウ専用スタイル
  * 聴覚障害のある受講者向け。フォント・色・縁取り等は全てユーザー設定可能。
  */
+
+/* v0.13.31: settingsOnly モード（メイン画面の字幕モーダル内 iframe で使う時）。
+ * 字幕表示エリア・ツールバー・リサイズハンドルを隠して、設定パネルを常時最大化。
+ * 字幕表示はオーバーレイ側で行うので、このウィンドウは設定 UI と Native Messaging hub だけを担う。
+ * モーダル側の .modal-header「字幕設定」と二重になるので cap-settings-head は強制 hide。 */
+html.cap-settings-only #cap-canvas,
+html.cap-settings-only #cap-toolbar { display: none !important; }
+html.cap-settings-only body { background: var(--cap-ui, #1a1a1f); padding: 0; margin: 0; }
+html.cap-settings-only #cap-settings.cap-settings,
+html.cap-settings-only #cap-settings.cap-settings.hidden {
+  position: static !important;
+  display: block !important;
+  width: 100% !important;
+  height: 100vh !important;
+  max-width: none !important;
+  transform: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+html.cap-settings-only #cap-settings .cap-settings-head { display: none !important; }
+html.cap-settings-only #cap-settings .cap-settings-body {
+  padding: 16px !important;
+  max-height: none !important;
+  height: 100vh !important;
+  overflow: auto !important;
+  /* design-system scrollbar.md 準拠：細身・背景透過のスクロールバー */
+  scrollbar-width: thin;
+  scrollbar-color: var(--cap-border) transparent;
+}
+html.cap-settings-only #cap-settings .cap-settings-body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+html.cap-settings-only #cap-settings .cap-settings-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+html.cap-settings-only #cap-settings .cap-settings-body::-webkit-scrollbar-thumb {
+  background: var(--cap-border);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+html.cap-settings-only #cap-settings .cap-settings-body::-webkit-scrollbar-thumb:hover {
+  background: #5a5a66;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+html.cap-settings-only #cap-settings .cap-settings-body::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 :root {
   --cap-bg: #000;          /* 外枠背景（字幕以外の部分） */
   --cap-ui: #1a1a1f;
@@ -19,6 +73,8 @@
   --cap-font-color: #ffffff;
   --cap-bg-color: rgba(0, 0, 0, 0.7);
   --cap-line-height: 1.4;
+  /* v0.13.31: ブロック間隔（段落間 margin-bottom、em 単位）。0=段落がぴったり詰まる */
+  --cap-block-gap: 0em;
   --cap-text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
   --cap-stroke: none;
 }
@@ -48,7 +104,9 @@ body.cap-body {
   overflow: hidden;
 }
 
-/* 字幕ボックス: ドラッグ移動、四隅でリサイズ可能 */
+/* 字幕ボックス: ドラッグ移動、四隅でリサイズ可能。
+ * 外枠は overflow visible でリサイズハンドルがスクロールに引っ張られないようにする。
+ * 実際のスクロールは内側の .cap-box-scroll が担当。 */
 .cap-box {
   position: absolute;
   left: 50%;
@@ -59,24 +117,40 @@ body.cap-body {
   max-width: calc(100% - 32px);
   max-height: calc(100% - 120px);
   width: 80%;
-  padding: 28px 36px;
   background: var(--cap-bg-color);
   border-radius: 14px;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: visible;
   cursor: grab;
   touch-action: none;
-  /* スクロールバー */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255,255,255,0.3) transparent;
-  transition: outline 0.15s;
+  display: flex;
+  flex-direction: column;
+
+  /* 点線枠のチラつき防止: 初期から 1px dashed transparent を持たせておき、
+     hoverで色だけ変える。widthの0→1px補間が走らないので白フラッシュが起きない。 */
+  outline: 1px dashed transparent;
+  outline-offset: -1px;
+  transition: outline-color 0.18s ease-out;
 }
-.cap-box::-webkit-scrollbar { width: 8px; height: 8px; }
-.cap-box::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 4px; }
-.cap-box::-webkit-scrollbar-track { background: transparent; }
+.cap-box:hover {
+  outline-color: rgba(255, 255, 255, 0.25);
+}
 .cap-box:active { cursor: grabbing; }
 .cap-box.resizing { cursor: nwse-resize !important; }
-.cap-box:hover { outline: 1px dashed rgba(255, 255, 255, 0.25); outline-offset: -1px; }
+
+/* 内側スクロール領域 */
+.cap-box-scroll {
+  flex: 1;
+  min-height: 0;       /* flex child が overflow を正しく起こすため必須 */
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 28px 36px;
+  border-radius: inherit;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.3) transparent;
+}
+.cap-box-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.cap-box-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 4px; }
+.cap-box-scroll::-webkit-scrollbar-track { background: transparent; }
 
 #cap-box-text {
   font-family: var(--cap-font-family);
@@ -86,10 +160,14 @@ body.cap-body {
   line-height: var(--cap-line-height);
   text-shadow: var(--cap-text-shadow);
   -webkit-text-stroke: var(--cap-stroke);
+  /* 縁取りを「外側だけ」に見せるため、stroke を下層・fill を上層に重ねる。
+     これがないと -webkit-text-stroke は字画パスごとに stroke を描き、
+     字画同士の縁取りが内側で重なって字が潰れる（v0.13.4 修正）。 */
+  paint-order: stroke fill;
   word-break: break-word;
   overflow-wrap: break-word;
 }
-#cap-box-text p { margin: 0 0 0.35em; }
+#cap-box-text p { margin: 0 0 var(--cap-block-gap, 0em); }
 #cap-box-text p:last-child { margin-bottom: 0; }
 #cap-box-text .cap-para.latest {
   /* 最新段落は不透明度MAX、過去段落はやや薄く */
@@ -106,7 +184,9 @@ body.cap-body {
   font-size: 0.6em;
 }
 
-/* リサイズハンドル（四隅） */
+/* リサイズハンドル（四隅）:
+ * .cap-box の直下（.cap-box-scrollの兄弟）に置くため、スクロールに影響されず
+ * 常にボックスの四隅に張り付く。小さいボックスでも確実に掴める。 */
 .cap-resize {
   position: absolute;
   width: 20px;
@@ -114,8 +194,9 @@ body.cap-body {
   cursor: nwse-resize;
   opacity: 0;
   transition: opacity 0.15s;
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.18);
   border-radius: 3px;
+  z-index: 2;      /* スクロール内テキストより前 */
 }
 .cap-box:hover .cap-resize { opacity: 1; }
 .cap-resize-tl { top: 4px; left: 4px; cursor: nwse-resize; }
@@ -278,12 +359,54 @@ select:focus { border-color: var(--cap-accent); }
 .cap-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
   font-size: 13px;
   user-select: none;
 }
-.cap-toggle input[type="checkbox"] { accent-color: var(--cap-accent); width: 16px; height: 16px; cursor: pointer; }
+/* v0.13.31: チェックボックス → トグルスイッチ風（design-system 準拠）。
+ * やっさん指示で全チェックボックスをトグルスイッチに統一。
+ * <input type="checkbox"> をそのまま使えるよう appearance:none + ::before の擬似要素で knob を描く。 */
+.cap-toggle input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 36px;
+  height: 20px;
+  background: var(--cap-ui-soft);
+  border: 1px solid var(--cap-border);
+  border-radius: 12px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s;
+  flex-shrink: 0;
+  margin: 0;
+  vertical-align: middle;
+  outline: none;
+}
+.cap-toggle input[type="checkbox"]::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: var(--cap-text-muted);
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.18s, background 0.18s;
+}
+.cap-toggle input[type="checkbox"]:hover { border-color: var(--cap-accent); }
+.cap-toggle input[type="checkbox"]:checked {
+  background: var(--cap-accent);
+  border-color: var(--cap-accent);
+}
+.cap-toggle input[type="checkbox"]:checked::before {
+  transform: translateX(16px);
+  background: #ffffff;
+}
+.cap-toggle input[type="checkbox"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 
 .cap-btn-ghost {
   background: transparent;
@@ -310,6 +433,124 @@ select:focus { border-color: var(--cap-accent); }
 /* 全画面時は余分な余白を削る */
 :fullscreen body.cap-body, body.cap-body:fullscreen {
   background: #000;
+}
+
+/* ツールバーボタン: アクティブ状態 */
+.cap-tool-btn.active {
+  background: rgba(52, 211, 153, 0.2);
+  border-color: rgba(52, 211, 153, 0.55);
+  color: #34d399;
+}
+
+/* ───────── OSDモード（親ウィンドウ内で字幕以外を非表示） ─────────
+ * ツールバー・設定・点線枠・リサイズハンドル・ドラッグカーソルなどを全部消して
+ * 字幕だけ大きく見せる。右クリック/Escで抜ける。 */
+body.osd-mode #cap-toolbar,
+body.osd-mode #cap-settings,
+body.osd-mode .cap-resize {
+  display: none !important;
+}
+body.osd-mode .cap-box {
+  cursor: default !important;
+  outline: none !important;
+  box-shadow: none;
+}
+body.osd-mode .cap-box:hover {
+  outline-color: transparent;
+}
+body.osd-mode .cap-session-title,
+body.osd-mode .cap-status {
+  display: none !important;
+}
+
+/* OSDモード開始時の一瞬だけ出るヒント */
+.cap-osd-hint {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  padding: 18px 26px;
+  border-radius: 12px;
+  font-size: 14px;
+  text-align: center;
+  line-height: 1.6;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease-out;
+  letter-spacing: 0.04em;
+}
+.cap-osd-hint.show { opacity: 1; }
+.cap-osd-hint.fade-out { opacity: 0; }
+.cap-osd-hint strong { color: var(--cap-accent); }
+
+/* ───────── テキストトランジション ─────────
+ * #cap-box-text に trans-* クラスで駆動方針を選ぶ。
+ * 更新時は .anim-in を一旦外して付け直してアニメを再トリガ。 */
+#cap-box-text {
+  will-change: transform, opacity;
+}
+
+/* フェード */
+.cap-box.trans-fade #cap-box-text.anim-in {
+  animation: capFade 0.35s ease-out;
+}
+@keyframes capFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* 右からスライド */
+.cap-box.trans-slide-right #cap-box-text.anim-in {
+  animation: capSlideRight 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes capSlideRight {
+  from { transform: translateX(24%); opacity: 0; }
+  to   { transform: translateX(0);   opacity: 1; }
+}
+
+/* 左からスライド */
+.cap-box.trans-slide-left #cap-box-text.anim-in {
+  animation: capSlideLeft 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes capSlideLeft {
+  from { transform: translateX(-24%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* 下からスクロール（TV下部字幕風） */
+.cap-box.trans-scroll #cap-box-text.anim-in {
+  animation: capScrollUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes capScrollUp {
+  from { transform: translateY(18%); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+/* なし: アニメクラスは付くが何も起こらない */
+.cap-box.trans-none #cap-box-text.anim-in { animation: none; }
+
+/* v0.13.31: スクロール演出。
+ * バッファに新規 slice が追加されたとき、その段落（.cap-para.enter）だけを
+ * 下からスライドイン。既存表示の段落は位置維持＝「前の行を表示しつつスクロール」感。
+ * 既存の transition（#cap-box-text 全体へのアニメ）とは独立、段落単位で発火する。
+ */
+#cap-box-text .cap-para.enter {
+  animation: capParaSlideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes capParaSlideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* 継続マーカー「→」（文節途中改行を示す） */
+.osd-cont {
+  color: var(--cap-accent);
+  margin-left: 0.15em;
+  font-weight: 700;
+  opacity: 0.9;
 }
 
 /* ───────── 配信モード（OBS用） ─────────
@@ -396,4 +637,220 @@ body.broadcast-mode #cap-box-text {
 .cap-hint strong {
   color: var(--cap-text);
   font-weight: 600;
+}
+
+/* ───────── ネイティブオーバーレイ連携 (v0.2.0) ───────── */
+
+#cap-btn-overlay {
+  position: relative;
+}
+#cap-btn-overlay.connected {
+  background: var(--cap-accent);
+  color: #0a0a0a;
+}
+#cap-btn-overlay.connected::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #0a0a0a;
+  box-shadow: 0 0 4px var(--cap-accent);
+}
+
+/* v0.13.31: 旧 cap-overlay-section の破線枠と緑色背景を撤去（やっさん指示）。
+ * 通常の cap-field と同じスタイルにするため、特別な装飾は持たない。
+ * 過去のクラス参照が残っていても無害になるよう空ルールで残置。 */
+.cap-overlay-section {}
+
+/* v0.13.31: 区切り線（design-system 風、薄い 1px ライン） */
+.cap-separator {
+  border: 0;
+  border-top: 1px solid var(--cap-border);
+  margin: 12px 0;
+  opacity: 0.6;
+}
+
+/* v0.13.31: セクション見出し（design-system principles.md 準拠の uppercase + letter-spacing）。
+ * 「字幕」「字幕背景」のようにグループタイトルとして使う。 */
+.cap-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--cap-text-muted);
+  text-transform: uppercase;
+  margin: 16px 0 8px;
+}
+
+/* v0.13.31: number-stepper（design-system 準拠）。iframe 内 captions.html でも使うため移植。
+ * style.css の .number-stepper 一式と同等。 */
+.number-stepper {
+  display: inline-flex;
+  align-items: stretch;
+  height: 28px;
+  border: 1px solid var(--cap-border);
+  border-radius: 4px;
+  background: var(--cap-ui-soft);
+  overflow: hidden;
+  transition: border-color 0.15s;
+  flex-shrink: 0;
+}
+.number-stepper:hover { border-color: #4a4a54; }
+.number-stepper:focus-within { border-color: var(--cap-accent); }
+.number-stepper input[type="number"] {
+  width: 56px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  color: var(--cap-text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.number-stepper input[type="number"]::-webkit-inner-spin-button,
+.number-stepper input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.number-stepper-btns {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--cap-border);
+  width: 18px;
+}
+.number-stepper-btn {
+  flex: 1 1 50%;
+  background: transparent;
+  border: none;
+  color: var(--cap-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 9px;
+  line-height: 1;
+}
+.number-stepper-btn [data-icon] svg {
+  width: 10px;
+  height: 10px;
+}
+.number-stepper-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--cap-text);
+}
+.number-stepper-btn:active {
+  background: rgba(52, 211, 153, 0.18);
+  color: var(--cap-accent);
+}
+.number-stepper-btn + .number-stepper-btn {
+  border-top: 1px solid var(--cap-border);
+}
+/* v0.13.31: icons.js が <span data-icon="..."> の中に SVG を挿入する。
+ * captions.html 側で icons.js を読み込み、captions.js で renderIcons() を呼ぶ。 */
+
+/* v0.13.31: 条件付きフィールド（design-system principles.md C 準拠の出入りアニメ）。
+ * grid-template-rows のトランジションで「スッ」と開閉、opacity と margin も連動。 */
+.cap-field-conditional {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  margin-top: 8px;
+  transition:
+    grid-template-rows 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    margin-top 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cap-field-conditional > .cap-field-conditional-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+.cap-field-conditional.is-hidden {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  margin-top: 0;
+  pointer-events: none;
+}
+
+/* v0.13.31: 旧 .cap-overlay-toast はモーダル内トースト用に追加したが、
+ * やっさん指示でオーバーレイ側の初期テキスト上書き方式に変更したため撤去。 */
+
+.cap-overlay-status {
+  font-size: 12px;
+  padding: 6px 10px;
+  margin: 6px 0;
+  border-radius: 4px;
+  font-family: 'Source Code Pro', monospace;
+  word-break: break-all;
+}
+.cap-overlay-status.connected {
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--cap-accent);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+}
+.cap-overlay-status.disconnected {
+  background: rgba(248, 113, 113, 0.06);
+  color: var(--cap-text-muted);
+  border: 1px solid var(--cap-border);
+}
+#cap-overlay-monitor {
+  flex: 1;
+  min-width: 0;
+}
+#cap-overlay-install {
+  color: var(--cap-accent);
+  text-decoration: underline;
+}
+
+/* Web Speech interim ライブ表示 (v0.13.9) — opacity は inline で個別指定 */
+.cap-para-interim {
+  /* 「途中である」記号として斜体は付けない（読みづらくなる）。
+     opacity だけで識別。確定すると別の cap-para としてフェードイン置換される流れ。 */
+  font-style: normal;
+}
+
+/* ストリームモード（v0.13.12）— 1行単位でスクロール積上げ表示
+ * 既存の cap-para から余分な margin を削って、行間隔は line-height に任せる。
+ * latest のみ強調・古い行は薄くフェードする「文字起こしペインのスクロール感」を再現。 */
+.cap-stream-line {
+  margin: 0 0 0.18em !important;
+}
+.cap-stream-line:not(.latest):not(.cap-para-interim) {
+  opacity: 0.85;
+}
+
+/* オーバーレイ接続フィードバック用トースト（右上に出して消える） */
+.cap-overlay-toast {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  background: rgba(20, 20, 25, 0.95);
+  color: #fff;
+  padding: 12px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  max-width: 420px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  white-space: pre-wrap;
+}
+.cap-overlay-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+.cap-overlay-toast.success {
+  background: rgba(52, 211, 153, 0.95);
+  color: #062018;
+}
+.cap-overlay-toast.error {
+  background: rgba(248, 113, 113, 0.95);
+  color: #1a0606;
 }

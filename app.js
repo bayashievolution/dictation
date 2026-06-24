@@ -128,7 +128,32 @@ const DEFAULT_SETTINGS = {
   audioDeviceId: '',
   audioChunkSec: 12,
   audioMinChunkBytes: 400, // 旧1200から感度↑。小さい発話（小声・短語）もGeminiへ送る
+  // v0.13.24: 旧 webspeechInterimDebounceMs / webspeechInterimOpacity (v0.13.9) は撤去。
+  // 字幕ウィンドウ側の cap-para-interim を v0.13.17 で撤去済み・UI も v0.13.23 で
+  // 削除済み。設定値だけ残しても読み手なしで意味ない。
+  // Web Speech モードの強制 commit（チャンク間隔）設定 (v0.13.14〜)
+  // - 0 にすると WebSpeech 任せ、N 秒にすると N 秒ごとに recognition.stop() を呼んで
+  //   「ここまで」と区切らせる。これが字幕の「ちょうどいい塊感」の鍵。
+  // - v0.13.20 でうかつに撤去したが、やっさんから「最初の状態に戻った」と即指摘され
+  //   v0.13.21 で revert。実は本機能が Web Speech 字幕成功の根幹だった。
+  // - **N 秒は話し手のリズムで調整するパラメータ。6 という数字は重要ではない。**
+  //   岡田斗司夫（早口の解説系）でやっさんがテストした時に 6 がちょうどよかっただけ。
+  //   児童のゆっくりめ発表なら 8〜10、早口の長文なら 3〜4 が適。
+  //   既定 6 は「最初に試す値」程度の位置付け（CLAUDE.md ルール11、2回目の説明）。
+  webspeechCommitSec: 6,
+  // v0.13.31: 真の「改行」方式。interim を N 字単位にカットして新段落として流す。
+  // recognition.stop() は呼ばない（言葉抜けゼロ）。0=OFF / 25 / 30 / 40。既定 30。
+  // やっさんの当初の発言「バッファしながら指定文字数で改行 改行した時点で字幕を更新」
+  // を文字通り実装したもの。v0.13.30 の「stop()で final 化」誤翻訳の正しいやり直し。
+  webspeechSliceChars: 30,
+  // v0.13.31: 無音 stop。interim の中身が変化していない時間が N 秒続いたら stop() で強制 final 化。
+  // 30 字未満で喋り終わった時、字幕に流れるまでの待ち時間を短縮するため。
+  // v0.13.30 の誤発火（onresult タイミング判定）を、interim 中身比較で回避した改良版。
+  // 0=OFF、min=0、max=10、既定 3 秒。
+  webspeechSilenceStopSec: 3,
 };
+// v0.13.24: WEB_SPEECH_DEFAULTS（v0.13.9 「Web Speech 設定をデフォルトに戻す」
+// ボタン用のリセット値）は UI 撤去済み（v0.13.23）に伴い削除。
 
 const PANE_FONT_KEYS = {
   'pane-transcript': { font: 'transcriptFont', size: 'transcriptSize' },
@@ -241,6 +266,18 @@ const state = {
   // 複数タブ選択（Ctrl+クリック=追加/除外、Shift+クリック=範囲選択、一括ドラッグ移動）
   selectedTabIds: new Set(),
   selectionAnchorId: null, // Shift+クリックの基準
+
+  // v0.13.31: Web Speech interim slice（真の「改行」方式）の累積オフセット。
+  // 1 つの認識単位（result index）の中で「すでに段落として流した文字数」。
+  // final 到来時 / 録音停止 / onend で 0 にリセット。
+  interimSliceOffset: 0,
+
+  // v0.13.31 (Step4): 「無音 stop」用。interim の中身が変化していない時間が
+  // N 秒続いたら recognition.stop() で強制 final 化＝字幕に流す。
+  // v0.13.30 の誤発火（onresult 来ない時間ベース判定）の改良版で、
+  // 「interim 文字列の中身を比較して、変化していない＝本当に止まっている」を判定。
+  lastInterimText: '',
+  webspeechSilenceStopTimer: null,
 };
 
 /**
@@ -338,6 +375,12 @@ const els = {
   inputAudioDevice: document.getElementById('input-audio-device'),
   inputChunkSec: document.getElementById('input-chunk-sec'),
   inputMinChunkBytes: document.getElementById('input-min-chunk-bytes'),
+  // v0.13.24: 旧 v0.13.9 interim 設定 UI（input-webspeech-interim-debounce /
+  // input-webspeech-interim-opacity / btn-webspeech-defaults）への els 参照は削除。
+  // HTML から削除済み（v0.13.23）+ 機能本体撤去（v0.13.24）に伴い不要。
+  inputWsCommitSec: document.getElementById('input-webspeech-commit-sec'),
+  inputWsSliceChars: document.getElementById('input-webspeech-slice-chars'),
+  inputWsSilenceStopSec: document.getElementById('input-webspeech-silence-stop-sec'),
   zoomBar: document.getElementById('zoom-bar'),
   zoomRange: document.getElementById('zoom-range'),
   zoomPercent: document.getElementById('zoom-percent'),
@@ -519,13 +562,132 @@ function setParagraphContent(pEl, refinedText) {
   }
 }
 
+/* ───────── Web Speech 強制 commit タイマー (v0.13.14) ─────────
+ * settings.webspeechCommitSec 秒ごとに recognition.stop() を呼び出して、
+ * Web Speech に「ここまで」と区切らせる。stop() で現在の interim が final として
+ * onresult に届き、appendRawChunk で transcript の新しい段落になる。
+ * その後 onend が呼ばれ、既存の自動再起動ロジック（state.shouldAutoRestart）が
+ * recognition を再 start するので、認識ループは継続する。
+ *
+ * Gemini Audio の audioChunkSec（MediaRecorder.stop → 再start）と対称的な仕組み。
+ * 0 にすると WebSpeech 任せの既存挙動。岡田斗司夫みたいに長文を続けて喋る人で
+ * final が遅れて字幕がドカっと出るのを防ぐためのコア機能。
+ */
+function restartWebSpeechCommitTimer() {
+  stopWebSpeechCommitTimer();
+  const sec = Number(state.settings.webspeechCommitSec || 0);
+  if (sec <= 0) return; // OFF
+  const intervalMs = Math.max(2, Math.min(20, sec)) * 1000;
+  state.webspeechCommitTimer = setInterval(() => {
+    if (!state.isRecording) return;
+    if (state.settings.inputMode !== 'web-speech') return;
+    if (!state.recognition) return;
+    try {
+      // stop() を呼ぶと Web Speech が現在の interim を final として吐き出し、
+      // 続いて onend が走る → 既存の自動再起動ロジックで rec.start() が走る。
+      state.recognition.stop();
+      diagLog.info(`Web Speech 強制 commit (${sec}秒)`);
+    } catch (e) {
+      console.warn('webspeech commit stop failed', e);
+    }
+  }, intervalMs);
+}
+function stopWebSpeechCommitTimer() {
+  if (state.webspeechCommitTimer) {
+    clearInterval(state.webspeechCommitTimer);
+    state.webspeechCommitTimer = null;
+  }
+}
+
+/* ───────── Web Speech 無音 stop タイマー (v0.13.31) ─────────
+ * onresult 内で「interim の中身が変化したとき」だけリセット&セット。
+ * 同じ interim のまま N 秒経つ＝本当に喋りが止まっている＝stop() で final 化。
+ * 30 字 slice に達しない短い発話を、6 秒（webspeechCommitSec）待たずに字幕へ流す。
+ * v0.13.30 の「onresult が N 秒来なかったら判定」は誤発火多発で revert。
+ * 今回は中身比較なので、Web Speech が interim を更新中（喋り中）は誤発火しない。
+ */
+function resetWebSpeechSilenceStopTimer() {
+  stopWebSpeechSilenceStopTimer();
+  const sec = Number(state.settings.webspeechSilenceStopSec || 0);
+  if (sec <= 0) return;
+  state.webspeechSilenceStopTimer = setTimeout(() => {
+    state.webspeechSilenceStopTimer = null;
+    if (!state.isRecording) return;
+    if (state.settings.inputMode !== 'web-speech') return;
+    if (!state.recognition) return;
+    if (!state.lastInterimText) return; // 既に final 済みなら何もしない
+    try {
+      state.recognition.stop();
+      diagLog.info(`Web Speech 無音 stop (${sec}秒、interim ${state.lastInterimText.length}字)`);
+    } catch (e) {
+      console.warn('webspeech silence stop failed', e);
+    }
+  }, sec * 1000);
+}
+function stopWebSpeechSilenceStopTimer() {
+  if (state.webspeechSilenceStopTimer) {
+    clearTimeout(state.webspeechSilenceStopTimer);
+    state.webspeechSilenceStopTimer = null;
+  }
+}
+
+// v0.13.24: v0.13.9 で追加した interim ライブ表示の機能本体（scheduleInterimSync /
+// _writeLiveInterim / LIVE_INTERIM_KEY / _interimSyncTimer / _pendingInterim）は撤去。
+// v0.13.17 で字幕ウィンドウ側の cap-para-interim 撤去 = 読み手なし、
+// v0.13.23 で UI 撤去 = 設定経路なし。app.js 側だけ残しても呼び出し元が無く意味なし。
+// 機能撤去のトリガは「読み手なし」のコード整合性チェック（CLAUDE.md ルール12 学び）。
+
+/* ───────── 字幕用バッファ (v0.13.31 完全分離型) ─────────
+ * やっさん発「文字起こしウィンドウに表示されるものと、字幕に表示されるものは別にしてほしい。
+ *   字幕に表示される内容＝バッファだからいけるよね？」の実装。
+ *
+ * - 文字起こしペイン (transcript HTML)：自然 final 単位で段落追加（appendRawChunk、v0.13.16 の元の挙動）
+ * - 字幕ウィンドウ／オーバーレイ：30 字 slice 単位で段落追加（appendCaptionSlice、新規）
+ * - AI 整形は文字起こしペイン側だけ。字幕は生テキスト（即時性優先）。
+ *   字幕を整形したい用途は Gemini Audio モードを使う。
+ *
+ * localStorage キー：dictation:liveCaption（最新 N 件、JSON 配列）。
+ * captions.js が監視して、存在すれば字幕表示に優先反映。
+ */
+const CAPTION_BUFFER_KEY = 'dictation:liveCaption';
+const CAPTION_BUFFER_MAX = 10; // 最新 10 段落保持（captions.js の paraCount=2 より十分大きい）
+
+function appendCaptionSlice(text) {
+  if (!text) return;
+  let buf = [];
+  try { buf = JSON.parse(localStorage.getItem(CAPTION_BUFFER_KEY) || '[]'); } catch {}
+  if (!Array.isArray(buf)) buf = [];
+  buf.push({ text: String(text), ts: Date.now() });
+  if (buf.length > CAPTION_BUFFER_MAX) buf = buf.slice(-CAPTION_BUFFER_MAX);
+  try { localStorage.setItem(CAPTION_BUFFER_KEY, JSON.stringify(buf)); } catch (e) {
+    console.warn('appendCaptionSlice persist failed', e);
+  }
+}
+
+function clearCaptionBuffer() {
+  try { localStorage.removeItem(CAPTION_BUFFER_KEY); } catch {}
+}
+
 function appendRawChunk(text) {
   if (!text || !text.trim()) return;
   const container = getWriteContainer();
   const inBg = container !== els.confirmed;
   if (!inBg) hideEmptyHint();
-  if (!state.pendingChunkEl || !container.contains(state.pendingChunkEl)) {
-    state.pendingChunkEl = createParagraphEl(text, 'paragraph raw');
+  // v0.13.16: Web Speech モードでは final（確定）が来るたびに新しい段落を作る。
+  // 旧来は同じ pendingChunkEl にスペースで連結し続けてベタ書き状態になり、
+  // 字幕（最新N段落）に長文がドカっと出る原因だった。
+  // Web Speech が「ここで一区切り」と自分で判断して final を出すタイミングは
+  // 自然な発話の切れ目なので、それを段落区切りとして尊重する。
+  // Gemini Audio の 6 秒チャンク = 1 段落、と対称的な構造になる。
+  const forceNewPara = state.settings.inputMode === 'web-speech';
+  if (forceNewPara || !state.pendingChunkEl || !container.contains(state.pendingChunkEl)) {
+    // v0.13.31: Web Speech モードの final 毎段落にも .short-refined と dataset.shortTs を付与。
+    // これでショート整形（flushPendingToGemini）が即発火対象になり、ミドル整形
+    // （consolidateShortChunks）も .short-refined を拾って 3 段落単位で統合・見出し付与する。
+    // やっさん発「喋り通しても整形されるように、final のチャンクに合わせて整形」の実装。
+    const klass = forceNewPara ? 'paragraph raw short-refined' : 'paragraph raw';
+    state.pendingChunkEl = createParagraphEl(text, klass);
+    if (forceNewPara) state.pendingChunkEl.dataset.shortTs = String(Date.now());
     container.appendChild(state.pendingChunkEl);
     state.pendingChunkText = text;
   } else {
@@ -533,9 +695,38 @@ function appendRawChunk(text) {
     const body = state.pendingChunkEl.querySelector('.p-body');
     if (body) body.textContent = state.pendingChunkText;
   }
-  if (inBg) syncBgToSession();
-  else autoScroll();
+  if (inBg) {
+    syncBgToSession();
+  } else {
+    autoScroll();
+    // v0.13.19: 通常 active 録音時は、DOM の最新 paragraph を state.sessions[active].transcript
+    // に同期する必要がある（syncBgToSession は BG 時のみで対称性が抜けていた）。
+    // これがないと v0.13.18 で persist しても古い transcript が localStorage に書かれて
+    // 字幕ウィンドウに反映されない（ブロック溜まり一気流れ症状）。
+    // fromAutosave: true でタイピング Undo の baseline 同期はスキップする
+    // （録音中の baseline 更新は別経路で管理するため、ここで上書きしない）。
+    snapshotActiveToSession({ fromAutosave: true });
+  }
   updateActionButtons();
+  // v0.13.18: final ごとに localStorage に persist。
+  // 旧来は appendRawChunk で persist しておらず、別タイミング（autoSave 等）で
+  // まとめて persist されていたため、字幕ウィンドウへの伝達が遅延し、
+  // 「ブロックが溜まってから一気に流れる」症状が出ていた。
+  // Gemini Audio は sendAudioChunkToGemini 内で persist しているので問題なかった。
+  persistSessions();
+  // v0.13.31: Web Speech final 毎にショート整形を即発火（無音 3 秒待ちじゃない）。
+  // やっさん発「岡田斗司夫を喋り通しても整形されるように、final のチャンクに合わせて整形」の実装。
+  // flushPendingToGemini は state.pendingChunkEl をローカルに退避してから state を null クリア
+  // するので、次の appendRawChunk 呼び出しと競合しない。
+  // 喋りが速くて整形が追いつかない場合は、未整形段落が .short-refined のまま残り、
+  // 既存のミドル整形（maybeConsolidateShortChunks、3 段落 or 60 秒）が拾って統合・見出し付け。
+  if (
+    state.settings.inputMode === 'web-speech' &&
+    state.settings.aiEnabled &&
+    state.settings.apiKey
+  ) {
+    flushPendingToGemini();
+  }
 }
 
 function getContextForGemini() {
@@ -613,6 +804,9 @@ async function refineUnstructuredInTranscript({ force = false, showFeedback = tr
     return false;
   });
   if (unstructuredNodes.length === 0) return;
+
+  // 破壊的操作: Undo スナップショットを取る（force 指定時のみ、つまり手動クリック時）
+  if (force) pushUndo('貼付けテキスト整形', 'pane-transcript');
 
   // テキストを集めて改行で結合
   const rawText = unstructuredNodes.map(n => {
@@ -695,6 +889,167 @@ async function retryPendingRefinements({ showFeedback = true } = {}) {
   return { tried: pending.length, ok, failed };
 }
 
+/**
+ * 全文字起こしを丸ごと文脈付き再整形＋見出し付与（「今すぐ整形」ボタン本体が呼ぶ）。
+ * 現状が「既に整形済み」「短チャンクだけ」「needs-retry混在」のどれであっても、
+ * 上から下までまとめて Gemini に送り直して 1つの整った文書として再構築する。
+ * ミドル整形を全体に拡張した版。
+ */
+async function refineWholeTranscript({ showFeedback = true } = {}) {
+  if (!state.settings.apiKey) {
+    if (showFeedback) { alert('Gemini API キーが未設定です'); openSettings(); }
+    return;
+  }
+
+  const container = getWriteContainer();
+  const paragraphs = Array.from(container.querySelectorAll('.paragraph'));
+
+  // 1つの .paragraph に複数の h2+p-body が入れ子になっている場合がある
+  // （setParagraphContent が refined テキストの "## A\n\nA本文\n\n## B\n\nB本文" を
+  //  全部同じ paragraph に展開する仕様のため）。
+  // querySelector('h2') だと先頭1つしか取れず、残りを丸ごとロストする。
+  // 全子要素を走査して h2/.p-body/その他 を順序通りに並べ直す。
+  let allText = paragraphs.map(p => {
+    const parts = [];
+    for (const child of p.children) {
+      const t = (child.textContent || '').trim();
+      if (!t) continue;
+      if (child.tagName === 'H2') parts.push('## ' + t);
+      else parts.push(t);
+    }
+    if (parts.length === 0) {
+      return (p.innerText || p.textContent || '').trim();
+    }
+    return parts.join('\n\n');
+  }).filter(Boolean).join('\n\n');
+
+  // パラグラフに入っていない生テキストも拾う
+  const unstructured = Array.from(container.childNodes).filter(n => {
+    if (n.nodeType === Node.TEXT_NODE) return !!n.textContent.trim();
+    if (n.nodeType === Node.ELEMENT_NODE) return !n.classList || !n.classList.contains('paragraph');
+    return false;
+  }).map(n => (n.nodeType === Node.TEXT_NODE ? n.textContent : (n.innerText || n.textContent || '')).trim())
+    .filter(Boolean).join('\n\n');
+  if (unstructured) allText = (allText ? allText + '\n\n' : '') + unstructured;
+
+  if (!allText.trim()) {
+    if (showFeedback) setStatus('idle', '整形対象のテキストがありません');
+    return;
+  }
+
+  // 常時確認ダイアログ（破壊的操作。Undoで戻せる旨も明記）
+  const lengthStr = allText.length.toLocaleString();
+  const willChunk = allText.length > 5000;
+  const chunkNote = willChunk
+    ? `\n\n⚠️ 長文のため、段落境界で分割して順次整形します（約${Math.ceil(allText.length / 3000)}チャンク、各 3000字 目安）。`
+    : '';
+  if (!confirm(
+    `現在の文字起こし ${lengthStr} 文字を、見出し付きで再整形します。\n` +
+    `既存のパラグラフ構造は置き換わります。${chunkNote}\n\n` +
+    `もし結果がおかしければ「戻す」（Ctrl+Z）で元に戻せます。\n\n` +
+    `続けますか？`
+  )) return;
+
+  // 破壊的操作なので Undo スナップショット
+  pushUndo('全体整形', 'pane-transcript');
+
+  // 全部消して refining プレースホルダを置く
+  paragraphs.forEach(p => p.remove());
+  Array.from(container.childNodes).forEach(n => {
+    if (n.nodeType === Node.TEXT_NODE) n.remove();
+    else if (n.nodeType === Node.ELEMENT_NODE && !n.classList.contains('paragraph')) n.remove();
+  });
+  const target = createParagraphEl('（全体整形中… しばらくお待ちください）', 'paragraph refining');
+  container.appendChild(target);
+
+  const inBg = container !== els.confirmed;
+  const persist = () => {
+    if (inBg) syncBgToSession();
+    else snapshotActiveToSession();
+    persistSessions();
+  };
+  if (inBg) syncBgToSession(); else autoScroll();
+  diagLog.info(`全体整形開始: ${allText.length}字${willChunk ? '（チャンク分割）' : ''}`);
+
+  try {
+    let refined;
+    if (willChunk) {
+      refined = await refineByChunks(allText, target);
+    } else {
+      refined = await refineWithGemini({
+        apiKey: state.settings.apiKey,
+        context: '',
+        newChunk: allText,
+        maxOutputTokens: 8192,
+      });
+    }
+    target.className = 'paragraph refined';
+    setParagraphContent(target, refined || allText);
+    persist();
+    diagLog.info(`全体整形完了: ${(refined || allText).length}字`);
+    if (!inBg) { updateActionButtons(); autoScroll(); }
+  } catch (e) {
+    console.warn('[refine whole] failed:', e.message || e);
+    target.className = 'paragraph needs-retry';
+    setParagraphContent(target, allText);
+    persist();
+    if (showFeedback) {
+      setStatus('error', '全体整形失敗: ' + (e.message || '').slice(0, 60));
+      setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
+                                  state.isRecording ? '録音中' : '停止'), 4000);
+    }
+  }
+}
+
+/**
+ * 長文を段落境界（\n\n）で約3000字のチャンクに分け、
+ * 順次 Gemini で整形。直前チャンクの末尾を context に渡して文脈連続を保つ。
+ * 出力切れ（maxOutputTokens超過）を確実に回避。
+ */
+async function refineByChunks(fullText, progressTargetEl) {
+  const CHUNK_SIZE = 3000;
+  const paragraphs = fullText.split(/\n\n+/);
+  // まず段落を束ねて ~CHUNK_SIZE のブロックにする
+  const blocks = [];
+  let buf = '';
+  for (const p of paragraphs) {
+    if (buf.length + p.length + 2 > CHUNK_SIZE && buf.length > 0) {
+      blocks.push(buf);
+      buf = p;
+    } else {
+      buf = buf ? buf + '\n\n' + p : p;
+    }
+  }
+  if (buf) blocks.push(buf);
+
+  const results = [];
+  let prevTail = '';
+  for (let i = 0; i < blocks.length; i++) {
+    diagLog.info(`全体整形: チャンク ${i + 1}/${blocks.length} (${blocks[i].length}字)`);
+    if (progressTargetEl) {
+      const body = progressTargetEl.querySelector('.p-body');
+      if (body) body.textContent = `（全体整形中… ${i + 1}/${blocks.length}チャンク処理中）`;
+    }
+    try {
+      const out = await refineWithGemini({
+        apiKey: state.settings.apiKey,
+        context: prevTail.slice(-500),  // 直前チャンクの末尾500字だけ文脈として
+        newChunk: blocks[i],
+        maxOutputTokens: 4096,           // チャンク単位なので 4k で十分
+      });
+      const outClean = (out || blocks[i]).trim();
+      results.push(outClean);
+      prevTail = outClean;
+    } catch (e) {
+      console.warn(`[refine chunk ${i + 1}] failed:`, e.message || e);
+      // チャンクが失敗したら原文をそのまま入れて次へ
+      results.push(blocks[i]);
+      prevTail = blocks[i];
+    }
+  }
+  return results.join('\n\n');
+}
+
 /* ───────── ミドル整形（短チャンクを蓄積→文脈込みで再整形＋見出し付与） ─────────
  * Geminiオーディオ録音の短チャンクは個別に文字起こしされるが、見出しが付かず
  * 誤字が残ることがある。3段落溜まるか 60秒経ったら refineWithGemini で
@@ -774,9 +1129,17 @@ function resetSilenceTimer() {
 
 function resetLongSilenceTimer() {
   if (state.longSilenceTimer) clearTimeout(state.longSilenceTimer);
+  state.longSilenceTimer = null;
+  // v0.13.28: 録音停止中は無音検出ダイアログを起動しない。
+  // 旧来は onresult が録音停止後に遅れて発火した時など、停止後に
+  // タイマーが再起動されて「録音停止中なのに無音ダイアログが出る」
+  // 症状があった（やっさん指摘）。「録音中にもかかわらず文字が出ない」
+  // 場合のみ出すのが正しい挙動。
+  if (!state.isRecording) return;
   if (!state.settings.autoStopEnabled) return;
   state.longSilenceTimer = setTimeout(() => {
     state.longSilenceTimer = null;
+    if (!state.isRecording) return; // タイマー発火時の二重防御
     showSilenceDialog();
   }, state.settings.autoStopSec * 1000);
 }
@@ -788,6 +1151,8 @@ function clearAllTimers() {
 }
 
 function showSilenceDialog() {
+  // v0.13.28: 三重防御。録音停止中は絶対に出さない。
+  if (!state.isRecording) return;
   diagLog.info(`無音停止ダイアログ発火（${state.settings.autoStopSec}秒無音と判定）`);
   els.silenceDialog.classList.remove('hidden');
   state.silenceCountdownLeft = 30;
@@ -829,24 +1194,53 @@ function buildRecognition() {
   rec.onstart = () => setStatus('listening', '録音中');
 
   rec.onresult = (event) => {
+    // v0.13.31 完全分離型：
+    // - 文字起こしペイン (transcript HTML)：**自然 final** が来たら appendRawChunk で
+    //   1 段落追加（v0.13.16 の元の挙動）。slice では transcript に書かない。
+    // - 字幕ウィンドウ／オーバーレイ：interim を **30 字 slice 単位** で字幕用バッファ
+    //   (dictation:liveCaption) に append。recognition.stop() は呼ばない＝言葉抜けゼロ。
+    // - state.interimSliceOffset は「現在の result 内で字幕バッファに既に流した文字数」
+    //   を覚えるためだけに使う（transcript への影響なし）。
+    const sliceN = Number(state.settings.webspeechSliceChars || 0);
     let interim = '';
     let gotFinal = false;
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
       const text = result[0].transcript;
       if (result.isFinal) {
+        // 文字起こしペインには **自然 final 全文** を 1 段落として追加（25 字単位の細切れではない）
         appendRawChunk(text);
+        // 字幕バッファには「offset 以降の残り」だけを 1 段落として追加（既に流した分は重複させない）
+        if (sliceN > 0) {
+          const offset = state.interimSliceOffset || 0;
+          const remaining = offset > 0 ? text.slice(offset) : text;
+          if (remaining) appendCaptionSlice(remaining);
+        }
+        state.interimSliceOffset = 0; // 次の result の頭から数え直す
         gotFinal = true;
       } else {
         interim += text;
+        // 字幕バッファに 30 字 slice 単位で append（transcript には書かない）
+        if (sliceN > 0) {
+          let cursor = state.interimSliceOffset || 0;
+          while (text.length - cursor >= sliceN) {
+            const chunk = text.slice(cursor, cursor + sliceN);
+            appendCaptionSlice(chunk);
+            cursor += sliceN;
+            diagLog.info(`字幕バッファ slice (${sliceN}字)`);
+          }
+          state.interimSliceOffset = cursor;
+        }
       }
     }
+    // 文字起こしペインの interim 表示は累積 interim をそのまま（slice を transcript に書いていないので重複なし）
+    const interimForDisplay = interim;
     // BG録音中（録音対象セッションが非表示）は共有の#interimに書かない。
     // 書くと別セッション（表示中のタブ）の文字起こしエリアに漏れて見える。
     if (isBgRecording()) {
       els.interim.textContent = '';
     } else {
-      els.interim.textContent = interim;
+      els.interim.textContent = interimForDisplay;
       if (interim || gotFinal) hideEmptyHint();
       if (gotFinal || interim) autoScroll();
     }
@@ -856,6 +1250,19 @@ function buildRecognition() {
       if (els.silenceDialog && !els.silenceDialog.classList.contains('hidden')) {
         hideSilenceDialog();
       }
+    }
+    // v0.13.31: 無音 stop。interim の「中身」が変化したときだけタイマーをリセット&セット。
+    // 同じ interim のまま N 秒 = 本当に喋りが止まっている → stop() で final 化。
+    // v0.13.30 の「onresult タイミング判定」は喋り中も onresult が空く瞬間があって誤発火していた。
+    // 中身比較なら Web Speech が interim を更新し続ける限り（喋り中）は誤発火しない。
+    if (interim && interim !== state.lastInterimText) {
+      state.lastInterimText = interim;
+      resetWebSpeechSilenceStopTimer();
+    }
+    if (gotFinal) {
+      // final が来たら interim 文字列はリセット。次の発話を待つためタイマーも停止。
+      state.lastInterimText = '';
+      stopWebSpeechSilenceStopTimer();
     }
   };
 
@@ -885,6 +1292,13 @@ function buildRecognition() {
 
   rec.onend = () => {
     els.interim.textContent = '';
+    // v0.13.31: interim slice オフセットを 0 リセット。
+    // network エラー等で onend が走った時、再 start 後の result index は新しいので
+    // 古いオフセットを残すと slice が壊れる。
+    state.interimSliceOffset = 0;
+    // v0.13.31: 無音 stop タイマーと比較バッファもリセット。
+    state.lastInterimText = '';
+    stopWebSpeechSilenceStopTimer();
     if (state.shouldAutoRestart && state.isRecording) {
       // 即再start()は失敗しやすいので、少し遅延してからリトライ
       const tryRestart = (attempt = 0) => {
@@ -975,11 +1389,13 @@ async function startRecording() {
   state.isRecording = true;
   state.shouldAutoRestart = true;
   state.recordingSessionId = state.activeId; // BG録音用に固定
-  diagLog.info(`録音開始 (Web Speech) session=${state.recordingSessionId?.slice(-6)}`);
+  diagLog.info(`録音開始 (Web Speech) session=${state.recordingSessionId?.slice(-6)} commitSec=${state.settings.webspeechCommitSec || 0}`);
   try {
     state.recognition.start();
     setRecordingUI(true);
     resetLongSilenceTimer();
+    // v0.13.14: Web Speech 強制 commit タイマーを起動（commitSec=0 なら何もしない）
+    restartWebSpeechCommitTimer();
   } catch (e) {
     console.error('start failed', e);
     setStatus('error', '開始失敗: ' + e.message);
@@ -1001,6 +1417,13 @@ function stopRecording() {
   if (state.settings.inputMode === 'gemini-audio') {
     stopGeminiAudioRecording();
   } else {
+    // v0.13.14: 強制 commit タイマーを止めてから recognition を止める
+    stopWebSpeechCommitTimer();
+    // v0.13.31: 無音 stop タイマーも停止
+    stopWebSpeechSilenceStopTimer();
+    state.lastInterimText = '';
+    // v0.13.31: 字幕バッファをクリア（次の録音開始時に過去の slice が混ざらないように）
+    clearCaptionBuffer();
     if (state.recognition) {
       try { state.recognition.stop(); } catch {}
     }
@@ -1045,11 +1468,22 @@ async function startGeminiAudioRecording() {
     openSettings();
     return;
   }
-  const constraints = {
-    audio: state.settings.audioDeviceId
-      ? { deviceId: { exact: state.settings.audioDeviceId } }
-      : true,
+  // Gemini Audio は録音生データをそのまま AI に送るルートなので、
+  // Chrome の音声前処理（AGC/NS/EC）はすべて OFF にする。
+  // 特に AGC（autoGainControl）は仮想ケーブル経由の音声で「無音区間」に
+  // 過剰ブーストをかけるため、リアルマイクから漏れる微弱音や室内雑音を
+  // 持ち上げて Gemini が「独り言として」拾ってしまう症状を引き起こす。
+  // （v0.13.6 修正: VB-Cable + YouTube 音声の文字起こしで
+  //  「変えようかな」「もうダメだ」など独り言が混入する事故への対策）
+  const audioOpts = {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
   };
+  if (state.settings.audioDeviceId) {
+    audioOpts.deviceId = { exact: state.settings.audioDeviceId };
+  }
+  const constraints = { audio: audioOpts };
   try {
     state.audioStream = await navigator.mediaDevices.getUserMedia(constraints);
   } catch (e) {
@@ -1225,6 +1659,21 @@ function applyGeminiOnlyVisibility(animated = true) {
     el.style.transition = prev;
   } else {
     el.classList.toggle('is-hidden', !isGemini);
+  }
+}
+
+function applyWebSpeechOnlyVisibility(animated = true) {
+  const el = document.getElementById('webspeech-only-fields');
+  if (!el) return;
+  const isWs = els.modeWebSpeech && els.modeWebSpeech.checked;
+  if (!animated) {
+    const prev = el.style.transition;
+    el.style.transition = 'none';
+    el.classList.toggle('is-hidden', !isWs);
+    void el.offsetWidth;
+    el.style.transition = prev;
+  } else {
+    el.classList.toggle('is-hidden', !isWs);
   }
 }
 
@@ -2084,7 +2533,7 @@ async function loadFromFile(file) {
   }
 }
 
-function clearPane(paneId, { confirmFirst = true } = {}) {
+function clearPane(paneId, { confirmFirst = true, skipUndo = false } = {}) {
   const label = PANE_META[paneId]?.label || paneId;
   const hasContent = paneId === 'pane-transcript' ? !!getConfirmedText()
     : paneId === 'pane-memo' ? !!getMemoText()
@@ -2092,7 +2541,8 @@ function clearPane(paneId, { confirmFirst = true } = {}) {
     : paneId === 'pane-chat' ? !!getChatText()
     : false;
   if (!hasContent) return;
-  if (confirmFirst && !confirm(`「${label}」をクリアしますか？`)) return;
+  if (confirmFirst && !confirm(`「${label}」をクリアしますか？\n\nCtrl+Z で戻せます。`)) return;
+  if (!skipUndo && PANE_FIELD[paneId]) pushUndo(`クリア: ${label}`, paneId);
   if (paneId === 'pane-transcript') {
     els.confirmed.innerHTML = '';
     els.interim.textContent = '';
@@ -2116,12 +2566,326 @@ function clearPane(paneId, { confirmFirst = true } = {}) {
 
 function clearAllPanes() {
   if (!hasAnyContent()) return;
-  if (!confirm('このセッションの4タブ（文字起こし・メモ・要約・質問）をすべてクリアしますか？')) return;
-  clearPane('pane-transcript', { confirmFirst: false });
-  clearPane('pane-memo', { confirmFirst: false });
-  clearPane('pane-summary', { confirmFirst: false });
-  clearPane('pane-chat', { confirmFirst: false });
+  if (!confirm('このセッションの4タブ（文字起こし・メモ・要約・質問）をすべてクリアしますか？\n\nCtrl+Z（Undo）で元に戻せます。')) return;
+  // 各ペインにスナップショット（chatは対象外）
+  for (const pid of Object.keys(PANE_FIELD)) pushUndo('全タブクリア', pid);
+  clearPane('pane-transcript', { confirmFirst: false, skipUndo: true });
+  clearPane('pane-memo',       { confirmFirst: false, skipUndo: true });
+  clearPane('pane-summary',    { confirmFirst: false, skipUndo: true });
+  clearPane('pane-chat',       { confirmFirst: false, skipUndo: true });
 }
+
+/* ───────── Pane別 Undo / Redo ─────────
+ * タブごとに独立したスタックを持つ。各スタック項目は以下:
+ *   { sessionId, content, ts, op }
+ * content は各 pane の HTML 文字列 または chat JSON。
+ * localStorage に永続化し、pane単位で保存（容量対策）。 */
+
+const PANE_FIELD = {
+  'pane-transcript': 'transcript',
+  'pane-memo':       'memo',
+  'pane-summary':    'summary',
+};
+const MAX_UNDO_ENTRIES = 15;
+
+// paneId -> { undo: [], redo: [] }
+const paneStacks = (function loadAll() {
+  const obj = {};
+  for (const paneId of Object.keys(PANE_FIELD)) {
+    try {
+      obj[paneId] = {
+        undo: JSON.parse(localStorage.getItem(`dictation:undo:${paneId}`) || '[]'),
+        redo: JSON.parse(localStorage.getItem(`dictation:redo:${paneId}`) || '[]'),
+      };
+    } catch { obj[paneId] = { undo: [], redo: [] }; }
+  }
+  return obj;
+})();
+
+function _persistPaneStack(paneId) {
+  const s = paneStacks[paneId];
+  if (!s) return;
+  try {
+    localStorage.setItem(`dictation:undo:${paneId}`, JSON.stringify(s.undo));
+    localStorage.setItem(`dictation:redo:${paneId}`, JSON.stringify(s.redo));
+  } catch (e) {
+    // 容量オーバー時は半分に圧縮して再保存
+    s.undo = s.undo.slice(Math.floor(s.undo.length / 2));
+    s.redo = s.redo.slice(Math.floor(s.redo.length / 2));
+    try {
+      localStorage.setItem(`dictation:undo:${paneId}`, JSON.stringify(s.undo));
+      localStorage.setItem(`dictation:redo:${paneId}`, JSON.stringify(s.redo));
+    } catch {}
+  }
+}
+
+function _paneSnapshot(paneId, opLabel) {
+  snapshotActiveToSession();
+  const sess = getActiveSession();
+  if (!sess) return null;
+  const field = PANE_FIELD[paneId];
+  if (!field) return null;
+  return {
+    sessionId: sess.id,
+    content: sess[field] || '',
+    ts: Date.now(),
+    op: opLabel || '操作',
+  };
+}
+
+function _applyPaneSnapshot(paneId, snap) {
+  const target = state.sessions.find(x => x.id === snap.sessionId);
+  if (!target) return false;
+  const field = PANE_FIELD[paneId];
+  if (!field) return false;
+  target[field] = snap.content;
+  target.updatedAt = Date.now();
+  persistSessions();
+  if (state.activeId === snap.sessionId) {
+    loadActiveSessionIntoDOM();
+  }
+  renderTabs();
+  return true;
+}
+
+// 現在セッションに属する最新のUndo/Redo項目のインデックスを返す（無ければ-1）
+function _topForSession(stack, sessionId) {
+  for (let i = stack.length - 1; i >= 0; i--) {
+    if (stack[i].sessionId === sessionId) return i;
+  }
+  return -1;
+}
+
+/** 任意の content 文字列を指定して Undo スタックに積む（タイピング用） */
+function pushUndoSnapshot(paneId, opLabel, content) {
+  if (!PANE_FIELD[paneId]) return;
+  const sess = getActiveSession();
+  if (!sess) return;
+  const s = paneStacks[paneId];
+  s.undo.push({
+    sessionId: sess.id,
+    content: content != null ? content : '',
+    ts: Date.now(),
+    op: opLabel || '編集',
+  });
+  while (s.undo.length > MAX_UNDO_ENTRIES) s.undo.shift();
+  s.redo = [];
+  _persistPaneStack(paneId);
+  updatePaneUndoRedoButtons();
+}
+
+/* ───── タイピングの Undo スナップショット ─────
+ * 各ペインの contenteditable への user input を 2秒でデバウンスして、
+ * 打ち始める前の状態を Undo スタックに積む。
+ * loadActiveSessionIntoDOM / _applyPaneSnapshot 等のプログラム側変更では
+ * syncPaneBaselineFromDOM() で baseline を更新して、誤ったスナップショットを防ぐ。 */
+const paneLastStable = {
+  'pane-transcript': '',
+  'pane-memo': '',
+  'pane-summary': '',
+};
+const paneTypingTimers = {};
+
+function syncPaneBaselineFromDOM() {
+  if (els.confirmed) paneLastStable['pane-transcript'] = els.confirmed.innerHTML;
+  if (els.memo)      paneLastStable['pane-memo']       = els.memo.innerHTML;
+  if (els.summary)   paneLastStable['pane-summary']    = els.summary.innerHTML;
+}
+
+function bindPaneTypingUndo() {
+  const targets = [
+    { paneId: 'pane-transcript', el: els.confirmed },
+    { paneId: 'pane-memo',       el: els.memo },
+    { paneId: 'pane-summary',    el: els.summary },
+  ];
+
+  /* スナップショット頻度の目安:
+   *  - 句読点（。.!?！？、,）→ 即スナップ（文/句の区切り）
+   *  - 20文字以上打った → 即スナップ（文字数閾値）
+   *  - Enter → 即スナップ（行区切り）
+   *  - 2秒放置 → スナップ（idle安全ネット）
+   *  - blur → スナップ
+   *  こうすると「バーっと打ち続け」ても、20〜25字ごと + 句読点ごと に段階的に戻れる。 */
+  const CHARS_THRESHOLD = 20;
+  const PUNCT_RE = /[。．.!?！？、,，]/;
+
+  // baseline（paneLastStable）の textContent 長を取るヘルパ
+  const baseTextLen = (paneId) => {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = paneLastStable[paneId] || '';
+    return (tmp.textContent || '').length;
+  };
+
+  for (const { paneId, el } of targets) {
+    if (!el || el.__typingUndoWired) continue;
+    el.__typingUndoWired = true;
+    paneLastStable[paneId] = el.innerHTML;
+
+    // 現在のバーストを Undo スタックに確定させて baseline を更新するヘルパ
+    const flushBurst = (opLabel = '編集') => {
+      if (paneTypingTimers[paneId]) {
+        clearTimeout(paneTypingTimers[paneId]);
+        paneTypingTimers[paneId] = null;
+      }
+      const current = el.innerHTML;
+      if (current === paneLastStable[paneId]) return;
+      pushUndoSnapshot(paneId, opLabel, paneLastStable[paneId]);
+      paneLastStable[paneId] = current;
+    };
+
+    el.addEventListener('input', (e) => {
+      // 入力された文字列（IME 確定時も含む）
+      const inputData = (e && 'data' in e && e.data) ? e.data : '';
+
+      // 1) 句読点が入力されたら即スナップ（文/句の区切り）
+      if (inputData && PUNCT_RE.test(inputData)) {
+        flushBurst('文区切り');
+        return;
+      }
+
+      // 2) 文字数閾値（baseline から 20字以上増えた）
+      const baseLen = baseTextLen(paneId);
+      const curLen = (el.textContent || '').length;
+      if (Math.abs(curLen - baseLen) >= CHARS_THRESHOLD) {
+        flushBurst('編集');
+        return;
+      }
+
+      // 3) 2秒デバウンス（idle 時の安全ネット）
+      if (paneTypingTimers[paneId]) clearTimeout(paneTypingTimers[paneId]);
+      paneTypingTimers[paneId] = setTimeout(() => {
+        paneTypingTimers[paneId] = null;
+        flushBurst('編集');
+      }, 2000);
+    });
+
+    // Enter を境界に（1行単位）
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) {
+        flushBurst('行編集');
+        requestAnimationFrame(() => {
+          paneLastStable[paneId] = el.innerHTML;
+        });
+      }
+    });
+
+    // フォーカスアウト時に未確定のバーストを確定
+    el.addEventListener('blur', () => flushBurst('編集'));
+  }
+}
+
+/**
+ * 破壊的操作の直前に呼ぶ。対象ペインの現状をUndoスタックに積む。
+ * Redoスタックはクリア（新操作後はRedoできないため）。
+ */
+function pushUndo(opLabel, paneId) {
+  // 旧呼び出し（paneId なし）は active pane で推定（後方互換）
+  paneId = paneId || state.activePane || 'pane-transcript';
+  if (!PANE_FIELD[paneId]) return;
+  const snap = _paneSnapshot(paneId, opLabel);
+  if (!snap) return;
+  const s = paneStacks[paneId];
+  s.undo.push(snap);
+  while (s.undo.length > MAX_UNDO_ENTRIES) s.undo.shift();
+  s.redo = [];
+  _persistPaneStack(paneId);
+  updatePaneUndoRedoButtons();
+  diagLog.info(`Undo可: ${paneId} / ${opLabel}`);
+}
+
+function doPaneUndo(paneId) {
+  const s = paneStacks[paneId];
+  if (!s) return;
+  const idx = _topForSession(s.undo, state.activeId);
+  if (idx < 0) {
+    setStatus('idle', '戻せる操作がありません');
+    setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
+                                state.isRecording ? '録音中' : '停止'), 1500);
+    return;
+  }
+  // 現在状態をRedoに退避
+  const current = _paneSnapshot(paneId, s.undo[idx].op);
+  if (current) {
+    s.redo.push(current);
+    while (s.redo.length > MAX_UNDO_ENTRIES) s.redo.shift();
+  }
+  const last = s.undo.splice(idx, 1)[0];
+  _persistPaneStack(paneId);
+  if (!_applyPaneSnapshot(paneId, last)) {
+    setStatus('error', 'Undo対象のセッションが見つかりません');
+    updatePaneUndoRedoButtons();
+    return;
+  }
+  updatePaneUndoRedoButtons();
+  const paneLabel = PANE_META[paneId]?.label || paneId;
+  diagLog.info(`Undo実行: ${paneId} / ${last.op}`);
+  setStatus('idle', `[${paneLabel}] 戻しました: ${last.op}`);
+  setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
+                              state.isRecording ? '録音中' : '停止'), 2000);
+}
+
+function doPaneRedo(paneId) {
+  const s = paneStacks[paneId];
+  if (!s) return;
+  const idx = _topForSession(s.redo, state.activeId);
+  if (idx < 0) {
+    setStatus('idle', 'やり直せる操作がありません');
+    setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
+                                state.isRecording ? '録音中' : '停止'), 1500);
+    return;
+  }
+  const current = _paneSnapshot(paneId, s.redo[idx].op);
+  if (current) {
+    s.undo.push(current);
+    while (s.undo.length > MAX_UNDO_ENTRIES) s.undo.shift();
+  }
+  const next = s.redo.splice(idx, 1)[0];
+  _persistPaneStack(paneId);
+  if (!_applyPaneSnapshot(paneId, next)) {
+    setStatus('error', 'Redo対象のセッションが見つかりません');
+    updatePaneUndoRedoButtons();
+    return;
+  }
+  updatePaneUndoRedoButtons();
+  const paneLabel = PANE_META[paneId]?.label || paneId;
+  diagLog.info(`Redo実行: ${paneId} / ${next.op}`);
+  setStatus('idle', `[${paneLabel}] やり直しました: ${next.op}`);
+  setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
+                              state.isRecording ? '録音中' : '停止'), 2000);
+}
+
+function updatePaneUndoRedoButtons() {
+  const sid = state.activeId;
+  for (const paneId of Object.keys(PANE_FIELD)) {
+    const s = paneStacks[paneId];
+    const undoBtn = document.querySelector(`[data-pane-undo="${paneId}"]`);
+    const redoBtn = document.querySelector(`[data-pane-redo="${paneId}"]`);
+    const paneLabel = PANE_META[paneId]?.label || paneId;
+    // 現在セッションに属する最新エントリだけ考慮
+    const undoIdx = _topForSession(s.undo, sid);
+    const redoIdx = _topForSession(s.redo, sid);
+    if (undoBtn) {
+      undoBtn.disabled = undoIdx < 0;
+      const last = undoIdx >= 0 ? s.undo[undoIdx] : null;
+      undoBtn.title = last
+        ? `${paneLabel}を戻す: ${last.op} (Ctrl+Z)`
+        : `${paneLabel}を戻す — なし`;
+    }
+    if (redoBtn) {
+      redoBtn.disabled = redoIdx < 0;
+      const next = redoIdx >= 0 ? s.redo[redoIdx] : null;
+      redoBtn.title = next
+        ? `${paneLabel}をやり直す: ${next.op} (Ctrl+Shift+Z)`
+        : `${paneLabel}をやり直す — なし`;
+    }
+  }
+}
+
+// 旧名との互換（既存の呼び出しを壊さないため残す）
+function updateUndoRedoButtons() { updatePaneUndoRedoButtons(); }
+function updateUndoButton() { updatePaneUndoRedoButtons(); }
+function doUndo() { doPaneUndo(state.activePane || 'pane-transcript'); }
+function doRedo() { doPaneRedo(state.activePane || 'pane-transcript'); }
 
 function toggleAi() {
   if (!state.settings.apiKey) { openSettings(); return; }
@@ -2280,7 +3044,21 @@ function applyPaneOrder() {
 }
 
 function renderInnerTabs() {
-  els.innerTabsContainer.innerHTML = '';
+  // 内側ラッパ .inner-tabs-list が無ければ作る（外側タブの #tabs-list と同構造）
+  // これでアクティブ線 indicator が位置: relative の基準を持てる
+  let listEl = els.innerTabsContainer.querySelector('.inner-tabs-list');
+  if (!listEl) {
+    els.innerTabsContainer.innerHTML = '';
+    listEl = document.createElement('div');
+    listEl.className = 'inner-tabs-list';
+    els.innerTabsContainer.appendChild(listEl);
+  }
+
+  // renderTabs と同じく indicator を renderInnerTabs を跨いで保持
+  let indicator = listEl.__activeIndicator;
+  if (indicator && indicator.parentElement === listEl) indicator.remove();
+
+  listEl.innerHTML = '';
   for (const id of state.settings.paneOrder) {
     const meta = PANE_META[id];
     if (!meta) continue;
@@ -2289,14 +3067,52 @@ function renderInnerTabs() {
     btn.dataset.pane = id;
     btn.innerHTML = `<span class="inner-tab-icon" data-icon="${meta.icon}"></span>${meta.label}`;
     btn.addEventListener('click', () => switchInnerPane(id));
-    els.innerTabsContainer.appendChild(btn);
+    listEl.appendChild(btn);
   }
-  renderIcons(els.innerTabsContainer);
-  enablePointerDragSort(els.innerTabsContainer, {
+
+  // indicator を再アペンド（新規なら作る）
+  if (!indicator) {
+    indicator = document.createElement('div');
+    indicator.className = 'inner-tab-active-indicator';
+    listEl.__activeIndicator = indicator;
+  }
+  listEl.appendChild(indicator);
+
+  renderIcons(listEl);
+  enablePointerDragSort(listEl, {
     itemSelector: '.inner-tab',
     idAttr: 'pane',
     onReorder: reorderPaneOrder,
   });
+
+  requestAnimationFrame(updateInnerTabsIndicator);
+}
+
+/* 内側タブのアクティブ線を現在位置に滑らす */
+function updateInnerTabsIndicator() {
+  const listEl = els.innerTabsContainer && els.innerTabsContainer.querySelector('.inner-tabs-list');
+  const bar = listEl && listEl.__activeIndicator;
+  if (!bar) return;
+  const activeTab = listEl.querySelector('.inner-tab.active');
+  if (!activeTab) {
+    bar.classList.remove('visible');
+    return;
+  }
+  const x = activeTab.offsetLeft;
+  const w = activeTab.offsetWidth;
+  const firstShow = !bar.classList.contains('visible');
+  if (firstShow) {
+    const saved = bar.style.transition;
+    bar.style.transition = 'none';
+    bar.style.transform = `translateX(${x}px)`;
+    bar.style.width = `${w}px`;
+    void bar.offsetWidth;
+    bar.style.transition = saved;
+    requestAnimationFrame(() => bar.classList.add('visible'));
+  } else {
+    bar.style.transform = `translateX(${x}px)`;
+    bar.style.width = `${w}px`;
+  }
 }
 
 function reorderPaneOrder(newOrder) {
@@ -2498,6 +3314,10 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
   if (!state.settings.apiKey) {
     if (!silent) { alert('Gemini API キーが未設定です。設定から登録してください。'); openSettings(); }
     return;
+  }
+  // 要約は既存内容を置き換える破壊的操作。Undoスタックに退避（対象セッションがアクティブな時のみ）
+  if (targetId === state.activeId && (session.summary || '').trim()) {
+    pushUndo(silent ? '要約自動生成' : '要約生成', 'pane-summary');
   }
   state.isSummarizing = true;
   // 表示中のセッションだった場合のみ UI にローディング表示
@@ -2816,6 +3636,9 @@ function enablePointerDragSort(list, opts) {
       if (typeof updateActiveTabIndicator === 'function') {
         setTimeout(() => updateActiveTabIndicator(), 340);
       }
+      if (typeof updateInnerTabsIndicator === 'function') {
+        setTimeout(() => updateInnerTabsIndicator(), 340);
+      }
     }
     clearHighlights();
     try { list.releasePointerCapture(pointerId); } catch {}
@@ -2993,8 +3816,33 @@ function openSettings() {
   }
   els.inputChunkSec.value = state.settings.audioChunkSec || 12;
   if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
+  if (els.inputWsCommitSec) {
+    // v0.13.29: localStorage に古い値（3/4/5 等、v0.13.26 で削除した選択肢）が
+    // 残っていると、UI のセレクトが空欄表示になる（option に value マッチがない）。
+    // 妥当な選択肢に含まれない値は既定 6 にフォールバックして state.settings も
+    // 即時更新（次回 saveSettingsFromForm で localStorage にも反映される）。
+    let v = Number(state.settings.webspeechCommitSec ?? 6);
+    if (![0, 6, 8, 10].includes(v)) v = 6;
+    els.inputWsCommitSec.value = String(v);
+    state.settings.webspeechCommitSec = v;
+  }
+  if (els.inputWsSliceChars) {
+    // v0.13.31: 改行文字数。number input（10〜100）。範囲外は既定 30 にクランプ。
+    let v = Number(state.settings.webspeechSliceChars ?? 30);
+    if (!Number.isFinite(v) || v < 10 || v > 100) v = 30;
+    els.inputWsSliceChars.value = String(v);
+    state.settings.webspeechSliceChars = v;
+  }
+  if (els.inputWsSilenceStopSec) {
+    // v0.13.31: 無音 stop 秒数。number input（0〜10、0=OFF）。範囲外は既定 3。
+    let v = Number(state.settings.webspeechSilenceStopSec ?? 3);
+    if (!Number.isFinite(v) || v < 0 || v > 10) v = 3;
+    els.inputWsSilenceStopSec.value = String(v);
+    state.settings.webspeechSilenceStopSec = v;
+  }
   populateAudioDevices();
   applyGeminiOnlyVisibility(/* animated */ false);
+  applyWebSpeechOnlyVisibility(/* animated */ false);
   els.fontTranscript.value = state.settings.transcriptFont;
   els.sizeTranscript.value = state.settings.transcriptSize;
   els.fontMemo.value = state.settings.memoFont;
@@ -3028,6 +3876,24 @@ function saveSettingsFromForm() {
   state.settings.audioDeviceId = els.inputAudioDevice ? els.inputAudioDevice.value : '';
   state.settings.audioChunkSec = Math.max(5, Math.min(60, Number(els.inputChunkSec.value) || 12));
   if (els.inputMinChunkBytes) state.settings.audioMinChunkBytes = Math.max(100, Math.min(5000, Number(els.inputMinChunkBytes.value) || 400));
+  if (els.inputWsCommitSec) {
+    const newSec = Math.max(0, Math.min(20, Number(els.inputWsCommitSec.value) || 0));
+    if (newSec !== state.settings.webspeechCommitSec) {
+      state.settings.webspeechCommitSec = newSec;
+      // 録音中なら即時タイマー反映
+      if (typeof restartWebSpeechCommitTimer === 'function') restartWebSpeechCommitTimer();
+    }
+  }
+  if (els.inputWsSliceChars) {
+    // v0.13.31: 改行文字数。10〜100 にクランプ。設定変更は次の onresult から効くので即時反映処理は不要。
+    const newN = Math.max(10, Math.min(100, Number(els.inputWsSliceChars.value) || 30));
+    state.settings.webspeechSliceChars = newN;
+  }
+  if (els.inputWsSilenceStopSec) {
+    // v0.13.31: 無音 stop 秒数。0〜10 にクランプ。次の onresult からタイマーが新しい値で動くので即時反映処理は不要。
+    const newSec = Math.max(0, Math.min(10, Number(els.inputWsSilenceStopSec.value) || 0));
+    state.settings.webspeechSilenceStopSec = newSec;
+  }
   state.settings.transcriptFont = els.fontTranscript.value;
   state.settings.transcriptSize = Math.max(10, Math.min(36, Number(els.sizeTranscript.value) || 17));
   state.settings.memoFont = els.fontMemo.value;
@@ -3074,6 +3940,10 @@ function switchInnerPane(paneId) {
 
   state.activePane = paneId;
   els.innerTabsContainer.querySelectorAll('.inner-tab').forEach(t => t.classList.toggle('active', t.dataset.pane === paneId));
+  // アクティブ線（下の色バー）を新しいアクティブタブへ滑らす
+  if (typeof updateInnerTabsIndicator === 'function') updateInnerTabsIndicator();
+  // 検索バー等のリスナーに通知
+  document.dispatchEvent(new CustomEvent('dictation:paneSwitched', { detail: { paneId } }));
   const panes = [els.paneTranscript, els.paneMemo, els.paneSummary, els.paneChat];
   panes.forEach(p => {
     p.classList.toggle('active', p.id === paneId);
@@ -3162,8 +4032,10 @@ function createSession({ activate = true, title = null, skipSave = false } = {})
   renderTabs();
   if (activate) {
     loadActiveSessionIntoDOM();
-    // 新規タブを画面内に収めるよう自動スクロール
-    requestAnimationFrame(scrollActiveTabIntoView);
+    // v0.13.31: 新規タブは末尾に追加されるので、scrollWidth まで一発で行けば必ず見える。
+    // 旧 scrollActiveTabIntoView は新規 DOM のレイアウト前に getBoundingClientRect を取って
+    // 「最新タブの手前で止まる」事故が起きていた（やっさん指摘）。
+    scrollTabsToEnd();
   }
   return session;
 }
@@ -3172,13 +4044,20 @@ function getActiveSession() {
   return state.sessions.find(s => s.id === state.activeId);
 }
 
-function snapshotActiveToSession() {
+function snapshotActiveToSession(opts = {}) {
   const s = getActiveSession();
   if (!s) return;
   s.transcript = els.confirmed.innerHTML;
   s.memo = els.memo.innerHTML;
   s.summary = els.summary.innerHTML;
   s.updatedAt = Date.now();
+  // タイピングUndoの baseline も同期（autosave 由来の場合はスキップ：
+  // ユーザーが入力中の可能性があり、baseline を上書きすると履歴が流れるため）
+  if (!opts.fromAutosave && typeof paneLastStable !== 'undefined') {
+    paneLastStable['pane-transcript'] = s.transcript;
+    paneLastStable['pane-memo']       = s.memo;
+    paneLastStable['pane-summary']    = s.summary;
+  }
 }
 
 function migrateMemoTaskItems() {
@@ -3208,6 +4087,10 @@ function loadActiveSessionIntoDOM() {
   renderChat();
   updateActionButtons();
   renderTitleBar();
+  // Undo/Redo ボタンはセッションごとにフィルタされるので、セッション切替時にも更新
+  if (typeof updatePaneUndoRedoButtons === 'function') updatePaneUndoRedoButtons();
+  // タイピングUndoの基準状態をDOMから再同期（プログラム変更で baseline が古くなるのを防ぐ）
+  if (typeof syncPaneBaselineFromDOM === 'function') syncPaneBaselineFromDOM();
   state.userScrolledUp = false;
   requestAnimationFrame(() => autoScroll(true));
 }
@@ -3646,6 +4529,23 @@ function scrollActiveTabIntoView() {
   }
 }
 
+/** v0.13.31: タブを新規追加した時、末尾まで確実にスクロールする。
+ * 新規タブの DOM レイアウト完了が requestAnimationFrame 1 回では間に合わず、
+ * scrollActiveTabIntoView の getBoundingClientRect が古い値を返すケースがあった
+ * （やっさん指摘「最新のタブの手前で止まる」）。
+ * scrollWidth まで一発で行けば、新規タブは必ず末尾なので確実に見える。
+ * double RAF + scrollWidth で「DOM レイアウト後の最終位置」へジャンプ。 */
+function scrollTabsToEnd() {
+  const scrollEl = document.getElementById('tabs');
+  if (!scrollEl) return;
+  // double RAF で DOM レイアウトが確実に完了してから scrollWidth を取得
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      scrollEl.scrollTo({ left: scrollEl.scrollWidth, behavior: 'smooth' });
+    });
+  });
+}
+
 function reorderSessions(newIds) {
   const map = new Map(state.sessions.map(s => [s.id, s]));
   const reordered = newIds.map(id => map.get(id)).filter(Boolean);
@@ -3710,7 +4610,7 @@ async function regenTitleFromBar() {
 function startAutoSave() {
   if (state.autoSaveTimer) clearInterval(state.autoSaveTimer);
   state.autoSaveTimer = setInterval(() => {
-    snapshotActiveToSession();
+    snapshotActiveToSession({ fromAutosave: true });
     persistSessions();
   }, AUTOSAVE_INTERVAL_MS);
 }
@@ -3832,6 +4732,11 @@ const ONBOARDING_STEPS = [
     title: '設定',
     text: 'Gemini API キー、フォント・サイズ、要約の詳細度、音声入力モード（Web Speech / Gemini Audio）などをここで調整します。',
   },
+  {
+    target: '#btn-captions',
+    title: '字幕設定',
+    text: 'OS レベルの透過字幕オーバーレイ（ネイティブヘルパー dictation-overlay と連携）。Zoom や Meet・他アプリの上に直接字幕が乗ります。フォント・色・縁取り・影・背景・パディング・行間・改行ルール・AI整形などをここで調整。**Windows 専用**で、初回のみインストーラが必要です。',
+  },
 ];
 
 let onboardingIdx = 0;
@@ -3925,23 +4830,38 @@ function closeOnboarding() {
 const btnOnboarding = document.getElementById('btn-onboarding');
 if (btnOnboarding) btnOnboarding.addEventListener('click', startOnboarding);
 
-/* ライブ字幕（OSD）ウィンドウを開く。
- * Chrome拡張の場合は chrome-extension://ID/captions.html、
- * 一般Webの場合は相対パス captions.html で開く。 */
+/* v0.13.31: 字幕設定モーダル。
+ * 旧仕様：別ウィンドウとして captions.html を開いて字幕表示+設定を兼ねる
+ * 新仕様：字幕表示はオーバーレイのみ、字幕アイコン押下でモーダル開く。
+ *         モーダル内に captions.html?settingsOnly=1 を iframe で埋め込み、
+ *         既存の Native Messaging 連携・設定 UI ロジックをそのまま流用する。 */
 const btnCaptions = document.getElementById('btn-captions');
-if (btnCaptions) {
+const captionsModal = document.getElementById('captions-modal');
+const captionsModalIframe = document.getElementById('captions-modal-iframe');
+if (btnCaptions && captionsModal && captionsModalIframe) {
+  btnCaptions.title = '字幕設定';
+  // chrome.runtime.getURL の引数にクエリ（?）を含めると extension URL として正しく解決されないため、
+  // ベース URL を取ってから ?settingsOnly=1 を後付けする。
+  const captionsBaseUrl = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL)
+    ? chrome.runtime.getURL('captions.html')
+    : 'captions.html';
+  const captionsModalSrc = captionsBaseUrl + '?settingsOnly=1';
   btnCaptions.addEventListener('click', () => {
-    // 現在のセッションを先に保存しておかないと字幕側が古いまま表示
-    snapshotActiveToSession();
-    persistSessions();
-    const url = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL)
-      ? chrome.runtime.getURL('captions.html')
-      : 'captions.html';
-    // 別ウィンドウとして開く。ユーザーが手動で別モニタに移動できるよう、通常タブ扱い
-    const w = window.open(url, 'dictation-captions',
-      'popup=yes,width=960,height=540,resizable=yes,scrollbars=yes');
-    if (!w) {
-      alert('ポップアップがブロックされました。ブラウザのポップアップ許可を確認してください。');
+    // 現在のセッションを先に保存（iframe 内 captions.js が transcript フォールバックで読むことがある）
+    try { snapshotActiveToSession(); persistSessions(); } catch (_) {}
+    // src が違っていれば（旧 URL or 未セット）必ず読み直す。同じならそのまま（state 維持＝
+    // Native Messaging 接続を切らない）。CSP 対策の captions-bootstrap.js が外部 JS で
+    // 確実に実行されるため、キャッシュバスターは不要になった。
+    if (captionsModalIframe.src !== captionsModalSrc) {
+      captionsModalIframe.src = captionsModalSrc;
+    }
+    captionsModal.classList.remove('hidden');
+  });
+  // 閉じる：data-dismiss / backdrop / .modal-close で発火
+  captionsModal.addEventListener('click', (e) => {
+    const t = e.target;
+    if (t && (t.closest('[data-dismiss]') || t.classList.contains('modal-backdrop'))) {
+      captionsModal.classList.add('hidden');
     }
   });
 }
@@ -3951,6 +4871,7 @@ document.querySelector('#onboarding .onboarding-overlay')?.addEventListener('cli
 window.addEventListener('resize', () => {
   if (!document.getElementById('onboarding').classList.contains('hidden')) onboardingPosition();
   updateActiveTabIndicator();
+  if (typeof updateInnerTabsIndicator === 'function') updateInnerTabsIndicator();
 });
 if (els.btnSummaryCombo) {
   els.btnSummaryCombo.addEventListener('click', async (e) => {
@@ -3996,9 +4917,21 @@ document.getElementById('btn-diag-clear')?.addEventListener('click', () => {
   diagLog.clear();
 });
 
-// モード切替で Gemini 専用フィールドの表示/非表示をアニメーション
-if (els.modeWebSpeech) els.modeWebSpeech.addEventListener('change', () => applyGeminiOnlyVisibility(true));
-if (els.modeGemini) els.modeGemini.addEventListener('change', () => applyGeminiOnlyVisibility(true));
+// モード切替で Gemini 専用 / Web Speech 専用フィールドの表示/非表示をアニメーション
+if (els.modeWebSpeech) {
+  els.modeWebSpeech.addEventListener('change', () => {
+    applyGeminiOnlyVisibility(true);
+    applyWebSpeechOnlyVisibility(true);
+  });
+}
+if (els.modeGemini) {
+  els.modeGemini.addEventListener('change', () => {
+    applyGeminiOnlyVisibility(true);
+    applyWebSpeechOnlyVisibility(true);
+  });
+}
+
+// v0.13.24: btnWebSpeechDefaults クリックハンドラ削除（UI 撤去・WEB_SPEECH_DEFAULTS 撤去に伴う）。
 
 /* ───────── Zoom bar (bottom-right) ───────── */
 function setZoom(pct, persist = true) {
@@ -4024,7 +4957,13 @@ let editSaveTimer = null;
 function onEdit() {
   updateActionButtons();
   if (editSaveTimer) clearTimeout(editSaveTimer);
-  editSaveTimer = setTimeout(() => { snapshotActiveToSession(); persistSessions(); }, 800);
+  // 800ms入力アイドル後の自動保存。fromAutosave:true を必ず付ける。
+  // これを付けないと paneLastStable がここで毎回 DOM 現在値にリセットされ、
+  // タイピングUndoの 20字閾値が永久に発火しなくなる（v0.12.16 修正）。
+  editSaveTimer = setTimeout(() => {
+    snapshotActiveToSession({ fromAutosave: true });
+    persistSessions();
+  }, 800);
 }
 els.confirmed.addEventListener('input', onEdit);
 els.memo.addEventListener('input', onEdit);
@@ -4388,7 +5327,7 @@ els.confirmed.addEventListener('paste', () => {
   setTimeout(() => { refineUnstructuredInTranscript({ showFeedback: false }); }, 150);
 });
 
-// 文字起こし整形コンボ: ノブ=自動ON/OFFトグル、本体=今すぐ整形
+// 文字起こし整形コンボ: ノブ=自動ON/OFFトグル、本体=全体を一括ミドル整形（見出し付け）
 if (els.btnRefineTranscript) {
   els.btnRefineTranscript.addEventListener('click', async (e) => {
     const hit = e.target.closest('[data-role]');
@@ -4396,17 +5335,12 @@ if (els.btnRefineTranscript) {
     if (role === 'toggle') {
       toggleAi();
     } else {
+      // 本体クリック: トグルON/OFFに関わらず、全体を上から下までまとめて文脈込みで
+      // 再整形＋見出し付け。既に整形済みのテキストも一度に整う。
       if (!state.settings.apiKey) { openSettings(); return; }
       els.btnRefineTranscript.classList.add('firing');
       try {
-        // 貼付け等の未整形テキストを先に整形
-        await refineUnstructuredInTranscript({ force: true, showFeedback: true });
-        // ショートチャンク（Geminiオーディオ由来）を強制的に統合整形（見出し付け）
-        const container = getWriteContainer();
-        const shorts = Array.from(container.querySelectorAll('.paragraph.short-refined'));
-        if (shorts.length > 0) await consolidateShortChunks(shorts);
-        // 失敗した needs-retry の再試行
-        await retryPendingRefinements({ showFeedback: true });
+        await refineWholeTranscript({ showFeedback: true });
       } finally {
         els.btnRefineTranscript.classList.remove('firing');
       }
@@ -4687,3 +5621,574 @@ renderTabs();
 loadActiveSessionIntoDOM();
 updateActionButtons();
 startAutoSave();
+// 文字起こし・メモ・要約の直接入力（キーボードタイピング）にも Undo/Redo を効かせる
+bindPaneTypingUndo();
+
+/* ───────── メモ: 選択範囲の整形（箇条書き→文章化 + 誤字訂正） ─────────
+ * メモ内で範囲選択してボタンを押すと、Gemini に送って整形。
+ * 訂正箇所は <mark class="mr-diff"> で一時的にハイライト（6秒後にフェード消去）。 */
+async function refineMemoSelection() {
+  if (!state.settings.apiKey) {
+    alert('Gemini API キーが未設定です。設定から登録してください。');
+    openSettings();
+    return;
+  }
+  const memo = els.memo;
+  if (!memo) return;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+    alert('メモ内で文章を範囲選択してからボタンを押してください。');
+    return;
+  }
+  const range = sel.getRangeAt(0);
+  // 選択範囲がメモ内にあるかチェック
+  if (!memo.contains(range.commonAncestorContainer) &&
+      range.commonAncestorContainer !== memo) {
+    alert('メモ内の範囲を選択してください。');
+    return;
+  }
+  const selectedText = (range.toString() || '').trim();
+  if (!selectedText) {
+    alert('選択範囲が空です。');
+    return;
+  }
+  if (selectedText.length < 5) {
+    alert('5文字以上を選択してください。');
+    return;
+  }
+
+  // Undo スナップショット
+  pushUndo(`選択範囲整形 (${selectedText.length}字)`, 'pane-memo');
+
+  // 選択範囲を「処理中…」の inline 要素で置き換える
+  const placeholder = document.createElement('span');
+  placeholder.className = 'mr-processing';
+  placeholder.textContent = '（整形中…）';
+  range.deleteContents();
+  range.insertNode(placeholder);
+  snapshotActiveToSession();
+  persistSessions();
+
+  const btn = document.getElementById('btn-memo-refine-selection');
+  if (btn) btn.classList.add('firing');
+  diagLog.info(`メモ選択整形開始: ${selectedText.length}字`);
+
+  try {
+    const refinedHtml = await window.refineMemoSelectionWithGemini({
+      apiKey: state.settings.apiKey,
+      text: selectedText,
+    });
+    // プレースホルダを実結果で置換。Gemini は <mark>...</mark> 付きテキストを返す想定。
+    // 安全のため mark 以外のタグを除去してからパース。
+    const safeHtml = sanitizeSelectionRefineHtml(refinedHtml || selectedText);
+    const tmpl = document.createElement('template');
+    tmpl.innerHTML = safeHtml.replace(/\n/g, '<br>');
+    const frag = tmpl.content.cloneNode(true);
+    // mark 要素にフェードアウトクラスをスケジュール
+    const marks = frag.querySelectorAll('mark');
+    marks.forEach(m => m.classList.add('mr-diff'));
+    placeholder.replaceWith(frag);
+    // 一定時間後にフェード、消去
+    setTimeout(() => {
+      memo.querySelectorAll('mark.mr-diff').forEach(m => m.classList.add('mr-diff-fade'));
+      setTimeout(() => {
+        memo.querySelectorAll('mark.mr-diff').forEach(m => {
+          const parent = m.parentNode;
+          while (m.firstChild) parent.insertBefore(m.firstChild, m);
+          parent.removeChild(m);
+          parent.normalize();
+        });
+        snapshotActiveToSession();
+        persistSessions();
+      }, 1500);
+    }, 6000);
+    snapshotActiveToSession();
+    persistSessions();
+    diagLog.info(`メモ選択整形完了: ${selectedText.length}字→${(refinedHtml || '').length}字`);
+  } catch (e) {
+    console.warn('[memo refine selection] failed:', e.message || e);
+    // プレースホルダを元テキストに戻す
+    placeholder.replaceWith(document.createTextNode(selectedText));
+    snapshotActiveToSession();
+    persistSessions();
+    setStatus('error', 'メモ整形失敗: ' + (e.message || '').slice(0, 60));
+    setTimeout(() => setStatus('idle', '停止'), 4000);
+  } finally {
+    if (btn) btn.classList.remove('firing');
+  }
+}
+
+/** Gemini の返したHTML文字列から許可タグ（mark/br）以外を除去 */
+function sanitizeSelectionRefineHtml(html) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const walker = document.createTreeWalker(tmp, NodeFilter.SHOW_ELEMENT, null);
+  const toUnwrap = [];
+  const cur = walker.currentNode;
+  while (walker.nextNode()) {
+    const el = walker.currentNode;
+    const tag = el.tagName.toLowerCase();
+    if (tag !== 'mark' && tag !== 'br') toUnwrap.push(el);
+  }
+  for (const el of toUnwrap) {
+    const parent = el.parentNode;
+    if (!parent) continue;
+    while (el.firstChild) parent.insertBefore(el.firstChild, el);
+    parent.removeChild(el);
+  }
+  return tmp.innerHTML;
+}
+
+const btnMemoRefineSel = document.getElementById('btn-memo-refine-selection');
+if (btnMemoRefineSel) btnMemoRefineSel.addEventListener('click', refineMemoSelection);
+
+/**
+ * 横スクロール領域でマウスホイールを回したら左右にスクロールさせる。
+ * - 実際に横オーバーフローしてる時だけ効かせる（縦方向の親スクロールを邪魔しない）
+ * - トラックパッドが既に deltaX を送ってくる場合はネイティブに任せる
+ * - Shiftキー押しながらのホイールも deltaY を使って動くよう対応（Shift+wheel標準）
+ */
+function enableHorizontalWheelScroll(el) {
+  if (!el || el.__hwheelWired) return;
+  el.__hwheelWired = true;
+  el.addEventListener('wheel', (e) => {
+    if (el.scrollWidth <= el.clientWidth) return;
+    // トラックパッドの横スワイプ等で deltaX のほうが大きい場合はネイティブ挙動
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    // 縦ホイールを横スクロールに変換
+    e.preventDefault();
+    el.scrollLeft += e.deltaY;
+  }, { passive: false });
+}
+// コントロールバー・外タブ・内タブ・ペインヘッダに適用
+enableHorizontalWheelScroll(document.getElementById('controls'));
+enableHorizontalWheelScroll(document.getElementById('tabs'));
+enableHorizontalWheelScroll(document.getElementById('inner-tabs'));
+document.querySelectorAll('.pane-header').forEach(enableHorizontalWheelScroll);
+
+/* ペイン別 Undo / Redo ボタンと Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y */
+(function bindPaneUndoRedo() {
+  // 各ペインヘッダの data-pane-undo / data-pane-redo ボタンをまとめて配線
+  document.querySelectorAll('[data-pane-undo]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const paneId = btn.dataset.paneUndo;
+      doPaneUndo(paneId);
+    });
+  });
+  document.querySelectorAll('[data-pane-redo]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const paneId = btn.dataset.paneRedo;
+      doPaneRedo(paneId);
+    });
+  });
+  updatePaneUndoRedoButtons();
+
+  document.addEventListener('keydown', (e) => {
+    const isMod = e.ctrlKey || e.metaKey;
+    if (!isMod) return;
+    // 編集中フィールドでのネイティブ Undo/Redo は邪魔しない
+    const t = e.target;
+    const inEditable = t && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA');
+    if (inEditable) return;
+    // Ctrl+Shift+Z or Ctrl+Y → Redo（現在アクティブなペインに対して）
+    if ((e.key === 'z' && e.shiftKey) || (e.key === 'Z' && e.shiftKey) || e.key === 'y' || e.key === 'Y') {
+      e.preventDefault();
+      doPaneRedo(state.activePane || 'pane-transcript');
+      return;
+    }
+    // Ctrl+Z → Undo（現在アクティブなペインに対して）
+    if (e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      doPaneUndo(state.activePane || 'pane-transcript');
+    }
+  });
+})();
+
+/* ───────── 検索＆置換（Ctrl+F / 検索アイコン） ─────────
+ * アクティブなペインの contenteditable / rendered 領域内のテキストを検索・置換する。
+ * テキストノードだけを対象にして <mark.search-hit> で囲む方式。
+ * 閉じる時は全ての mark を外して親を normalize してきれいに戻す。 */
+
+const SEARCH_TARGETS = {
+  'pane-transcript': { sel: '#confirmed',        label: '文字起こし' },
+  'pane-memo':       { sel: '#memo',             label: 'メモ' },
+  'pane-summary':    { sel: '#summary',          label: '要約' },
+  'pane-chat':       { sel: '#chat-messages',    label: '質問（チャット）' },
+};
+
+const searchState = {
+  open: false,
+  query: '',
+  caseSensitive: false,
+  useRegex: false,
+  showReplace: false,
+  matches: [],       // <mark> 要素の配列
+  currentIdx: -1,
+};
+
+function getSearchTargetEl() {
+  const cfg = SEARCH_TARGETS[state.activePane] || SEARCH_TARGETS['pane-transcript'];
+  return { el: document.querySelector(cfg.sel), label: cfg.label };
+}
+
+function clearSearchHighlights(target) {
+  if (!target) return;
+  const marks = target.querySelectorAll('mark.search-hit');
+  marks.forEach(m => {
+    const parent = m.parentNode;
+    if (!parent) return;
+    while (m.firstChild) parent.insertBefore(m.firstChild, m);
+    parent.removeChild(m);
+  });
+  target.normalize(); // 分裂したテキストノードを結合
+}
+
+function openSearchBar() {
+  const bar = document.getElementById('search-bar');
+  if (!bar) return;
+  searchState.open = true;
+  bar.classList.remove('hidden');
+  const input = document.getElementById('search-input');
+  // 既に選択中のテキストがあれば初期値に（ブラウザ標準の挙動に寄せる）
+  const sel = window.getSelection();
+  if (sel && sel.toString().trim()) {
+    input.value = sel.toString().trim();
+    searchState.query = input.value;
+  }
+  updateSearchScopeLabel();
+  setTimeout(() => { input.focus(); input.select(); }, 10);
+  runSearch();
+}
+
+function closeSearchBar() {
+  const bar = document.getElementById('search-bar');
+  if (!bar) return;
+  searchState.open = false;
+  bar.classList.add('hidden');
+  const { el } = getSearchTargetEl();
+  clearSearchHighlights(el);
+  searchState.matches = [];
+  searchState.currentIdx = -1;
+  // 編集を即保存（置換した場合のため）
+  snapshotActiveToSession();
+  persistSessions();
+}
+
+function updateSearchScopeLabel() {
+  const scope = document.getElementById('search-scope');
+  const { label } = getSearchTargetEl();
+  if (scope) scope.textContent = `検索対象：${label}`;
+}
+
+function buildSearchRegex(query, { caseSensitive, useRegex }) {
+  try {
+    const flags = caseSensitive ? 'g' : 'gi';
+    if (useRegex) return new RegExp(query, flags);
+    const escaped = query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    return new RegExp(escaped, flags);
+  } catch (e) {
+    return null;
+  }
+}
+
+function runSearch() {
+  const { el: target } = getSearchTargetEl();
+  if (!target) return;
+  clearSearchHighlights(target);
+  searchState.matches = [];
+  searchState.currentIdx = -1;
+
+  const q = (document.getElementById('search-input').value || '');
+  searchState.query = q;
+  if (!q) { updateSearchCounter(); return; }
+
+  const re = buildSearchRegex(q, searchState);
+  if (!re) { updateSearchCounter('無効な正規表現'); return; }
+
+  // テキストノードを走査して <mark> に包む
+  const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      if (node.parentNode && node.parentNode.nodeName === 'MARK') return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+  for (const node of textNodes) {
+    const text = node.nodeValue;
+    const parts = [];
+    let lastIdx = 0;
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      if (m[0].length === 0) { re.lastIndex++; continue; }
+      if (m.index > lastIdx) parts.push({ t: 'text', v: text.slice(lastIdx, m.index) });
+      parts.push({ t: 'mark', v: m[0] });
+      lastIdx = m.index + m[0].length;
+    }
+    if (parts.length === 0) continue;
+    if (lastIdx < text.length) parts.push({ t: 'text', v: text.slice(lastIdx) });
+
+    const frag = document.createDocumentFragment();
+    for (const p of parts) {
+      if (p.t === 'text') frag.appendChild(document.createTextNode(p.v));
+      else {
+        const mk = document.createElement('mark');
+        mk.className = 'search-hit';
+        mk.textContent = p.v;
+        frag.appendChild(mk);
+        searchState.matches.push(mk);
+      }
+    }
+    node.parentNode.replaceChild(frag, node);
+  }
+
+  if (searchState.matches.length > 0) {
+    searchState.currentIdx = 0;
+    updateCurrentMatch();
+  }
+  updateSearchCounter();
+}
+
+function updateCurrentMatch() {
+  const { matches, currentIdx } = searchState;
+  matches.forEach((m, i) => m.classList.toggle('current', i === currentIdx));
+  const cur = matches[currentIdx];
+  if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function updateSearchCounter(overrideText) {
+  const counter = document.getElementById('search-counter');
+  if (!counter) return;
+  const { matches, currentIdx, query } = searchState;
+  if (overrideText) {
+    counter.textContent = overrideText;
+    counter.classList.add('no-match');
+    return;
+  }
+  if (!query) {
+    counter.textContent = '';
+    counter.classList.remove('no-match');
+    return;
+  }
+  if (matches.length === 0) {
+    counter.textContent = '0件';
+    counter.classList.add('no-match');
+  } else {
+    counter.textContent = `${currentIdx + 1}/${matches.length}`;
+    counter.classList.remove('no-match');
+  }
+}
+
+function searchNext() {
+  const n = searchState.matches.length;
+  if (n === 0) return;
+  searchState.currentIdx = (searchState.currentIdx + 1) % n;
+  updateCurrentMatch();
+  updateSearchCounter();
+}
+function searchPrev() {
+  const n = searchState.matches.length;
+  if (n === 0) return;
+  searchState.currentIdx = (searchState.currentIdx - 1 + n) % n;
+  updateCurrentMatch();
+  updateSearchCounter();
+}
+
+function searchReplaceOne() {
+  const { matches, currentIdx } = searchState;
+  const cur = matches[currentIdx];
+  if (!cur) return;
+  const repl = document.getElementById('search-replace').value;
+  const parent = cur.parentNode;
+  parent.replaceChild(document.createTextNode(repl), cur);
+  parent.normalize();
+  // 保存用スナップショット
+  snapshotActiveToSession();
+  persistSessions();
+  // 再検索。同じ index を保って次に進む
+  const savedIdx = currentIdx;
+  runSearch();
+  if (searchState.matches.length > 0) {
+    searchState.currentIdx = Math.min(savedIdx, searchState.matches.length - 1);
+    updateCurrentMatch();
+    updateSearchCounter();
+  }
+}
+function searchReplaceAll() {
+  const n = searchState.matches.length;
+  if (n === 0) return;
+  const repl = document.getElementById('search-replace').value;
+  if (!confirm(`${n}件を「${repl || '（空文字）'}」に置換しますか？\n\nCtrl+Z で戻せます。`)) return;
+  // 検索の対象ペインで Undo スタックを積む
+  pushUndo(`全置換 (${n}件)`, state.activePane);
+  for (const m of searchState.matches) {
+    const p = m.parentNode;
+    if (!p) continue;
+    p.replaceChild(document.createTextNode(repl), m);
+  }
+  const { el: target } = getSearchTargetEl();
+  if (target) target.normalize();
+  snapshotActiveToSession();
+  persistSessions();
+  runSearch();
+}
+
+/* ─── UIバインディング ─── */
+(function bindSearchBar() {
+  const btn = document.getElementById('btn-search');
+  if (btn) btn.addEventListener('click', () => {
+    if (searchState.open) closeSearchBar();
+    else openSearchBar();
+  });
+
+  const input = document.getElementById('search-input');
+  const replInput = document.getElementById('search-replace');
+  const btnPrev = document.getElementById('search-prev');
+  const btnNext = document.getElementById('search-next');
+  const btnCase = document.getElementById('search-case');
+  const btnRegex = document.getElementById('search-regex');
+  const btnTog = document.getElementById('search-toggle-replace');
+  const btnClose = document.getElementById('search-close');
+  const btnReplOne = document.getElementById('search-replace-one');
+  const btnReplAll = document.getElementById('search-replace-all');
+  const replRow = document.getElementById('search-replace-row');
+
+  if (input) {
+    input.addEventListener('input', () => runSearch());
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (e.shiftKey) searchPrev(); else searchNext();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeSearchBar();
+      }
+    });
+  }
+  if (replInput) {
+    replInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); searchReplaceOne(); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeSearchBar(); }
+    });
+  }
+  if (btnPrev) btnPrev.addEventListener('click', searchPrev);
+  if (btnNext) btnNext.addEventListener('click', searchNext);
+  if (btnCase) btnCase.addEventListener('click', () => {
+    searchState.caseSensitive = !searchState.caseSensitive;
+    btnCase.classList.toggle('active', searchState.caseSensitive);
+    runSearch();
+  });
+  if (btnRegex) btnRegex.addEventListener('click', () => {
+    searchState.useRegex = !searchState.useRegex;
+    btnRegex.classList.toggle('active', searchState.useRegex);
+    runSearch();
+  });
+  if (btnTog && replRow) btnTog.addEventListener('click', () => {
+    searchState.showReplace = !searchState.showReplace;
+    replRow.classList.toggle('hidden', !searchState.showReplace);
+    btnTog.classList.toggle('active', searchState.showReplace);
+    if (searchState.showReplace) setTimeout(() => replInput.focus(), 10);
+  });
+  if (btnClose) btnClose.addEventListener('click', closeSearchBar);
+  if (btnReplOne) btnReplOne.addEventListener('click', searchReplaceOne);
+  if (btnReplAll) btnReplAll.addEventListener('click', searchReplaceAll);
+
+  // Ctrl+F / Cmd+F — 開いていたらトグルで閉じる、閉じていたら開く
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault();
+      if (searchState.open) closeSearchBar();
+      else openSearchBar();
+    } else if (e.key === 'Escape' && searchState.open) {
+      closeSearchBar();
+    }
+  });
+
+  // 検索バーをドラッグで移動可能に（上のタブバー等と被らないよう自由配置）
+  bindSearchBarDrag();
+
+  // ペイン切替時は検索対象が変わるのでハイライトをクリアして再検索
+  document.addEventListener('dictation:paneSwitched', () => {
+    if (!searchState.open) return;
+    updateSearchScopeLabel();
+    runSearch();
+  });
+})();
+
+/**
+ * 検索バーをドラッグ可能に。
+ * 入力欄やボタンではなくバー本体の余白をつかんで移動できる。
+ * 位置は localStorage に保存して次回起動時に復元（タブバーとの重なり回避）。
+ */
+function bindSearchBarDrag() {
+  const bar = document.getElementById('search-bar');
+  if (!bar || bar.__dragWired) return;
+  bar.__dragWired = true;
+
+  // 保存済み位置を復元
+  try {
+    const saved = JSON.parse(localStorage.getItem('dictation:searchBarPos') || 'null');
+    if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+      bar.style.left = saved.left + 'px';
+      bar.style.top  = saved.top + 'px';
+      bar.style.right = 'auto';
+    }
+  } catch {}
+
+  let dragging = false;
+  let startX = 0, startY = 0, originLeft = 0, originTop = 0;
+
+  bar.addEventListener('pointerdown', (e) => {
+    // 入力・ボタンはドラッグ対象外（操作と衝突させない）
+    if (e.target.closest('input, button, select, textarea')) return;
+    if (e.button !== undefined && e.button !== 0) return;
+    const z = (parseFloat(document.documentElement.style.zoom) || 1) || 1;
+    const rect = bar.getBoundingClientRect();
+    // 初回ドラッグ時は right:16px をやめて left 基準に
+    bar.style.left = (rect.left / z) + 'px';
+    bar.style.top  = (rect.top  / z) + 'px';
+    bar.style.right = 'auto';
+    startX = e.clientX;
+    startY = e.clientY;
+    originLeft = rect.left / z;
+    originTop  = rect.top  / z;
+    dragging = true;
+    bar.classList.add('dragging');
+    try { bar.setPointerCapture(e.pointerId); } catch {}
+    e.preventDefault();
+  });
+
+  bar.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const z = (parseFloat(document.documentElement.style.zoom) || 1) || 1;
+    const dx = (e.clientX - startX) / z;
+    const dy = (e.clientY - startY) / z;
+    bar.style.left = (originLeft + dx) + 'px';
+    bar.style.top  = (originTop  + dy) + 'px';
+  });
+
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    bar.classList.remove('dragging');
+    try { bar.releasePointerCapture(e.pointerId); } catch {}
+    // ビューポート内に収める
+    const r = bar.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight, m = 4;
+    const z = (parseFloat(document.documentElement.style.zoom) || 1) || 1;
+    let left = r.left / z, top = r.top / z;
+    left = Math.max(m / z, Math.min((vw - r.width - m) / z, left));
+    top  = Math.max(m / z, Math.min((vh - r.height - m) / z, top));
+    bar.style.left = left + 'px';
+    bar.style.top  = top + 'px';
+    // 位置を永続化
+    try { localStorage.setItem('dictation:searchBarPos', JSON.stringify({ left, top })); } catch {}
+  };
+  bar.addEventListener('pointerup', endDrag);
+  bar.addEventListener('pointercancel', endDrag);
+}

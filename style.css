@@ -209,15 +209,26 @@ html, body {
 }
 
 /* ───────── Controls ───────── */
+/* コントロールバー: 画面が狭い時は2行化せず横スクロールで収める
+ * （縦スペースを奪われて文字起こし領域が狭くなるのを防ぐ） */
 #controls {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   padding: 10px 14px;
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: no-drag;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-shrink: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
+/* 子要素（ボタン）は縮まず横並びを維持 */
+#controls > * { flex-shrink: 0; }
+/* コントロールバーの横スクロールバーは一段細く */
+#controls::-webkit-scrollbar { height: 4px; }
 
 .btn {
   display: inline-flex;
@@ -653,6 +664,35 @@ html, body {
   overflow-y: hidden;
 }
 
+/* 内側タブのリストラッパ。アクティブ線 indicator の position:absolute 基準 */
+.inner-tabs-list {
+  display: flex;
+  gap: 0;
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* 内側タブのアクティブ色線（外側タブと同じ滑るアニメーション） */
+.inner-tab-active-indicator {
+  position: absolute;
+  bottom: -1px;   /* 内側タブは下の border-bottom に重なる位置 */
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0;
+  transform: translateX(0);
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.16s;
+  will-change: transform, width;
+}
+.inner-tab-active-indicator.visible { opacity: 1; }
+
 .inner-tab {
   display: inline-flex;
   align-items: center;
@@ -664,8 +704,8 @@ html, body {
   font-size: 13px;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.15s var(--ease-snap);
-  border-bottom: 2px solid transparent;
+  transition: color 0.15s var(--ease-snap), background 0.15s var(--ease-snap);
+  border-bottom: 2px solid transparent; /* レイアウト維持用（色は indicator が担当） */
   margin-bottom: -1px;
   flex-shrink: 0;
   white-space: nowrap;
@@ -678,7 +718,7 @@ html, body {
 
 .inner-tab.active {
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  /* border-bottom-color は indicator に移譲（スライドアニメ用） */
 }
 
 .inner-tab {
@@ -707,6 +747,151 @@ html, body {
 
 .drag-ghost {
   pointer-events: none;
+}
+
+/* ───────── 検索＆置換バー（Ctrl+F / 検索アイコン） ───────── */
+.search-bar {
+  position: fixed;
+  top: 76px;
+  right: 16px;
+  z-index: 400;
+  min-width: 360px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: grab;         /* バー余白はドラッグ可能 */
+  user-select: none;
+  animation: searchBarIn 0.18s var(--ease-out);
+}
+.search-bar.dragging { cursor: grabbing; }
+.search-bar input,
+.search-bar button {
+  cursor: auto;         /* 入力・ボタンは通常カーソル */
+}
+.search-bar button { cursor: pointer; }
+@keyframes searchBarIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.search-bar.hidden { display: none; }
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.search-row .search-icon {
+  color: var(--text-muted);
+}
+.search-row .search-icon svg { width: 14px; height: 14px; }
+.search-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 4px 8px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.12s;
+}
+.search-row input[type="text"]:focus { border-color: var(--accent); }
+.search-counter {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 6px;
+  font-family: var(--font-mono, 'Source Code Pro', monospace);
+  min-width: 44px;
+  text-align: right;
+}
+.search-counter.no-match { color: var(--danger); }
+.search-btn {
+  height: 26px;
+  min-width: 26px;
+  padding: 0 6px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.search-btn:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  color: var(--text);
+  border-color: var(--border);
+}
+.search-btn:disabled { opacity: 0.35; cursor: default; }
+.search-btn svg { width: 13px; height: 13px; }
+.search-toggle.active {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--accent);
+  border-color: rgba(52, 211, 153, 0.4);
+}
+.search-action {
+  background: var(--bg-subtle);
+  border-color: var(--border);
+  padding: 0 10px;
+}
+.search-replace-row.hidden { display: none; }
+.search-scope {
+  font-size: 10px;
+  color: var(--text-faint);
+  padding: 0 2px;
+  letter-spacing: 0.04em;
+}
+
+/* メモ選択整形: 訂正箇所のハイライト（一定時間でフェード消去） */
+mark.mr-diff {
+  background: rgba(125, 211, 252, 0.25);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 3px;
+  box-shadow: inset 0 -2px 0 rgba(125, 211, 252, 0.8);
+  transition: background 0.9s ease-out, box-shadow 0.9s ease-out;
+}
+mark.mr-diff.mr-diff-fade {
+  background: transparent;
+  box-shadow: none;
+}
+.mr-processing {
+  display: inline-block;
+  padding: 1px 8px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  border-radius: 4px;
+  font-style: italic;
+  animation: pulseOpacity 1.2s ease-in-out infinite;
+}
+@keyframes pulseOpacity {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* 検索ヒットのハイライト */
+mark.search-hit {
+  background: rgba(253, 224, 71, 0.35);
+  color: inherit;
+  padding: 0;
+  border-radius: 2px;
+  transition: background 0.12s;
+}
+mark.search-hit.current {
+  background: rgba(253, 186, 116, 0.75);
+  box-shadow: 0 0 0 1px rgba(253, 186, 116, 0.95);
 }
 
 /* ───────── タブ右クリックのコンテキストメニュー ───────── */
@@ -849,18 +1034,23 @@ html, body {
 
 
 /* ───────── Pane header (per-tab actions) ───────── */
+/* ペインヘッダ: ボタン群は折り返さず、横スクロールで収める（縦スペース節約） */
 .pane-header {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   padding: 8px 14px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  container-type: inline-size;
-  container-name: pane-header;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
+.pane-header::-webkit-scrollbar { height: 4px; }
+.pane-header > * { flex-shrink: 0; }
 
 
 .pane-btn {
@@ -1979,6 +2169,10 @@ html, body {
   text-transform: uppercase;
   margin-bottom: 12px;
 }
+/* v0.13.31: グループ途中に置かれたサブ見出し（前のフィールドと視覚分離するため上マージン） */
+.field + .field-group-title {
+  margin-top: 16px;
+}
 
 .font-row {
   display: grid;
@@ -2271,6 +2465,28 @@ html, body {
   max-width: 520px;
 }
 
+/* v0.13.31: 字幕設定モーダル（captions.html を iframe で埋め込む）。
+ * iframe の高さは modal-card の flex 中で 1fr 相当に伸びる。
+ * padding=0 で iframe が border まで届くようにし、独自スクロールに任せる。 */
+.modal-captions {
+  max-width: 560px;
+  height: 80vh;
+  max-height: 720px;
+}
+.modal-body-iframe {
+  padding: 0 !important;
+  overflow: hidden;
+  display: flex;
+  min-height: 0; /* flex item の overflow が効くようにする */
+}
+.modal-body-iframe iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  background: var(--bg);
+}
+
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -2347,9 +2563,9 @@ html, body {
   font-weight: 600;
 }
 
-.field-row input[type="checkbox"],
+/* v0.13.31: ラジオは従来通り、チェックボックスはトグルスイッチ風に統一。
+ * やっさん指示で「全てのチェックボックスをトグルスイッチに変更」。 */
 .field-row input[type="radio"],
-.field input[type="checkbox"],
 .field input[type="radio"] {
   width: 16px;
   height: 16px;
@@ -2361,6 +2577,59 @@ html, body {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+/* チェックボックス → トグルスイッチ風（design-system 準拠）。
+ * <input type="checkbox"> のまま見た目だけ変える（appearance:none + ::before で knob 描画）。 */
+.field-row input[type="checkbox"],
+.field input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 36px;
+  height: 20px;
+  min-width: 36px;
+  min-height: 20px;
+  flex: 0 0 36px;
+  background: var(--bg-subtle, #2a2a32);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  outline: none;
+  vertical-align: middle;
+}
+.field-row input[type="checkbox"]::before,
+.field input[type="checkbox"]::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.18s, background 0.18s;
+}
+.field-row input[type="checkbox"]:hover,
+.field input[type="checkbox"]:hover { border-color: var(--accent); }
+.field-row input[type="checkbox"]:checked,
+.field input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.field-row input[type="checkbox"]:checked::before,
+.field input[type="checkbox"]:checked::before {
+  transform: translateX(16px);
+  background: #ffffff;
+}
+.field-row input[type="checkbox"]:disabled,
+.field input[type="checkbox"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .field-label {

@@ -193,7 +193,7 @@ async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800 } =
   throw lastErr || new Error('Gemini 呼び出し失敗（リトライ上限）');
 }
 
-async function refineWithGemini({ apiKey, context, newChunk }) {
+async function refineWithGemini({ apiKey, context, newChunk, maxOutputTokens = 2048 }) {
   if (!apiKey) throw new Error('Gemini API キーが設定されていません');
   if (!newChunk || !newChunk.trim()) return '';
 
@@ -224,7 +224,7 @@ async function refineWithGemini({ apiKey, context, newChunk }) {
     generationConfig: {
       temperature: 0.3,
       topP: 0.9,
-      maxOutputTokens: 2048,
+      maxOutputTokens,
       responseMimeType: 'text/plain',
     },
   };
@@ -516,8 +516,116 @@ function blobToBase64(blob) {
   });
 }
 
+/**
+ * OSD（テレビ字幕風）向けに字幕バッファのテキストを整形する。
+ * v0.13.31 改：字幕バッファ（dictation:liveCaption）から最新 N 行を読み込んで整形する形に変更。
+ * 文字数はほぼ変えず、文節の途中改行であれば → を付ける。
+ * 文脈から話題を推測して整形に生かすが、飛躍した推測は禁止。
+ */
+async function formatForOSDWithGemini({ apiKey, text, lineLength = 30, continuationMark = true }) {
+  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  if (!text || !text.trim()) return '';
+
+  // v0.13.31: やっさん指示で大幅にシンプル化。
+  // - 文節・句読点ベースの改行ロジックは廃止
+  // - 改行は **指定文字数（lineLength）で固定**
+  // - 文節中の改行を検知した場合のみ、オプションで「→」を付加
+  const N = Math.max(10, Math.min(100, Number(lineLength) || 30));
+  // v0.13.31: 「→」の判定をシンプル化。
+  // 句読点（、。！？）で終わる行 = 自然な区切り → 「→」不要
+  // それ以外で改行された行 = 単語/文節の途中 → 「→」を付加
+  // やっさん指摘：「なるほ\nど」「ホワイトベー\nス」のように単語途中で切れた時に
+  // 「→」が付いていないケースがあった。判定ロジックを明確化することで安定化。
+  const continuationLines = continuationMark
+    ? [
+        '- **行末が句読点（、。！？）でない場合は、その行末に必ず「→」を付ける**（単語・文節の途中で改行されている合図）。',
+        '- 行末が句読点（、。！？）で終わっている場合は「→」を付けない（自然な区切り）。',
+      ]
+    : ['- 「→」継続マークは付けない（OFF 設定）'];
+
+  const instruction = [
+    'あなたは聴覚障害のある方向けのTV字幕編集者です。',
+    '以下の文字起こしテキストを、TV字幕用にシンプルに整形してください。',
+    '',
+    '【最重要ルール】',
+    `- 各行を **${N} 字で固定改行**してください（${N} 字に達したら必ず改行、文節や単語の境界は気にしない）。`,
+    '- **文字を増減させない**：要約・短縮・補足・フィラー削除・誤字訂正は一切禁止。発話内容をそのまま保持。',
+    '- 句読点も入力のまま維持。新たに追加・削除しない。',
+    '',
+    '【継続マーク（→）】',
+    ...continuationLines,
+    '',
+    '【メタ表記の扱い】',
+    '- 「## 見出し」等の Markdown 見出し記号は削除（本文だけ残す）。',
+    '- 「（文字起こし中…）」「（音声不明瞭）」等のメタ表記は削除。',
+    '',
+    '【出力】',
+    '- 整形後の字幕テキストのみ。前置き・説明・コードブロックは一切付けない。',
+  ].join('\n');
+
+  const body = {
+    system_instruction: { parts: [{ text: instruction }] },
+    contents: [{ role: 'user', parts: [{ text: text.slice(0, 2400) }] }],
+    generationConfig: {
+      temperature: 0.2,
+      topP: 0.9,
+      maxOutputTokens: 1024,
+      responseMimeType: 'text/plain',
+    },
+  };
+
+  const out = await _callGemini(body, apiKey, { maxRetries: 1 });
+  return (out || '').trim();
+}
+
+/**
+ * メモ内の選択範囲を整形する。
+ * 箇条書きなら文章化、誤字脱字誤用を訂正。
+ * 元→整形後の差分が分かるよう、変更箇所を <mark class="mr-diff">...</mark> で
+ * 包んだ HTML を返すよう Gemini に指示。
+ */
+async function refineMemoSelectionWithGemini({ apiKey, text }) {
+  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  if (!text || !text.trim()) return '';
+
+  const instruction = [
+    'あなたは日本語の文章編集者です。',
+    '以下のメモテキストを次のルールで整形してください。',
+    '',
+    'ルール:',
+    '- 箇条書きは文章にまとめ直す（冗長な繰り返しは削除、文脈で繋ぐ）',
+    '- 誤字・脱字・変換ミス・誤用を訂正',
+    '- 意味や事実は変えない、勝手に情報を足さない',
+    '- 句読点「、。」と改行を自然な位置に',
+    '- 固有名詞・専門用語・数字はそのまま維持',
+    '- 丁寧体/常体は入力に合わせる',
+    '',
+    '【重要】訂正したり書き換えたりした部分は、必ず <mark> タグで囲むこと。',
+    '例: もと「きょうはいい天気」→ 整形後「今日は<mark>いい</mark>天気です。」',
+    '訂正していない部分は <mark> を付けないこと。',
+    '',
+    '出力は整形後テキストのみ。前置き・説明・コードブロック・```等は付けないこと。',
+  ].join('\n');
+
+  const body = {
+    system_instruction: { parts: [{ text: instruction }] },
+    contents: [{ role: 'user', parts: [{ text: text }] }],
+    generationConfig: {
+      temperature: 0.2,
+      topP: 0.9,
+      maxOutputTokens: 4096,
+      responseMimeType: 'text/plain',
+    },
+  };
+
+  const out = await _callGemini(body, apiKey, { maxRetries: 1 });
+  return (out || '').trim();
+}
+
 window.refineWithGemini = refineWithGemini;
 window.summarizeWithGemini = summarizeWithGemini;
 window.generateTitleWithGemini = generateTitleWithGemini;
 window.chatWithGemini = chatWithGemini;
 window.transcribeAudioWithGemini = transcribeAudioWithGemini;
+window.formatForOSDWithGemini = formatForOSDWithGemini;
+window.refineMemoSelectionWithGemini = refineMemoSelectionWithGemini;

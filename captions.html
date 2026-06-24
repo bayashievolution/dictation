@@ -7,13 +7,24 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;900&family=Noto+Serif+JP:wght@400;600;700&family=M+PLUS+1p:wght@400;500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600;700&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="captions.css?v=0.11.0" />
+  <!-- v0.13.31: settingsOnly モード（iframe 埋め込み時）の早期初期化。
+       URL ?settingsOnly=1 検知 → cap-settings-only クラス付与 + inline 保険スタイル。
+       CSP（manifest.json の script-src 'self'）が inline script を禁止しているため
+       外部 JS として読み込む。必ず <link rel="stylesheet"> より前で評価する。 -->
+  <script src="captions-bootstrap.js"></script>
+  <link rel="stylesheet" href="captions.css?v=0.13.31" />
+  <!-- v0.13.31: icons.js を iframe 内 captions でも読み込む（number-stepper など SVG 表示用） -->
+  <script src="icons.js"></script>
 </head>
 <body class="cap-body">
   <div id="cap-canvas">
     <div id="cap-box" class="cap-box">
-      <div id="cap-box-text">録音を開始すると字幕が表示されます</div>
-      <!-- リサイズハンドル -->
+      <!-- スクロールする内側ラッパ。リサイズハンドルはこの外（cap-box直下）に置いて
+           スクロールと一緒に消えないようにする -->
+      <div id="cap-box-scroll" class="cap-box-scroll">
+        <div id="cap-box-text">録音を開始すると字幕が表示されます</div>
+      </div>
+      <!-- リサイズハンドル: 四隅に絶対配置、スクロールに影響されない -->
       <div class="cap-resize cap-resize-br" data-resize="br"></div>
       <div class="cap-resize cap-resize-tl" data-resize="tl"></div>
       <div class="cap-resize cap-resize-tr" data-resize="tr"></div>
@@ -29,6 +40,9 @@
     <div class="cap-tool-right">
       <button id="cap-btn-settings" class="cap-tool-btn" title="表示設定">⚙</button>
       <button id="cap-btn-fullscreen" class="cap-tool-btn" title="全画面">⛶</button>
+      <button id="cap-btn-fit" class="cap-tool-btn" title="字幕ボックスをウィンドウ全体に広げて中央配置">⊞</button>
+      <button id="cap-btn-osd" class="cap-tool-btn" title="OSDモード（UIを隠して字幕だけを大きく表示／右クリックで復帰）">📺</button>
+      <button id="cap-btn-overlay" class="cap-tool-btn" title="デスクトップオーバーレイに接続（OSレベル透過字幕）">🪟</button>
       <button id="cap-btn-reset-pos" class="cap-tool-btn" title="字幕ボックスの位置とサイズをリセット">⟳</button>
     </div>
   </div>
@@ -41,13 +55,61 @@
     </div>
     <div class="cap-settings-body">
 
+      <!-- v0.13.31: 字幕表示セクション（design-system 準拠の通常スタイル）。
+           破線枠と緑色は撤去、トグルスイッチに統一、ラベルだけ「字幕表示」に短縮。 -->
+      <div class="cap-field">
+        <label class="cap-toggle">
+          <input type="checkbox" id="cap-overlay-toggle" />
+          <span>字幕表示</span>
+        </label>
+        <small class="cap-hint">
+          ZoomやMeet・他アプリの上に直接字幕が乗ります。
+          初回のみ <a href="#" id="cap-overlay-install">インストーラ</a> が必要です。（Windows のみ対応）
+        </small>
+      </div>
+
+      <div class="cap-field">
+        <label class="cap-toggle">
+          <input type="checkbox" id="cap-overlay-clickthrough" checked disabled />
+          <span>字幕位置を固定</span>
+        </label>
+        <small class="cap-hint">OFF にするとオーバーレイをドラッグして位置調整できます。</small>
+      </div>
+
+      <!-- v0.13.31: テスト字幕送信トグル（やっさん指示で表示モニタの上に。
+           ON でテスト用字幕がオーバーレイに送られ、OFF で消える）。 -->
+      <div class="cap-field">
+        <label class="cap-toggle">
+          <input type="checkbox" id="cap-overlay-test-toggle" disabled />
+          <span>テスト字幕送信</span>
+        </label>
+      </div>
+
+      <div class="cap-field">
+        <label class="cap-label">表示モニタ</label>
+        <select id="cap-overlay-monitor" disabled>
+          <option value="">（未接続）</option>
+        </select>
+      </div>
+
+      <!-- 接続情報のログウィンドウ -->
+      <div class="cap-field">
+        <div id="cap-overlay-status" class="cap-overlay-status disconnected">未接続</div>
+      </div>
+
+      <!-- 区切り線（次セクション=「字幕」へ） -->
+      <hr class="cap-separator" />
+
+      <!-- v0.13.31: やっさん指示の順番変更で「字幕」セクション。 -->
+      <h3 class="cap-section-title">字幕</h3>
+
       <div class="cap-field">
         <label class="cap-label">フォントサイズ <output id="cap-font-size-out">64px</output></label>
         <input type="range" id="cap-font-size" min="16" max="240" step="2" value="64" />
       </div>
 
       <div class="cap-field">
-        <label class="cap-label">フォント種類</label>
+        <label class="cap-label">フォント</label>
         <select id="cap-font-family">
           <option value="'Noto Sans JP', sans-serif">ゴシック (Noto Sans JP)</option>
           <option value="'M PLUS 1p', sans-serif">丸ゴ (M PLUS 1p)</option>
@@ -79,14 +141,6 @@
       </div>
 
       <div class="cap-field">
-        <label class="cap-label">背景色 <output id="cap-bg-alpha-out">70%</output></label>
-        <div class="cap-row">
-          <input type="color" id="cap-bg-color" value="#000000" />
-          <input type="range" id="cap-bg-alpha" min="0" max="100" step="5" value="70" />
-        </div>
-      </div>
-
-      <div class="cap-field">
         <label class="cap-toggle">
           <input type="checkbox" id="cap-stroke-on" />
           <span>縁取り</span>
@@ -110,26 +164,146 @@
         </div>
       </div>
 
+      <!-- v0.13.31: 「行間」（line-height）。表示エリア内での自動改行の行間。 -->
       <div class="cap-field">
-        <label class="cap-label">行間 <output id="cap-lh-out">1.4</output></label>
+        <label class="cap-label">行間 <output id="cap-line-height-out">1.4</output></label>
         <input type="range" id="cap-line-height" min="10" max="25" step="1" value="14" />
       </div>
 
+      <!-- v0.13.31: 「ブロック間隔」（段落間 margin）。
+           「行間」と同じ字幕の縦余白系なのでこの位置に置く（やっさん指示）。 -->
       <div class="cap-field">
-        <label class="cap-label">表示する段落数</label>
-        <select id="cap-para-count">
-          <option value="1">最新1段落のみ（最大に大きく）</option>
-          <option value="2" selected>最新2段落</option>
-          <option value="3">最新3段落</option>
-          <option value="5">最新5段落（履歴多め）</option>
+        <label class="cap-label">ブロック間隔 <output id="cap-block-gap-out">0.0</output></label>
+        <input type="range" id="cap-block-gap" min="0" max="25" step="1" value="0" />
+      </div>
+
+      <!-- v0.13.31: やっさん指示の「字幕背景」セクション。 -->
+      <h3 class="cap-section-title">字幕背景</h3>
+
+      <div class="cap-field">
+        <label class="cap-label">背景色 <output id="cap-bg-alpha-out">70%</output></label>
+        <div class="cap-row">
+          <input type="color" id="cap-bg-color" value="#000000" />
+          <input type="range" id="cap-bg-alpha" min="0" max="100" step="5" value="70" />
+        </div>
+      </div>
+
+      <!-- v0.13.31: オーバーレイ背景の角丸。やっさん指示で「字幕」プレフィックス削除。 -->
+      <div class="cap-field">
+        <label class="cap-label">背景の角を丸く <output id="cap-border-radius-out">8px</output></label>
+        <input type="range" id="cap-border-radius" min="0" max="32" step="1" value="8" />
+      </div>
+
+      <!-- v0.13.31: 字幕背景の padding。やっさん指示で「マージン」→「パディング」にリネーム。 -->
+      <div class="cap-field">
+        <label class="cap-label">パディング（横） <output id="cap-padding-x-out">24px</output></label>
+        <input type="range" id="cap-padding-x" min="0" max="60" step="1" value="24" />
+      </div>
+      <div class="cap-field">
+        <label class="cap-label">パディング(縦) <output id="cap-padding-y-out">10px</output></label>
+        <input type="range" id="cap-padding-y" min="0" max="40" step="1" value="10" />
+      </div>
+
+      <!-- 区切り線（字幕背景セクション後） -->
+      <hr class="cap-separator" />
+
+      <!-- v0.13.31: 字幕表示モードセレクトはやっさん指示で UI 非表示。
+           内部は block 固定。flow/stream 機能は将来用に残置（hidden）。 -->
+      <div class="cap-field hidden">
+        <label class="cap-label">字幕表示モード</label>
+        <select id="cap-display-mode">
+          <option value="block" selected>ブロック</option>
+          <option value="flow">自動行スクロール</option>
         </select>
       </div>
 
-      <div class="cap-field cap-field-row">
+      <div class="cap-field" id="cap-block-only-fields">
+        <label class="cap-label">表示する行数</label>
+        <select id="cap-para-count">
+          <option value="1">1行</option>
+          <option value="2" selected>2行</option>
+          <option value="3">3行</option>
+          <option value="5">5行（履歴多め）</option>
+        </select>
+      </div>
+
+      <!-- v0.13.31: スクロールする行数（バッチサイズ）。
+           1 = 1 段落ずつ流れる（自然）、N = N 段落溜まってから一気に N 行流す（早送り感）。 -->
+      <div class="cap-field" id="cap-scroll-count-field">
+        <label class="cap-label">スクロールする行数</label>
+        <select id="cap-scroll-line-count">
+          <option value="1" selected>1行ずつ</option>
+          <option value="2">2行ずつ</option>
+          <option value="3">3行ずつ</option>
+        </select>
+      </div>
+
+      <div class="cap-field hidden" id="cap-stream-only-fields">
+        <label class="cap-label">表示する行数</label>
+        <select id="cap-stream-line-count">
+          <option value="2">2行</option>
+          <option value="3">3行</option>
+          <option value="4" selected>4行（既定）</option>
+          <option value="5">5行</option>
+          <option value="6">6行</option>
+          <option value="7">7行</option>
+          <option value="8">8行（履歴多め）</option>
+        </select>
+        <small class="cap-hint">字幕窓の幅とフォントサイズから 1 行に入る文字数を自動算出します。窓のリサイズ／フォントサイズ変更で自動的に再計算。</small>
+
+        <!-- v0.13.15 整理：詳細設定は隠しつつ機能は維持（後で再表示可能） -->
+        <div class="hidden">
+          <label class="cap-label" style="margin-top:8px">
+            1行の最大文字数 <output id="cap-stream-max-chars-out">28字</output>
+          </label>
+          <input type="range" id="cap-stream-max-chars" min="15" max="50" step="1" value="28" />
+          <label class="cap-label" style="margin-top:8px">行追加の間隔</label>
+          <select id="cap-stream-interval">
+            <option value="150">速め 150ms（流れる映像感）</option>
+            <option value="300" selected>普通 300ms（既定）</option>
+            <option value="500">ゆっくり 500ms</option>
+            <option value="800">かなりゆっくり 800ms</option>
+          </select>
+          <label class="cap-label" style="margin-top:8px">パケットサイズ（一度に送る行数）</label>
+          <select id="cap-stream-packet">
+            <option value="1" selected>1行ずつ（スクロール感）</option>
+            <option value="2">2行まとめて（トランジション感）</option>
+          </select>
+          <button id="cap-stream-defaults" class="cap-btn-ghost">ストリーム設定を既定に戻す</button>
+        </div>
+      </div>
+
+      <!-- v0.13.31: AI 字幕整形は途中でエラーで消える/「→」判定が不安定なバグあり。
+           やっさん指示で一旦非表示。後でバグ取りする。機能本体は残置（osdAi=false が既定）。 -->
+      <div class="cap-field cap-osd-section hidden">
         <label class="cap-toggle">
-          <input type="checkbox" id="cap-follow-live" checked />
-          <span>新しい発話で自動スクロール</span>
+          <input type="checkbox" id="cap-osd-ai" />
+          <span>AI字幕整形</span>
         </label>
+        <small class="cap-hint">AIを使用し、文脈を考慮しながら誤字等を修正。</small>
+        <!-- v0.13.31: AI字幕整形 ON 時のサブ設定。design-system principles.md C
+             「条件フィールドは出入りアニメ」に従い、is-hidden クラスでアニメーション付き表示制御。 -->
+        <div class="cap-field-conditional is-hidden" id="cap-osd-ai-only-fields">
+          <div class="cap-field-conditional-inner">
+            <!-- v0.13.31: 改行文字数はメイン設定の「Web Speech 改行文字数」を流用するため、
+                 ここでは設定しない（やっさん指摘で重複撤去）。 -->
+            <label class="cap-toggle cap-indent">
+              <input type="checkbox" id="cap-osd-continuation-mark" checked />
+              <span>文節途中の改行に「→」を追加</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="cap-field">
+        <label class="cap-label">テキスト表示のトランジション</label>
+        <select id="cap-transition">
+          <option value="none">なし（即切替）</option>
+          <option value="fade" selected>フェードイン/アウト</option>
+          <option value="slide-right">右からスライド</option>
+          <option value="slide-left">左からスライド</option>
+          <option value="scroll">下からスクロール</option>
+        </select>
       </div>
 
       <div class="cap-field cap-broadcast-section">
@@ -155,6 +329,7 @@
     </div>
   </aside>
 
-  <script src="captions.js?v=0.11.0"></script>
+  <script src="gemini.js?v=0.13.29"></script>
+  <script src="captions.js?v=0.13.29"></script>
 </body>
 </html>
