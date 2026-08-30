@@ -4,9 +4,84 @@
 
 ---
 
-## 📌 次セッションのカルディ２へ（2026-04-26 引継ぎ・最終 v0.13.31）
+## 📌 次セッションのカルディ２へ（2026-08-30 全体調査・3リポジトリ横断）
 
-**このセクションを最優先で読む。コードを編集する前に試行錯誤ログ全体に目を通すこと。**
+**このセクションを最優先で読む。** 2026-06-25 を最後に約 2 ヶ月止まっていたので、再開時に迷わないよう
+`dictation` / `dictation-beta` / `dictation-overlay` の 3 リポジトリを突き合わせた調査結果を残す。
+**この回はコードを 1 行も変えていない**（調査と本セクションの追記のみ）。
+
+### 3 リポジトリの最新状態（2026-08-30 時点）
+
+| リポジトリ | 役割 | 最新バージョン | 最終コミット | 技術 |
+|---|---|---|---|---|
+| `dictation` | 本番・安定版 | manifest `0.13.31` | `477efb1` 2026-06-25 WIP | Chrome拡張 + HTML版（Vanilla JS）|
+| `dictation-beta` | β開発ライン（普段使い）| `0.13.31` | `875d0aa` 2026-04-27 | 同上 |
+| `dictation-overlay` | OS レベル透過字幕オーバーレイ | `0.3.24` | `322cb66` 2026-04-27 | Rust + Tauri 2.0 |
+
+いずれも `main` ブランチ 1 本のみ。
+
+### 最重要：`dictation` と `dictation-beta` の作業ツリーが完全に同一
+
+`diff -rq` で全ファイルを比較した結果、**差分は beta 側の `.claude/settings.local.json` 1 個だけ**。
+app.js / captions.js / PROJECT_DESIGN.md まで含めてバイト単位で一致している。
+
+原因は `477efb1`（2026-06-25 の WIP コミット）。β v0.13.31 のツリーを本番へ丸ごとコピーして一括コミットし、
+メッセージ自身が「詳細分割は dictation カルディ２に委ねる」と書いたまま止まっている。
+
+結果として **本番リポジトリの manifest.json が β を名乗ったまま**になっている：
+
+| キー | 現在（`477efb1`）| 本来の安定版（`db2d5a1` v0.11.0）|
+|---|---|---|
+| `name` | ばっさんディクテーション **(β)** | ばっさんディクテーション |
+| `version` | `0.13.31` | `0.11.0` |
+| `description` | 【β版】…安定版と並行インストール可能 | （β表記なし）|
+| `permissions` | sidePanel, storage, **nativeMessaging** | sidePanel, storage |
+
+→ **このままでは本番として配布できない。** 配布を再開する前に必ずここを直す。
+なお `index.html` の `<title>` と `.app-name` は β 表記なしなので、直す対象は manifest.json だけ。
+
+### 配布形態は 3 つ（同じ index.html / app.js を 3 通りの入れ物で動かす）
+
+| 形態 | 入口ファイル | 状態 |
+|---|---|---|
+| **Chrome拡張版** | `manifest.json`（MV3・サイドパネル）+ `background.js` | 現行主力。`chrome://extensions` から未パッケージ読み込み |
+| **HTML版** | `serve.js`（Node 自前 HTTP・`127.0.0.1:8765`）+ `start.bat` | 現役。`file://` だとマイク許可が毎回聞かれるため localhost 配信にしてある |
+| **Electron版** | `main.js` / `preload.js` / `package.json`（electron ^32）| **事実上デッド**。更新履歴 v0.4「Chrome前提Webアプリに方針転換」以降ノータッチ。トレイ・最前面・`Ctrl+Shift+D` は実装されたまま残っている |
+
+- コード側の環境分岐は `app.js:1344` の `location.protocol === 'chrome-extension:'`（オンボーディング手順の出し分け）くらいしかない。
+- **Native Messaging（overlay 連携）は `chrome.runtime.connectNative` 依存 = Chrome拡張版でしか動かない**
+  （`captions.js:1330` `NATIVE_HOST = 'com.bayashi.dictation_overlay'`）。**HTML版では字幕オーバーレイは使えない。**
+
+### これまでの更新のやり方（履歴から読み取れる運用）
+
+- **1 コミット = 1 バージョン**。メッセージは `v0.13.31: 変更内容`（日本語）。overlay だけ `feat(v0.3.24): …` / `fix(…)` / `hotfix(…)` の Conventional Commits 風。
+- **β で刻んで本番へ統合**。実例が `db2d5a1 v0.11.0: β(v0.10.x系)の全改修を本番に統合`。今回の `477efb1` も同じ「統合」を狙って途中で止まった形。
+- `manifest.json` の version 更新漏れの前科あり（`ed6f58b v0.9.35: manifest versionを実装に合わせて更新`）。**コード側のバージョンを上げたら manifest も同時に。**
+- ドキュメントは PROJECT_DESIGN.md に「試行錯誤ログ」＋「次セッションへの引継ぎ」を書く。overlay は加えて HANDOFF.md / NATIVE_MESSAGING_SPEC.md。
+- `CLAUDE.md` はリポジトリ外（`~/.claude/CLAUDE.md`）にあるため、**リモートセッション（Claude Code on the web）からは見えない**。ルールが必要なときはこの md 内の「守るべきルール」を参照する。
+
+### 積み残しの宿題（着手順は未定・やっさんと相談して決める）
+
+1. **本番 manifest の β 表記剥がし**（上記）。配布を再開するなら前提条件
+2. **`477efb1` WIP 巨大コミットの分割**（app.js +1611 / captions.js +1401 / captions-bootstrap.js 新規 / PROJECT_DESIGN +873）。本人が次セッションに委ねると明記している
+3. **AI字幕整形が非表示のまま**。`captions.html` の `.cap-osd-section` に `hidden` を付与（beta `5002bd5`）。理由は「AI整形すると途中でエラーが出て消える／`→` の判定が正しい所とそうでない所がある」。機能本体（`osdAi` 設定・`formatOsdWithAi`・gemini.js のプロンプト）は残置してあるので、バグ取りすれば復活できる
+4. **overlay v0.3.24 の新機能 3 つを拡張側が送っていない**。overlay の `src/main.js` は `streamMode`（YouTube 風行スクロール）/ `writingMode`（縦書き）/ `transition` を受け取れるが、`captions.js` の `buildOverlaySettings()` にこの 3 キーが無い。**overlay 側だけ実装済みで、拡張側から有効化する手段が存在しない**状態。機能追加をするならここが一番コスパが良い
+5. `displayMode` の `flow` / `stream` は「あとで使うかも」で残置（UI・機能とも保持）— 前回からの継続
+6. PROJECT_DESIGN.md 自体の整理（古い情報と新しい情報が混在）— **やっさんと相談してから着手**。前回からの継続の保留事項
+
+### 作業環境についての注意（Claude Code on the web の場合）
+
+- リモートセッションで push できるのは **`dictation` だけ**。`dictation-beta` / `dictation-overlay` は public なので読み取りクローンはできるが push 不可（必要なら `add_repo` で attach し直す）。
+- `dictation` と `dictation-beta` の PROJECT_DESIGN.md は同一ファイル。**beta 側で作業する時はこのセクションを beta にもコピーすること**（現状 beta には入っていない）。
+
+---
+
+## 📌 前回の引継ぎ（2026-04-26 時点・最終 v0.13.31）
+
+> 下の「直近の重要な学び」「守るべきルール」「役割分担」「やっさんからの大事な指針」は**現在も有効**。
+> 「現状サマリ」「今日の作業の軌跡」は 2026-04-26 時点のスナップショットとして読むこと。
+
+**コードを編集する前に試行錯誤ログ全体に目を通すこと**（このルールは今も有効）。
 
 ### 現状サマリ
 
@@ -1100,3 +1175,4 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
 - 2026-04-21 (v0.7): **Chrome拡張（サイドパネル）化**。manifest v3、background service worker、サイドパネル常時表示で講義スライドと並べて使える
 - 2026-04-25〜26 (v0.13.x): dictation-overlay 連携・Web Speech 字幕系編集・自滅事故（上記反省会セクション参照）
 - 2026-04-26 (v0.13.30→31): v0.13.30「文字数 commit／無音 commit（recognition.stop で final 化）」を自滅事故として revert、v0.13.31 で真の「改行」方式（stop しない interim slice）に作り直し
+- 2026-08-30 (調査のみ): 3リポジトリ横断の現状調査。コード変更なし。本番 manifest が β 表記のままである点を発見（冒頭 📌 セクション参照）
