@@ -32,6 +32,9 @@
       <button id="btn-copy-all-md" class="btn btn-secondary btn-square" disabled title="Markdown形式でコピー（Notionは3トグルで復元）">
         <span class="btn-icon" data-icon="book"></span>
       </button>
+      <button id="btn-notion-upload" class="btn btn-secondary btn-square" disabled title="Notionに保存（クリック=このタブのみ／Shift+クリックor長押し=全タブを1つずつ）">
+        <span class="btn-icon" data-icon="cloud-upload"></span>
+      </button>
       <button id="btn-save-json" class="btn btn-ghost btn-square" title="HTMLで保存（クリック=このセッションのみ／Shift+クリックor長押し=全セッション一括・展開可）">
         <span class="btn-icon" data-icon="save"></span>
       </button>
@@ -622,6 +625,49 @@
   </div>
 
   <!-- 無音停止確認ダイアログ -->
+  <!-- v0.14.2: Notion 保存先ピッカー。
+       毎回聞くが、前回の保存先が最初から選ばれた状態で開く（そのまま保存を押せば済む）。 -->
+  <div id="notion-picker" class="modal hidden">
+    <div class="modal-backdrop" data-dismiss></div>
+    <div class="modal-card modal-small">
+      <div class="modal-header">
+        <h2>Notion に保存</h2>
+        <button class="modal-close" data-dismiss><span data-icon="x"></span></button>
+      </div>
+      <div class="modal-body">
+        <p id="notion-picker-summary" class="field-hint" style="margin-bottom:10px;"></p>
+        <label class="field">
+          <span class="field-label">保存先データベース</span>
+          <select id="notion-picker-select"></select>
+          <small class="field-hint">Notion 側でインテグレーションに「コネクト」したデータベースだけが出ます</small>
+        </label>
+        <p id="notion-picker-error" class="field-hint notion-test-result"></p>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-notion-picker-ok" class="btn btn-primary">保存</button>
+        <button class="btn btn-ghost" data-dismiss>キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- v0.14.2: アップロード進捗＋完了後の「閉じますか？」 -->
+  <div id="notion-progress" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card modal-small">
+      <div class="modal-header">
+        <h2 id="notion-progress-title">Notion に保存中…</h2>
+      </div>
+      <div class="modal-body">
+        <p id="notion-progress-body" style="font-size:14px; line-height:1.7;"></p>
+        <div id="notion-progress-list" class="notion-progress-list"></div>
+      </div>
+      <div class="modal-footer" id="notion-progress-footer" hidden>
+        <button id="btn-notion-close-tabs" class="btn btn-primary">閉じる</button>
+        <button id="btn-notion-keep-tabs" class="btn btn-ghost">残す</button>
+      </div>
+    </div>
+  </div>
+
   <div id="silence-dialog" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-card modal-small">
@@ -641,9 +687,9 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.14.1"></script>
-  <script src="gemini.js?v=0.14.1"></script>
-  <script src="notion.js?v=0.14.1"></script>
-  <script src="app.js?v=0.14.1"></script>
+  <script src="icons.js?v=0.14.2"></script>
+  <script src="gemini.js?v=0.14.2"></script>
+  <script src="notion.js?v=0.14.2"></script>
+  <script src="app.js?v=0.14.2"></script>
 </body>
 </html>

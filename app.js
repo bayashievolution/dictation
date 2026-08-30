@@ -362,6 +362,19 @@ const els = {
   btnRefineTranscript: document.getElementById('btn-refine-transcript'),
   emptyHint: document.getElementById('empty-hint'),
   settingsModal: document.getElementById('settings-modal'),
+  btnNotionUpload: document.getElementById('btn-notion-upload'),
+  notionPicker: document.getElementById('notion-picker'),
+  notionPickerSummary: document.getElementById('notion-picker-summary'),
+  notionPickerSelect: document.getElementById('notion-picker-select'),
+  notionPickerError: document.getElementById('notion-picker-error'),
+  btnNotionPickerOk: document.getElementById('btn-notion-picker-ok'),
+  notionProgress: document.getElementById('notion-progress'),
+  notionProgressTitle: document.getElementById('notion-progress-title'),
+  notionProgressBody: document.getElementById('notion-progress-body'),
+  notionProgressList: document.getElementById('notion-progress-list'),
+  notionProgressFooter: document.getElementById('notion-progress-footer'),
+  btnNotionCloseTabs: document.getElementById('btn-notion-close-tabs'),
+  btnNotionKeepTabs: document.getElementById('btn-notion-keep-tabs'),
   notionSettingsGroup: document.getElementById('notion-settings-group'),
   inputNotionToken: document.getElementById('input-notion-token'),
   btnNotionTest: document.getElementById('btn-notion-test'),
@@ -526,6 +539,12 @@ function updateActionButtons() {
   const has = hasAnyContent();
   els.btnCopyAllPlain.disabled = !has;
   els.btnCopyAllMd.disabled = !has;
+  // v0.14.2: Notion アップロードは拡張版のみ。HTML 版では押せないようにしておく
+  if (els.btnNotionUpload) {
+    const usable = notionIsAvailable();
+    els.btnNotionUpload.disabled = !has || !usable;
+    if (!usable) els.btnNotionUpload.title = 'Notion保存はChrome拡張版でのみ使えます';
+  }
 }
 
 /* ───────── Paragraph rendering ───────── */
@@ -1834,6 +1853,262 @@ async function copyAllMultiformat() {
       alert('コピー失敗: ' + err2.message);
     }
   }
+}
+
+/* ───────── Notion アップロード (v0.14.2) ─────────
+ *
+ * 単位はセッション（タブバーの1タブ）= Notion のノート1枚。
+ * ペイン（文字起こし・メモ・要約・質問）はノート内のトグル1つずつになる。
+ *
+ * クリック          … 今開いているタブだけ
+ * Shift+クリック/長押し … 全タブ。統合せず、タブごとに1ノートずつ作る
+ *
+ * 保存先は毎回聞くが、前回の保存先が選択済みの状態で出るので Enter/保存だけで済む。
+ */
+
+/** セッション1件 → ノート内のトグル配列。空のペインは省略する */
+function buildNotionToggles(session) {
+  const toggles = [];
+  for (const id of state.settings.paneOrder) {
+    const meta = PANE_META[id];
+    let blocks = [];
+    if (id === 'pane-transcript')   blocks = notionBlocksFromHtml(session.transcript || '');
+    else if (id === 'pane-memo')    blocks = notionBlocksFromHtml(session.memo || '');
+    else if (id === 'pane-summary') blocks = notionBlocksFromHtml(session.summary || '');
+    else if (id === 'pane-chat') {
+      // 質問ペインは配列なので、Q/A を見出し無しの段落ペアとして組み立てる
+      const chat = (session.chat || []).filter(m => !m.thinking && !m.error);
+      for (const m of chat) {
+        const who = m.role === 'user' ? 'あなた' : 'Gemini';
+        blocks.push(notionBlock.paragraph(notionRichText(`${who}:`, { bold: true })));
+        blocks.push(...notionBlocksFromText(m.content));
+      }
+    }
+    if (blocks.length) toggles.push({ label: meta.label, blocks });
+  }
+  return toggles;
+}
+
+/** そのセッションに Notion へ送る中身があるか */
+function sessionHasContentForNotion(session) {
+  return !!(session && (session.transcript || session.memo || session.summary
+    || (session.chat || []).some(m => !m.thinking && !m.error)));
+}
+
+/* ───────── 保存先ピッカー ───────── */
+
+let notionPickerResolve = null;
+
+function closeNotionPicker(result) {
+  els.notionPicker.classList.add('hidden');
+  const fn = notionPickerResolve;
+  notionPickerResolve = null;
+  if (fn) fn(result || null);
+}
+
+/**
+ * 保存先データベースを選ばせる。
+ * @returns {Promise<{id:string,title:string}|null>} キャンセルなら null
+ */
+async function openNotionPicker(summaryText) {
+  const token = state.settings.notionToken;
+  if (!token) {
+    alert('Notion のインテグレーショントークンが未設定です。設定 → Notion 連携 で登録してください。');
+    return null;
+  }
+
+  els.notionPickerSummary.textContent = summaryText;
+  els.notionPickerError.textContent = '';
+  els.notionPickerError.classList.remove('is-ng');
+  els.notionPickerSelect.innerHTML = '<option>読み込み中…</option>';
+  els.notionPickerSelect.disabled = true;
+  els.btnNotionPickerOk.disabled = true;
+  els.notionPicker.classList.remove('hidden');
+
+  let list = [];
+  try {
+    list = await notionListDataSources(token);
+  } catch (e) {
+    els.notionPickerSelect.innerHTML = '';
+    els.notionPickerError.textContent = e.message;
+    els.notionPickerError.classList.add('is-ng');
+    console.warn('[notion] 保存先の取得に失敗:', e.message);
+    return new Promise(resolve => { notionPickerResolve = () => resolve(null); });
+  }
+
+  if (list.length === 0) {
+    els.notionPickerSelect.innerHTML = '';
+    els.notionPickerError.textContent =
+      '保存先に使えるデータベースがありません。Notion でデータベースを開き「…」→「コネクト」からインテグレーションを接続してください。';
+    els.notionPickerError.classList.add('is-ng');
+    return new Promise(resolve => { notionPickerResolve = () => resolve(null); });
+  }
+
+  els.notionPickerSelect.innerHTML = list
+    .map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.title)}</option>`).join('');
+  // 前回の保存先を初期選択に（無ければ先頭）
+  const last = state.settings.notionLastDataSourceId;
+  if (last && list.some(d => d.id === last)) els.notionPickerSelect.value = last;
+  els.notionPickerSelect.disabled = false;
+  els.btnNotionPickerOk.disabled = false;
+  els.btnNotionPickerOk.focus();
+
+  return new Promise(resolve => {
+    notionPickerResolve = (picked) => {
+      if (!picked) return resolve(null);
+      const id = els.notionPickerSelect.value;
+      const title = list.find(d => d.id === id)?.title || '';
+      resolve({ id, title });
+    };
+  });
+}
+
+/* ───────── 進捗ダイアログ ───────── */
+
+function notionProgressOpen(title) {
+  els.notionProgressTitle.textContent = title;
+  els.notionProgressBody.textContent = '';
+  els.notionProgressList.innerHTML = '';
+  els.notionProgressFooter.hidden = true;
+  els.notionProgress.classList.remove('hidden');
+}
+
+function notionProgressSet(text) {
+  els.notionProgressBody.textContent = text;
+}
+
+function notionProgressAddRow(label, state_, detail) {
+  const row = document.createElement('div');
+  row.className = `notion-progress-row is-${state_}`;
+  row.textContent = (state_ === 'ok' ? '✓ ' : '✕ ') + label + (detail ? ` — ${detail}` : '');
+  els.notionProgressList.appendChild(row);
+  els.notionProgressList.scrollTop = els.notionProgressList.scrollHeight;
+}
+
+function notionProgressClose() {
+  els.notionProgress.classList.add('hidden');
+}
+
+/* ───────── アップロード本体 ───────── */
+
+/**
+ * セッション群を Notion に保存する。統合せずセッションごとに1ノート。
+ * @param {Array} sessions
+ * @returns {Promise<Array<{session:object, ok:boolean, error?:string}>>}
+ */
+async function uploadSessionsToNotion(sessions) {
+  const targets = sessions.filter(sessionHasContentForNotion);
+  if (targets.length === 0) {
+    alert('Notion に保存する中身がありません。');
+    return [];
+  }
+
+  const summary = targets.length === 1
+    ? `「${targets[0].title}」を1ノートとして保存します。`
+    : `${targets.length}個のタブを、1つずつ別のノートとして保存します。`;
+
+  const dest = await openNotionPicker(summary);
+  if (!dest) return [];
+
+  // 選んだ保存先を次回の既定として覚える
+  state.settings.notionLastDataSourceId = dest.id;
+  state.settings.notionLastDataSourceTitle = dest.title;
+  saveSettings();
+
+  notionProgressOpen(targets.length === 1 ? 'Notion に保存中…' : `Notion に保存中…（0/${targets.length}）`);
+
+  // 保存先は全件で共通なので、タイトル列の名前は1回だけ引いて使い回す
+  let titleProp = null;
+  try {
+    titleProp = await notionGetTitlePropName(state.settings.notionToken, dest.id);
+  } catch (e) {
+    notionProgressClose();
+    alert('保存先の情報を取得できませんでした: ' + e.message);
+    return [];
+  }
+
+  const results = [];
+  let done = 0;
+  for (const session of targets) {
+    notionProgressSet(`「${session.title}」を保存しています…`);
+    try {
+      await notionCreateNote({
+        token: state.settings.notionToken,
+        dataSourceId: dest.id,
+        titleProp,
+        title: session.title,
+        toggles: buildNotionToggles(session),
+      });
+      results.push({ session, ok: true });
+      notionProgressAddRow(session.title, 'ok');
+    } catch (e) {
+      results.push({ session, ok: false, error: e.message });
+      notionProgressAddRow(session.title, 'ng', e.message);
+      console.warn('[notion] アップロード失敗:', session.title, e.message);
+    }
+    done += 1;
+    if (targets.length > 1) els.notionProgressTitle.textContent = `Notion に保存中…（${done}/${targets.length}）`;
+  }
+  return results;
+}
+
+/**
+ * アップロード結果を出して「閉じますか？」を聞く。
+ * 成功したタブだけを閉じる対象にする（やっさん指示: 失敗した分は残す）。
+ */
+function notionFinish(results) {
+  const ok = results.filter(r => r.ok);
+  const ng = results.filter(r => !r.ok);
+
+  if (ok.length === 0) {
+    els.notionProgressTitle.textContent = 'Notion への保存に失敗しました';
+    notionProgressSet('保存できたタブはありません。タブはそのまま残しています。');
+    els.notionProgressFooter.hidden = false;
+    els.btnNotionCloseTabs.hidden = true;
+    els.btnNotionKeepTabs.textContent = '閉じる';
+    els.btnNotionKeepTabs.onclick = notionProgressClose;
+    els.btnNotionKeepTabs.focus();
+    return;
+  }
+
+  els.btnNotionCloseTabs.hidden = false;
+  els.btnNotionKeepTabs.textContent = '残す';
+  els.notionProgressTitle.textContent = 'Notion への保存が完了しました';
+
+  const label = ok.length === 1 ? `「${ok[0].session.title}」` : `${ok.length}個のタブ`;
+  const ngNote = ng.length ? `\n（${ng.length}個は失敗したので残します）` : '';
+  notionProgressSet(`${label}を保存しました。タブを閉じますか？（閉じるとアプリ内の内容は削除されます）${ngNote}`);
+
+  els.notionProgressFooter.hidden = false;
+  els.btnNotionCloseTabs.onclick = () => {
+    notionProgressClose();
+    // Notion に上がっている前提なので、closeSession の削除確認は出さない（二重確認の回避）
+    closeMultipleSessions(ok.map(r => r.session.id), { skipConfirm: true });
+  };
+  els.btnNotionKeepTabs.onclick = notionProgressClose;
+  els.btnNotionCloseTabs.focus();
+}
+
+/** クリック = 今開いているタブだけ */
+async function uploadActiveSessionToNotion() {
+  snapshotActiveToSession();
+  const session = getActiveSession();
+  if (!session) return;
+  const results = await uploadSessionsToNotion([session]);
+  if (results.length) notionFinish(results);
+}
+
+/** Shift+クリック / 長押し = 全タブを1つずつ */
+async function uploadAllSessionsToNotion() {
+  snapshotActiveToSession();
+  // 録音中のタブは閉じられると困るので対象から外す
+  const list = state.sessions.filter(s => !(state.isRecording && s.id === state.recordingSessionId));
+  if (list.length === 0) {
+    alert('録音中のタブしかないため、保存をスキップしました。');
+    return;
+  }
+  const results = await uploadSessionsToNotion(list);
+  if (results.length) notionFinish(results);
 }
 
 function buildExportHtml(session) {
@@ -4748,6 +5023,17 @@ attachLongPressClick(els.btnSaveJson, {
   onClick: saveSessionAsHtml,
   onLongPress: saveAllSessionsAsHtml,
 });
+// v0.14.2: Notion アップロード。「HTMLで保存」と同じ クリック/Shift・長押し の操作体系に揃える
+if (els.btnNotionUpload) {
+  attachLongPressClick(els.btnNotionUpload, {
+    onClick: uploadActiveSessionToNotion,
+    onLongPress: uploadAllSessionsToNotion,
+  });
+  els.notionPicker.querySelectorAll('[data-dismiss]').forEach(b => {
+    b.addEventListener('click', () => closeNotionPicker(null));
+  });
+  els.btnNotionPickerOk.addEventListener('click', () => closeNotionPicker(true));
+}
 els.btnLoadJson.addEventListener('click', () => els.fileLoad.click());
 els.fileLoad.addEventListener('change', (e) => {
   const f = e.target.files?.[0];
@@ -5423,6 +5709,8 @@ els.btnScrollBottom.addEventListener('click', () => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!els.settingsModal.classList.contains('hidden')) closeSettings();
+    // v0.14.2: 保存先ピッカーは Promise で待っているので、Escape でも必ず解決させる
+    if (els.notionPicker && !els.notionPicker.classList.contains('hidden')) closeNotionPicker(null);
     if (!els.silenceDialog.classList.contains('hidden')) {
       hideSilenceDialog();
       resetLongSilenceTimer();

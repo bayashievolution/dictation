@@ -2869,3 +2869,20 @@ body.chat-active #zoom-bar {
 .notion-test-result.is-ok   { color: var(--accent); }
 .notion-test-result.is-ng   { color: var(--danger); }
 .notion-test-result.is-note { color: var(--text-muted); }
+
+/* アップロード進捗の結果リスト v0.14.2 */
+.notion-progress-list {
+  margin-top: 10px;
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.notion-progress-row {
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+  word-break: break-all;
+}
+.notion-progress-row:last-child { border-bottom: none; }
+.notion-progress-row.is-ok { color: var(--accent); }
+.notion-progress-row.is-ng { color: var(--danger); }

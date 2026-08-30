@@ -35,7 +35,26 @@ function notionIsAvailable() {
 /**
  * Notion API の薄い呼び出し。失敗時はやっさんが読んで分かる日本語にして throw する。
  */
-async function notionRequest(path, { token, method = 'GET', body } = {}) {
+function notionSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function notionRequest(path, opts = {}) {
+  // Notion は毎秒3リクエスト程度でレート制限をかけてくる。全タブ一括保存だと
+  // 簡単に踏むので、429 と 5xx は指数バックオフで数回だけ自動リトライする。
+  const maxRetry = 3;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await notionRequestOnce(path, opts);
+    } catch (e) {
+      const retriable = e.status === 429 || (e.status >= 500 && e.status < 600);
+      if (!retriable || attempt >= maxRetry) throw e;
+      const wait = e.retryAfterMs || (800 * Math.pow(2, attempt));
+      console.warn(`[notion] ${e.status} のため ${wait}ms 待って再試行 (${attempt + 1}/${maxRetry})`);
+      await notionSleep(wait);
+    }
+  }
+}
+
+async function notionRequestOnce(path, { token, method = 'GET', body } = {}) {
   if (!token) throw new Error('Notion インテグレーショントークンが設定されていません（設定 → Notion 連携）');
 
   let res;
@@ -65,6 +84,8 @@ async function notionRequest(path, { token, method = 'GET', body } = {}) {
     const err = new Error(notionErrorMessage(res.status, data));
     err.status = res.status;
     err.code = data?.code || null;
+    const ra = Number(res.headers.get('Retry-After'));
+    if (Number.isFinite(ra) && ra > 0) err.retryAfterMs = Math.min(30000, ra * 1000);
     throw err;
   }
   return data;
@@ -211,7 +232,10 @@ function notionBlocksFromHtml(html) {
 
   const pushText = (node, make) => {
     const rich = notionRichTextFromNode(node);
-    if (rich.length === 0) return;          // 空行は落とす
+    // 空行は落とす。メモエディタは空行を <div><br></div> で表現するので、
+    // 中身が改行・空白だけのものも「空」とみなす（Notion 側に空段落を作らないため）。
+    if (rich.length === 0) return;
+    if (!rich.map(r => r.text.content).join('').trim()) return;
     blocks.push(make(rich));
   };
 
@@ -303,8 +327,9 @@ function notionChunk(arr, size) {
  * @param {function} [args.onProgress]   (done, total) で進捗を返す
  * @returns {Promise<{id:string, url:string}>}
  */
-async function notionCreateNote({ token, dataSourceId, title, toggles, onProgress }) {
-  const titleProp = await notionGetTitlePropName(token, dataSourceId);
+async function notionCreateNote({ token, dataSourceId, title, toggles, titleProp: titlePropIn, onProgress }) {
+  // 全タブ一括保存では保存先が同じなので、呼び出し側で1回引いて使い回せる
+  const titleProp = titlePropIn || await notionGetTitlePropName(token, dataSourceId);
 
   const page = await notionRequest('/pages', {
     token,

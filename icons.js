@@ -38,6 +38,8 @@ const ICON_DEFS = {
   'undo': '<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/>',
   // Redo (Undoの鏡像)
   'redo': '<path d="M15 14l5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13"/>',
+  // Notion アップロード（雲＋上矢印）。Lucide の cloud-upload に合わせた 24x24 / stroke 2
+  'cloud-upload': '<path d="M12 13v8"/><path d="M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.2"/><path d="M8 17l4-4 4 4"/>',
   // 置換（⇄ / swap）
   'replace': '<path d="M4 7h13M4 7l4-4M4 7l4 4"/><path d="M20 17H7M20 17l-4-4M20 17l-4 4"/>',
 };
