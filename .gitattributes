@@ -1,0 +1,16 @@
+# 改行コードの固定（2026-08-30 追加）
+#
+# 事故の経緯：Windows 側のツールがソースを CRLF で保存したせいで、WSL の git が
+# 「10ファイル・14566行の変更」を検出する状態になっていた。中身は1行も変わっておらず、
+# 差分の正体は全行の改行コードだけ。git checkout がブロックされて初めて気づいた。
+#
+# text=auto eol=lf にしておくと、Windows 側から CRLF で保存されても git の中では
+# LF に正規化されるので、以後この差分は出てこない。
+*           text=auto eol=lf
+
+# .bat は Windows のバッチファイルなので、作業ツリー上は CRLF で取り出す
+*.bat       text eol=crlf
+
+# バイナリは変換対象外であることを明示する
+*.png       binary
+*.ico       binary
