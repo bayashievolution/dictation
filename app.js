@@ -151,7 +151,8 @@ const DEFAULT_SETTINGS = {
   // v0.13.30 の誤発火（onresult タイミング判定）を、interim 中身比較で回避した改良版。
   // 0=OFF、min=0、max=10、既定 3 秒。
   webspeechSilenceStopSec: 3,
-  // v0.14.1: Notion 連携。トークンは内部インテグレーションシークレット。
+  // v0.14.1: Notion 連携。トークンは Notion の「コネクト」のアクセストークン
+  // （旧称: インテグレーション / 内部インテグレーションシークレット）。
   // notionLastDataSourceId / Title は「前回の保存先」を覚えておくためのもの。
   // 保存先は毎回聞くが、前回の場所が最初から選ばれた状態で出る（やっさん指示）。
   notionToken: '',
@@ -1913,7 +1914,7 @@ function closeNotionPicker(result) {
 async function openNotionPicker(summaryText) {
   const token = state.settings.notionToken;
   if (!token) {
-    alert('Notion のインテグレーショントークンが未設定です。設定 → Notion 連携 で登録してください。');
+    alert('Notion のアクセストークンが未設定です。設定 → Notion 連携 で登録してください。');
     return null;
   }
 
@@ -1939,7 +1940,7 @@ async function openNotionPicker(summaryText) {
   if (list.length === 0) {
     els.notionPickerSelect.innerHTML = '';
     els.notionPickerError.textContent =
-      '保存先に使えるデータベースがありません。Notion でデータベースを開き「…」→「コネクト」からインテグレーションを接続してください。';
+      '保存先に使えるデータベースがありません。Notion でデータベースのページを開き「…」→「コネクト」から接続してください。';
     els.notionPickerError.classList.add('is-ng');
     return new Promise(resolve => { notionPickerResolve = () => resolve(null); });
   }

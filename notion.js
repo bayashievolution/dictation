@@ -55,7 +55,7 @@ async function notionRequest(path, opts = {}) {
 }
 
 async function notionRequestOnce(path, { token, method = 'GET', body } = {}) {
-  if (!token) throw new Error('Notion インテグレーショントークンが設定されていません（設定 → Notion 連携）');
+  if (!token) throw new Error('Notion のアクセストークンが設定されていません（設定 → Notion 連携）');
 
   let res;
   try {
@@ -94,8 +94,8 @@ async function notionRequestOnce(path, { token, method = 'GET', body } = {}) {
 function notionErrorMessage(status, data) {
   const raw = data?.message || `HTTP ${status}`;
   if (status === 401) return 'Notion トークンが無効です。設定のトークンを確認してください';
-  if (status === 403) return 'Notion がこの操作を許可しませんでした（インテグレーションの権限を確認してください）';
-  if (status === 404) return '保存先が見つかりません。Notion 側でデータベースをインテグレーションに接続（コネクト）してください';
+  if (status === 403) return 'Notion がこの操作を許可しませんでした（コネクトの権限に「コンテンツを挿入」があるか確認してください）';
+  if (status === 404) return '保存先が見つかりません。Notion 側でデータベースのページを「…」→「コネクト」から接続してください';
   if (status === 429) return 'Notion のレート制限にかかりました。少し待ってからやり直してください';
   if (status >= 500) return `Notion 側で一時的なエラーが発生しました（${status}）`;
   return raw;
@@ -110,7 +110,7 @@ function notionPlainText(rich) {
 }
 
 /**
- * インテグレーションに接続されているデータソースを一覧する。
+ * コネクトが接続されているデータソースを一覧する。
  * Notion 側で「コネクト」していないデータベースはここに出てこない（API の仕様）。
  * @returns {Promise<Array<{id:string, title:string}>>}
  */
