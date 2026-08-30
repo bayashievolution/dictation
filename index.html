@@ -494,12 +494,13 @@
         <div class="field-group" id="notion-settings-group">
           <h3 class="field-group-title">Notion 連携</h3>
           <label class="field">
-            <span class="field-label">インテグレーショントークン</span>
+            <span class="field-label">アクセストークン</span>
             <input id="input-notion-token" type="password" placeholder="ntn_..." autocomplete="off" spellcheck="false" />
             <span class="field-hint">
-              <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">Notion のインテグレーション設定</a>
-              で「新しいインテグレーション」を作り、内部インテグレーションシークレットをここに貼ります。
-              そのあと <strong>保存先にしたいデータベースのページを開き、「…」→「コネクト」から作ったインテグレーションを接続</strong>してください。
+              <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">Notion の開発者ツール → コネクション</a>
+              でコネクトを開き（「+ 新規コネクト」で作っても、既存のものでも可）、その<strong>アクセストークン</strong>をここに貼ります。
+              コネクトの権限に「コンテンツを挿入」が必要です。
+              そのあと <strong>保存先にしたいデータベースのページを開き、「…」→「コネクト」からそのコネクトを接続</strong>してください。
               接続していないデータベースは保存先の一覧に出てきません。
             </span>
           </label>
@@ -639,7 +640,7 @@
         <label class="field">
           <span class="field-label">保存先データベース</span>
           <select id="notion-picker-select"></select>
-          <small class="field-hint">Notion 側でインテグレーションに「コネクト」したデータベースだけが出ます</small>
+          <small class="field-hint">Notion 側で「コネクト」を接続したデータベースだけが出ます</small>
         </label>
         <p id="notion-picker-error" class="field-hint notion-test-result"></p>
       </div>
@@ -687,9 +688,9 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.14.2"></script>
-  <script src="gemini.js?v=0.14.2"></script>
-  <script src="notion.js?v=0.14.2"></script>
-  <script src="app.js?v=0.14.2"></script>
+  <script src="icons.js?v=0.14.3"></script>
+  <script src="gemini.js?v=0.14.3"></script>
+  <script src="notion.js?v=0.14.3"></script>
+  <script src="app.js?v=0.14.3"></script>
 </body>
 </html>
