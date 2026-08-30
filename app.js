@@ -151,6 +151,12 @@ const DEFAULT_SETTINGS = {
   // v0.13.30 の誤発火（onresult タイミング判定）を、interim 中身比較で回避した改良版。
   // 0=OFF、min=0、max=10、既定 3 秒。
   webspeechSilenceStopSec: 3,
+  // v0.14.1: Notion 連携。トークンは内部インテグレーションシークレット。
+  // notionLastDataSourceId / Title は「前回の保存先」を覚えておくためのもの。
+  // 保存先は毎回聞くが、前回の場所が最初から選ばれた状態で出る（やっさん指示）。
+  notionToken: '',
+  notionLastDataSourceId: '',
+  notionLastDataSourceTitle: '',
 };
 // v0.13.24: WEB_SPEECH_DEFAULTS（v0.13.9 「Web Speech 設定をデフォルトに戻す」
 // ボタン用のリセット値）は UI 撤去済み（v0.13.23）に伴い削除。
@@ -356,6 +362,12 @@ const els = {
   btnRefineTranscript: document.getElementById('btn-refine-transcript'),
   emptyHint: document.getElementById('empty-hint'),
   settingsModal: document.getElementById('settings-modal'),
+  notionSettingsGroup: document.getElementById('notion-settings-group'),
+  inputNotionToken: document.getElementById('input-notion-token'),
+  btnNotionTest: document.getElementById('btn-notion-test'),
+  notionTestResult: document.getElementById('notion-test-result'),
+  notionLastTarget: document.getElementById('notion-last-target'),
+  btnNotionForget: document.getElementById('btn-notion-forget'),
   silenceDialog: document.getElementById('silence-dialog'),
   silenceCountdown: document.getElementById('silence-countdown'),
   btnSettingsSave: document.getElementById('btn-settings-save'),
@@ -3781,8 +3793,73 @@ function enableDragSort(list, { itemSelector, idAttr = 'pane-id', onReorder }) {
   });
 }
 
+/* ───────── Notion 連携の設定 UI (v0.14.1) ───────── */
+
+/** 接続テスト欄の色を design-system の変数で塗り分ける（style.css の .notion-test-result） */
+function setNotionTestResult(msg, kind = 'note') {
+  if (!els.notionTestResult) return;
+  els.notionTestResult.textContent = msg;
+  els.notionTestResult.classList.remove('is-ok', 'is-ng', 'is-note');
+  if (msg) els.notionTestResult.classList.add(`is-${kind}`);
+}
+
+/** 設定モーダルを開くたびに、トークン・前回の保存先・環境の制約を反映する */
+function syncNotionSettingsUi() {
+  if (!els.inputNotionToken) return;
+  els.inputNotionToken.value = state.settings.notionToken || '';
+  setNotionTestResult('');
+
+  if (els.notionLastTarget) {
+    const t = state.settings.notionLastDataSourceTitle;
+    els.notionLastTarget.textContent = t ? t : '（まだありません）';
+  }
+  if (els.btnNotionForget) {
+    els.btnNotionForget.disabled = !state.settings.notionLastDataSourceId;
+  }
+
+  // HTML 版では api.notion.com が CORS で叩けない。設定はできるが使えない旨を出す。
+  if (!notionIsAvailable()) {
+    setNotionTestResult('HTML版では利用できません（Chrome拡張版で使えます）', 'note');
+    if (els.btnNotionTest) els.btnNotionTest.disabled = true;
+  } else if (els.btnNotionTest) {
+    els.btnNotionTest.disabled = false;
+  }
+}
+
+async function testNotionConnection() {
+  const token = els.inputNotionToken.value.trim();
+  if (!token) {
+    setNotionTestResult('トークンを入力してください', 'ng');
+    return;
+  }
+  els.btnNotionTest.disabled = true;
+  setNotionTestResult('確認中…', 'note');
+  try {
+    const name = await notionTestConnection(token);
+    const list = await notionListDataSources(token);
+    if (list.length === 0) {
+      setNotionTestResult(`${name} に接続できましたが、保存先に使えるデータベースが 0 件です。Notion 側でデータベースを「コネクト」してください`, 'ng');
+    } else {
+      setNotionTestResult(`OK: ${name} — 保存先に使えるデータベース ${list.length} 件`, 'ok');
+    }
+  } catch (e) {
+    setNotionTestResult('NG: ' + e.message, 'ng');
+    console.warn('[notion] 接続テスト失敗:', e.message); // console.warn は diagLog に記録される
+  } finally {
+    els.btnNotionTest.disabled = false;
+  }
+}
+
+function forgetNotionTarget() {
+  state.settings.notionLastDataSourceId = '';
+  state.settings.notionLastDataSourceTitle = '';
+  saveSettings();
+  syncNotionSettingsUi();
+}
+
 function openSettings() {
   els.inputApiKey.value = state.settings.apiKey;
+  syncNotionSettingsUi();
   els.inputSilenceSec.value = state.settings.silenceSec;
   els.inputAiEnabled.checked = state.settings.aiEnabled;
   els.inputAutoStop.checked = state.settings.autoStopEnabled;
@@ -3848,6 +3925,7 @@ function closeSettings() {
 
 function saveSettingsFromForm() {
   state.settings.apiKey = els.inputApiKey.value.trim();
+  if (els.inputNotionToken) state.settings.notionToken = els.inputNotionToken.value.trim();
   state.settings.silenceSec = Math.max(1, Math.min(30, Number(els.inputSilenceSec.value) || 3));
   state.settings.aiEnabled = els.inputAiEnabled.checked;
   state.settings.autoStopEnabled = els.inputAutoStop.checked;
@@ -4678,6 +4756,8 @@ els.fileLoad.addEventListener('change', (e) => {
 });
 els.btnClearAll.addEventListener('click', clearAllPanes);
 els.btnSettings.addEventListener('click', openSettings);
+if (els.btnNotionTest) els.btnNotionTest.addEventListener('click', testNotionConnection);
+if (els.btnNotionForget) els.btnNotionForget.addEventListener('click', forgetNotionTarget);
 
 /* ───────── Onboarding ───────── */
 const ONBOARDING_STEPS = [

@@ -2864,3 +2864,8 @@ body.chat-active #zoom-bar {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* ───────── Notion 連携（設定モーダル内） v0.14.1 ───────── */
+.notion-test-result.is-ok   { color: var(--accent); }
+.notion-test-result.is-ng   { color: var(--danger); }
+.notion-test-result.is-note { color: var(--text-muted); }

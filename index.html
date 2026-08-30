@@ -488,6 +488,38 @@
           </div>
         </div>
 
+        <div class="field-group" id="notion-settings-group">
+          <h3 class="field-group-title">Notion 連携</h3>
+          <label class="field">
+            <span class="field-label">インテグレーショントークン</span>
+            <input id="input-notion-token" type="password" placeholder="ntn_..." autocomplete="off" spellcheck="false" />
+            <span class="field-hint">
+              <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">Notion のインテグレーション設定</a>
+              で「新しいインテグレーション」を作り、内部インテグレーションシークレットをここに貼ります。
+              そのあと <strong>保存先にしたいデータベースのページを開き、「…」→「コネクト」から作ったインテグレーションを接続</strong>してください。
+              接続していないデータベースは保存先の一覧に出てきません。
+            </span>
+          </label>
+          <div class="field">
+            <div class="diag-log-actions">
+              <button type="button" id="btn-notion-test" class="pane-btn" title="トークンが有効か確かめる">
+                <span data-icon="check"></span><span>接続テスト</span>
+              </button>
+              <span id="notion-test-result" class="field-hint notion-test-result"></span>
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-label">前回の保存先</span>
+            <div class="diag-log-actions">
+              <span id="notion-last-target" class="field-hint">（まだありません）</span>
+              <button type="button" id="btn-notion-forget" class="pane-btn" title="記憶している保存先を忘れる">
+                <span data-icon="trash"></span><span>忘れる</span>
+              </button>
+            </div>
+            <small class="field-hint">アップロード時はこの保存先が最初から選ばれた状態で確認ダイアログが出ます</small>
+          </div>
+        </div>
+
         <div class="field-group">
           <h3 class="field-group-title">診断ログ</h3>
           <div class="field">
@@ -609,8 +641,9 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.13.29"></script>
-  <script src="gemini.js?v=0.13.29"></script>
-  <script src="app.js?v=0.13.29"></script>
+  <script src="icons.js?v=0.14.1"></script>
+  <script src="gemini.js?v=0.14.1"></script>
+  <script src="notion.js?v=0.14.1"></script>
+  <script src="app.js?v=0.14.1"></script>
 </body>
 </html>

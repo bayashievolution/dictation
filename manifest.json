@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ばっさんディクテーション (β)",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "【β版】リアルタイム文字起こし＋Gemini AI整形・要約・質問。Chromeサイドパネルで講義スライドと並べて使える。安定版と並行インストール可能。",
   "author": "bayashi",
   "permissions": [
@@ -10,7 +10,8 @@
     "nativeMessaging"
   ],
   "host_permissions": [
-    "https://generativelanguage.googleapis.com/*"
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.notion.com/*"
   ],
   "action": {
     "default_title": "ばっさんディクテーション（クリックでサイドパネル）"
@@ -27,6 +28,6 @@
     "128": "assets/icon-128.png"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src 'self' https://generativelanguage.googleapis.com;"
+    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src 'self' https://generativelanguage.googleapis.com https://api.notion.com;"
   }
 }
