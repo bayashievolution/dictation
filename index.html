@@ -26,10 +26,10 @@
         <span class="btn-icon" data-icon="record" data-icon-size="18"></span>
       </button>
       <span class="controls-sep"></span>
-      <button id="btn-copy-all-plain" class="btn btn-secondary btn-square" disabled title="全タブをプレーンテキストでコピー">
+      <button id="btn-copy-all-plain" class="btn btn-secondary btn-square" disabled title="プレーンテキストでコピー">
         <span class="btn-icon" data-icon="copy"></span>
       </button>
-      <button id="btn-copy-all-md" class="btn btn-secondary btn-square" disabled title="全タブをMarkdown形式でコピー（Notionは3トグルで復元）">
+      <button id="btn-copy-all-md" class="btn btn-secondary btn-square" disabled title="Markdown形式でコピー（Notionは3トグルで復元）">
         <span class="btn-icon" data-icon="book"></span>
       </button>
       <button id="btn-save-json" class="btn btn-ghost btn-square" title="HTMLで保存（クリック=このセッションのみ／Shift+クリックor長押し=全セッション一括・展開可）">
@@ -38,7 +38,7 @@
       <button id="btn-load-json" class="btn btn-ghost btn-square" title="HTML/JSONから読み込み">
         <span class="btn-icon" data-icon="folder-open"></span>
       </button>
-      <button id="btn-clear-all" class="btn btn-ghost btn-square" title="全タブをクリア">
+      <button id="btn-clear-all" class="btn btn-ghost btn-square" title="このセッションの内容をすべてクリア">
         <span class="btn-icon" data-icon="trash"></span>
       </button>
       <button id="btn-search" class="btn btn-ghost btn-square" title="検索＆置換（Ctrl+F）">
@@ -103,11 +103,8 @@
           <button class="pane-btn pane-btn-icon" data-pane-redo="pane-transcript" disabled title="この タブの変更をやり直す（Ctrl+Shift+Z）">
             <span data-icon="redo"></span>
           </button>
-          <button class="pane-btn" data-pane-copy="pane-transcript" title="このタブだけコピー">
-            <span data-icon="copy"></span><span>コピー</span>
-          </button>
-          <button class="pane-btn" data-pane-clear="pane-transcript" title="このタブだけクリア">
-            <span data-icon="trash"></span><span>クリア</span>
+          <button class="pane-btn pane-btn-icon" data-pane-clear="pane-transcript" title="文字起こしをクリア">
+            <span data-icon="trash"></span>
           </button>
           <div class="pane-font-controls">
             <select class="pane-font-select" data-pane-font="pane-transcript" title="フォント"></select>
@@ -144,11 +141,8 @@
           <button class="pane-btn pane-btn-icon" data-pane-redo="pane-memo" disabled title="メモの変更をやり直す（Ctrl+Shift+Z）">
             <span data-icon="redo"></span>
           </button>
-          <button class="pane-btn" data-pane-copy="pane-memo" title="このタブだけコピー">
-            <span data-icon="copy"></span><span>コピー</span>
-          </button>
-          <button class="pane-btn" data-pane-clear="pane-memo" title="このタブだけクリア">
-            <span data-icon="trash"></span><span>クリア</span>
+          <button class="pane-btn pane-btn-icon" data-pane-clear="pane-memo" title="メモをクリア">
+            <span data-icon="trash"></span>
           </button>
           <div class="pane-font-controls">
             <select class="pane-font-select" data-pane-font="pane-memo" title="フォント"></select>
@@ -211,11 +205,8 @@
           <button class="pane-btn pane-btn-icon" data-pane-redo="pane-summary" disabled title="要約の変更をやり直す（Ctrl+Shift+Z）">
             <span data-icon="redo"></span>
           </button>
-          <button class="pane-btn" data-pane-copy="pane-summary" title="このタブだけコピー">
-            <span data-icon="copy"></span><span>コピー</span>
-          </button>
-          <button class="pane-btn" data-pane-clear="pane-summary" title="このタブだけクリア">
-            <span data-icon="trash"></span><span>クリア</span>
+          <button class="pane-btn pane-btn-icon" data-pane-clear="pane-summary" title="要約をクリア">
+            <span data-icon="trash"></span>
           </button>
           <div class="pane-font-controls">
             <select class="pane-font-select" data-pane-font="pane-summary" title="フォント"></select>
@@ -236,11 +227,8 @@
 
       <div id="pane-chat" class="pane">
         <div class="pane-header">
-          <button class="pane-btn" data-pane-copy="pane-chat" title="このタブだけコピー">
-            <span data-icon="copy"></span><span>コピー</span>
-          </button>
-          <button class="pane-btn" data-pane-clear="pane-chat" title="チャット履歴をクリア">
-            <span data-icon="trash"></span><span>クリア</span>
+          <button class="pane-btn pane-btn-icon" data-pane-clear="pane-chat" title="チャット履歴をクリア">
+            <span data-icon="trash"></span>
           </button>
           <div class="pane-font-controls">
             <select class="pane-font-select" data-pane-font="pane-chat" title="フォント"></select>
