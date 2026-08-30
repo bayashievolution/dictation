@@ -11,6 +11,9 @@
 このあと同じセッションで **v0.14.0〜v0.14.2（Notion アップロード機能）** を実装した。
 実装の経緯は試行錯誤ログの「2026-08-30 v0.14.x」を読むこと。
 
+**久しぶりに触るときは、下の「開発・更新の手順」を先に読むこと。** WSL のディレクトリ、
+Chrome 拡張の更新方法、HTML 版の起動、そして CRLF 事故の対処をまとめてある。
+
 ### 3 リポジトリの最新状態（2026-08-30 時点）
 
 | リポジトリ | 役割 | 最新バージョン | 最終コミット | 技術 |
@@ -144,6 +147,100 @@ app.js / captions.js / PROJECT_DESIGN.md まで含めてバイト単位で一致
 - **md はカルディ２のもの** — 確認不要で自分で書く
 - **「N 秒」は話者リズム依存** — 既定 6 は岡田斗司夫テストの値、絶対値ではない。実用範囲は 6〜10 秒
 - **他責にしない** — 受動態で逃げない、能動態で自分の責任として書く
+
+---
+
+## 開発・更新の手順（久しぶりに触るときは、まずここを読む）
+
+2026-08-30、約2ヶ月ぶりに触った際に「WSL のディレクトリはどこか」「Chrome 拡張はどう
+更新するのか」を思い出せず、さらに CRLF 事故（後述）を踏んだ。同じことを繰り返さないよう、
+実際にやった手順をそのまま残す。
+
+### ディレクトリ
+
+| | WSL のパス | Windows から見たパス |
+|---|---|---|
+| 安定版 | `~/dictation`（= `/home/bayashi/dictation`）| `\\wsl.localhost\Ubuntu\home\bayashi\dictation` |
+| β | `~/dictation-beta` | `\\wsl.localhost\Ubuntu\home\bayashi\dictation-beta` |
+| オーバーレイ | `~/dictation-overlay` | `\\wsl.localhost\Ubuntu\home\bayashi\dictation-overlay` |
+
+`~` は WSL のホーム。`/mnt/c/Users/ばやし` にいても `cd ~/dictation` で移動できる（Windows 側ではない）。
+迷ったら `pwd && git remote -v && git log --oneline -1` で今どこにいるか確認する。
+
+### Chrome 拡張を更新する
+
+```bash
+cd ~/dictation
+git status --short   # ← 先に見る。未コミットの変更が無いか確認
+git pull
+```
+
+そのあと Chrome で：
+
+1. `chrome://extensions/` を開く（デベロッパーモードは ON のまま）
+2. 拡張のカードの **↻（更新）ボタン**を押す
+3. サイドパネルを開いていたら、一度閉じて開き直す
+
+**manifest.json の権限（`permissions` / `host_permissions`）を変えたときは ↻ では反映されない
+ことがある。** そのときはカードを「削除」→「パッケージ化されていない拡張機能を読み込む」で
+フォルダを入れ直す。
+
+**どのカードを押すか間違えやすい。** 安定版とβを並行インストールしていると、
+安定版の manifest が「ばっさんディクテーション (β)」を名乗ったままなので**名前が同じに見える**。
+カードの「詳細」を開いてフォルダのパスを確認してから操作すること。
+（この名前の問題自体は宿題リストに残してある）
+
+### HTML 版を起動する
+
+`start.bat` をダブルクリック。中で `serve.js` を起動して `http://localhost:8765/` を開く。
+`file://` だとマイク許可が毎回聞かれるので、localhost 配信にしてある。
+**Notion 連携は HTML 版では動かない**（CORS。拡張版のみ）。
+
+### まだマージしていないブランチで試す
+
+```bash
+git fetch origin
+git checkout <ブランチ名>
+git log --oneline -1     # 意図したコミットに居るか確認
+```
+
+戻すときは `git checkout main`。
+
+---
+
+### トラブル：`git diff` が巨大な差分を出す（CRLF 事故）
+
+**症状**：`git checkout` が
+「Your local changes to the following files would be overwritten by checkout」で止まる。
+`git diff --stat` を見ると1万行以上の差分があり、**insertions と deletions の数が完全に同じ**。
+
+**正体**：中身は1行も変わっていない。Windows 側のツールがファイルを CRLF で保存したことによる、
+全行の改行コードの差分。
+
+**確認方法**：
+
+```bash
+file app.js                              # → "with CRLF line terminators" が出るか
+git diff --stat --ignore-cr-at-eol       # → 何も出なければ、差分は改行コードだけ
+```
+
+**`--ignore-cr-at-eol` で何も出なかった場合のみ**、捨てて良い：
+
+```bash
+git checkout -- .
+```
+
+**何かファイル名が出た場合は本物の変更が混ざっている。** 絶対に捨てず、一時ブランチに退避する：
+
+```bash
+git switch -c wip/$(date +%Y%m%d)-local && git add -A && git commit -m "WIP: 退避"
+```
+
+**再発防止**：2026-08-30 に `.gitattributes`（`* text=auto eol=lf`）を追加した。
+以後は Windows 側から CRLF で保存されても git の中では LF に正規化されるので、この差分は出ない。
+
+**やってはいけないこと**：確認前に `git reset --hard` や `git checkout -- .` を打つこと。
+本物の変更が混ざっていた場合、復元できない。**必ず `--ignore-cr-at-eol` で確かめてから**。
 
 ---
 
@@ -445,6 +542,52 @@ Chrome 拡張として実際に Notion に投げるところは、この環境�
 
 **やっさんに実機で確かめてほしいこと**：設定 → Notion 連携でトークンを入れて「接続テスト」、
 その後に実際のアップロード。Notion 側で保存先 DB を「コネクト」していないと一覧が 0 件になる。
+
+---
+
+### 2026-08-30 CRLF 事故（差分1万行に見えたが中身はゼロ）
+
+やっさんが v0.14.x を試すために `git checkout` したところ、こう言われて止まった。
+
+```
+error: Your local changes to the following files would be overwritten by checkout:
+        PROJECT_DESIGN.md / app.js / index.html / manifest.json / style.css
+```
+
+`git status --short` で 10 ファイルが ` M`。`git diff --stat` を見ると **14566 insertions /
+14566 deletions**、`app.js` だけで 12388 行。2 ヶ月分の未コミット作業が埋まっているように見えた。
+
+#### 判断の分かれ目
+
+ここで `git reset --hard` や `git checkout -- .` を打っていたら、本物の作業だった場合に
+復元できなかった。**打つ前に中身を確かめたのが正解だった。**
+
+見るべきだったのは数字。**insertions と deletions が完全に同数**で、しかも全ファイルが
+ほぼ全行。これは「全行が 1 対 1 で置き換わった」= 改行コードの差分の形。
+
+```bash
+file app.js                          # → "with CRLF line terminators"
+git diff --stat --ignore-cr-at-eol   # → 出力なし = 中身の差分はゼロ
+```
+
+これで中身の変更が 1 行も無いことが確定したので、`git checkout -- .` で捨てて解決した。
+
+#### 原因と再発防止
+
+Windows 側のツールがソースを CRLF で保存したことによる。変更されていたのは 10 ファイルで
+`icons.js` `serve.js` `background.js` `main.js` `package.json` は無傷だったので、
+全ファイルではなく「そのツールが開いたファイルだけ」だった。
+
+`.gitattributes` に `* text=auto eol=lf` を置いて再発を止めた。以後は Windows 側から
+CRLF で保存されても git の中では LF に正規化されるので、差分として出てこない。
+`*.bat` だけは Windows のバッチなので `eol=crlf` にしてある。
+
+#### 教訓
+
+- **巨大な差分を見ても、まず数字を読む。** insertions == deletions は改行コードのサイン
+- **確認する前に破壊的なコマンドを打たない。** `--ignore-cr-at-eol` で 1 秒で判別できる
+- 判別がつかないときは捨てずに一時ブランチへコミットして退避する。
+  stash より、名前の付いたブランチのほうが数ヶ月後の自分に見つけてもらえる
 
 ---
 
@@ -1265,3 +1408,5 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
 - 2026-08-30 (v0.14.0): ペインのコピーボタン撤去・クリアのアイコンのみ化・ツールチップの「全タブを」除去
 - 2026-08-30 (v0.14.1): Notion API クライアント（notion.js、API 版 2025-09-03）と設定 UI を追加
 - 2026-08-30 (v0.14.2): Notion アップロードボタン。タブ = ノート、ペイン = トグル。クリック=このタブ／Shift・長押し=全タブを1つずつ
+- 2026-08-30 (手順書): 「開発・更新の手順」を追加。WSL のディレクトリ・Chrome 拡張の更新・HTML 版の起動・CRLF 事故の対処
+- 2026-08-30 (.gitattributes): 改行コードを LF に固定して CRLF 事故の再発を防止
