@@ -1712,24 +1712,8 @@ function flashButton(btn, label = 'コピー完了') {
   }
 }
 
-async function copyTextOnly(text, btn) {
-  if (!text) return;
-  try {
-    await navigator.clipboard.writeText(text);
-    if (btn) flashButton(btn);
-  } catch (err) {
-    alert('コピー失敗: ' + err.message);
-  }
-}
-
-async function copyPane(paneId, btn) {
-  let text = '';
-  if (paneId === 'pane-transcript') text = getConfirmedText();
-  else if (paneId === 'pane-memo') text = getMemoText();
-  else if (paneId === 'pane-summary') text = getSummaryText();
-  if (!text) return;
-  await copyTextOnly(text, btn);
-}
+// v0.14.0: copyTextOnly / copyPane はペインのコピーボタン撤去に伴い削除。
+// ペイン単位のコピーはアプリ全体メニューの「プレーンテキストでコピー」と重複していた。
 
 function getChatText() {
   const chat = getActiveSession()?.chat || [];
@@ -4893,9 +4877,6 @@ if (els.btnSummaryCombo) {
   });
 }
 
-document.querySelectorAll('[data-pane-copy]').forEach(btn => {
-  btn.addEventListener('click', () => copyPane(btn.dataset.paneCopy, btn));
-});
 document.querySelectorAll('[data-pane-clear]').forEach(btn => {
   btn.addEventListener('click', () => clearPane(btn.dataset.paneClear));
 });
