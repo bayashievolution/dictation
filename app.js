@@ -1733,6 +1733,15 @@ const VOICE_BAND_HIGH_HZ = 3400;
 
 const SILENCE_WINDOW_MS = 4000;       // 最小/最大を集めるバケツの長さ（窓は最大この2倍）
 const SILENCE_DYNAMIC_RANGE_DB = 10;  // 窓内の最大-最小がこれ未満なら判定しない
+/* 「このチャンクに発話があったか」の判定に、続いていることを要求する (v0.18.10)
+ *
+ * 実機 2026-08-31 20:36 で、1.0秒の末尾チャンク（Gemini も Web Speech も
+ * 何も拾わなかった）に「発話あり」の判定が付き、
+ * 「（音声不明瞭・再試行可）」が残った。
+ * 1フレーム(50ms)でも大きい音があれば発話と見なしていたため、
+ * 舌打ちやクリック音、前の発話の余韻でも成立してしまう。
+ */
+const SILENCE_SPEECH_MIN_MS = 200;   // これだけ続いて初めて「発話あり」
 // 完全なゼロ（-95dB 未満）は「静かな部屋」ではなく「まだ音が流れていない」。
 // これをフロアの材料にすると上記のデッドロックが起きるので、材料から外す。
 const DIGITAL_SILENCE_DB = -95;
@@ -1777,6 +1786,7 @@ function createSilenceDetector(stream) {
   let lastDb = -99;      // 声の帯域（判定に使う値）
   let lastWideDb = -99;  // 全帯域（比較用。v0.18.4 まではこちらで判定していた）
   let speechInChunk = false;   // いまのチャンクの中で発話らしい音量を見たか
+  let speechFrames = 0;        // 発話らしい音量が何フレーム続いているか
   let longestSilentInChunk = 0; // 同上・いちばん長かった無音（診断用）
   // チャンク全体の音量の振れ幅（診断用）。窓の値だけだと、そのチャンクに
   // そもそも十分な差があったのかが分からない
@@ -1832,8 +1842,12 @@ function createSilenceDetector(stream) {
     }
 
     const quiet = hasSignal && canJudge() && db < floorDb() + SILENCE_MARGIN_DB;
+    // 一瞬の物音を発話と取り違えないよう、続いていることを条件にする
     if (hasSignal && canJudge() && db >= floorDb() + SILENCE_DYNAMIC_RANGE_DB) {
-      speechInChunk = true;
+      speechFrames++;
+      if (speechFrames * SILENCE_POLL_MS >= SILENCE_SPEECH_MIN_MS) speechInChunk = true;
+    } else {
+      speechFrames = 0;
     }
 
     if (quiet) {
@@ -1873,7 +1887,7 @@ function createSilenceDetector(stream) {
     },
     /** チャンクを切ったときに呼ぶ */
     resetChunkSpeech() {
-      speechInChunk = false; longestSilentInChunk = 0;
+      speechInChunk = false; speechFrames = 0; longestSilentInChunk = 0;
       chunkMinDb = Infinity; chunkMaxDb = -Infinity;
     },
     close() {
@@ -1914,20 +1928,6 @@ function decideChunkCut({ elapsed, minMs, maxMs, useSilenceCut, silentMs }) {
   return ms >= needed ? 'silence' : null;
 }
 
-/**
- * Gemini が空を返したチャンクを、画面から消してよいか (v0.18.1)
- *
- * 無音位置で区切るようになった結果、最後の区切りのあとに「中身が沈黙だけ」の
- * チャンクが必ず1本できるようになった。それを送ると Gemini は正しく空を返すが、
- * 従来のコードはそれを「（音声不明瞭・再試行可）」として画面に残していた。
- *
- * ただし**間違えると小声を黙って捨てることになる**ので、条件は厳しくする。
- * 3つ揃って初めて消す:
- *   - Gemini が空（呼び出し側で確認済み）
- *   - Web Speech も何も拾っていない（別エンジンでも聞こえていない）
- *   - 検出器がこのチャンク中に発話音量を一度も見ていない
- * 検出器が無い場合 hadSpeech は undefined なので、消さずに残す。
- */
 /**
  * 無音検出の状態を1行にまとめる（診断ログ用・v0.18.3）
  *
@@ -2050,9 +2050,39 @@ function confirmedTailText(excludeEl, maxChars = 400) {
   return all.length > maxChars ? all.slice(-maxChars) : all;
 }
 
+/**
+ * Gemini が空を返したチャンクを、画面から消してよいか (v0.18.1 / v0.18.10)
+ *
+ * 無音位置で区切るようになった結果、最後の区切りのあとに「中身が沈黙だけ」の
+ * チャンクが必ず1本できるようになった。それを送ると Gemini は正しく空を返すが、
+ * 従来のコードはそれを「（音声不明瞭・再試行可）」として画面に残していた。
+ *
+ * **間違えると小声を黙って捨てることになる**ので、条件は厳しくする。
+ * 前提として次の2つは必須:
+ *   - Gemini が空（呼び出し側で確認済み）
+ *   - Web Speech も何も拾っていない（別エンジンでも聞こえていない）
+ *
+ * そのうえで、次のどちらかが言えるときに消す:
+ *   (a) 検出器がこのチャンク中に発話音量を一度も見ていない
+ *   (b) チャンクが SILENCE_ABS_MIN_MS より短い
+ *
+ * (b) は v0.18.10 で追加。実機 2026-08-31 20:36 で 1.0 秒の末尾チャンクに
+ * 「（音声不明瞭・再試行可）」が残った。(a) が成立していなかったため
+ * （幅12dB の物音を発話と判定していた。そちらは SILENCE_SPEECH_MIN_MS で対処済み）。
+ *
+ * (b) が安全な理由: cutChunk は SILENCE_ABS_MIN_MS より前に切らないので、
+ * これより短いチャンクは**録音停止時の末尾**しか存在しない。そのうえ両エンジンが
+ * 何も拾っていないので、消しても失う文字が無い。
+ * この表示は「再試行できます」と言うが、再試行はテキストを整形し直す仕組みなので、
+ * 中身が空のこれを再試行しても何も起きない。
+ *
+ * 検出器が無い場合 hadSpeech は undefined なので (a) は成立せず、(b) だけで判断する。
+ */
 function shouldDropEmptyChunk(provisionalText, edges) {
   if (provisionalText) return false;
-  return !!edges && edges.hadSpeech === false;
+  if (!edges) return false;
+  if (edges.hadSpeech === false) return true;
+  return Number.isFinite(edges.durationMs) && edges.durationMs < SILENCE_ABS_MIN_MS;
 }
 
 async function startGeminiAudioRecording() {
