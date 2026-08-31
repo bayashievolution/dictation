@@ -138,16 +138,40 @@ async function notionListDataSources(token) {
 }
 
 /**
- * データソースの「タイトル列」の名前を得る。
- * ページ作成時の properties のキーに使う。DB ごとに「名前」「Name」など違うため毎回引く。
+ * データソースの列構成を取得する。
+ *
+ * - タイトル列の名前は DB ごとに違う（名前 / Name / タイトル）ので毎回引く必要がある
+ * - 日付列は「録音日」などユーザーが自由に作れるので、選ばせるために一覧で返す
+ *   （Notion 標準の「作成日時」は created_time 型で API から書き込めないため対象外）
+ *
+ * @returns {Promise<{titleProp:string, dateProps:string[]}>}
  */
-async function notionGetTitlePropName(token, dataSourceId) {
+async function notionGetSchema(token, dataSourceId) {
   const ds = await notionRequest(`/data_sources/${dataSourceId}`, { token });
   const props = ds?.properties || {};
+  let titleProp = null;
+  const dateProps = [];
   for (const [name, conf] of Object.entries(props)) {
-    if (conf?.type === 'title') return name;
+    if (conf?.type === 'title') titleProp = name;
+    else if (conf?.type === 'date') dateProps.push(name);
   }
-  throw new Error('保存先にタイトル列が見つかりませんでした');
+  if (!titleProp) throw new Error('保存先にタイトル列が見つかりませんでした');
+  return { titleProp, dateProps };
+}
+
+/**
+ * ミリ秒のタイムスタンプを、ローカルのタイムゾーンを保った ISO 8601 文字列にする。
+ * toISOString() だと UTC に変換されてしまい、Notion 上で日付が前日にずれることがある。
+ * 例: 2026-08-30T14:30:00+09:00
+ */
+function notionLocalIso(ts) {
+  const d = new Date(ts);
+  const pad = n => String(Math.floor(Math.abs(n))).padStart(2, '0');
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    + `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    + `${sign}${pad(off / 60)}:${pad(off % 60)}`;
 }
 
 /* ───────── リッチテキスト / ブロック生成 ───────── */
@@ -327,18 +351,27 @@ function notionChunk(arr, size) {
  * @param {function} [args.onProgress]   (done, total) で進捗を返す
  * @returns {Promise<{id:string, url:string}>}
  */
-async function notionCreateNote({ token, dataSourceId, title, toggles, titleProp: titlePropIn, onProgress }) {
+async function notionCreateNote({
+  token, dataSourceId, title, toggles,
+  titleProp: titlePropIn, dateProp, dateTs, onProgress,
+}) {
   // 全タブ一括保存では保存先が同じなので、呼び出し側で1回引いて使い回せる
-  const titleProp = titlePropIn || await notionGetTitlePropName(token, dataSourceId);
+  const titleProp = titlePropIn || (await notionGetSchema(token, dataSourceId)).titleProp;
+
+  const properties = {
+    [titleProp]: { title: notionRichText(title || '無題', null).slice(0, 100) },
+  };
+  // 録音日時を日付列に入れる（列を選んでいない場合は入れない）
+  if (dateProp && dateTs) {
+    properties[dateProp] = { date: { start: notionLocalIso(dateTs) } };
+  }
 
   const page = await notionRequest('/pages', {
     token,
     method: 'POST',
     body: {
       parent: { type: 'data_source_id', data_source_id: dataSourceId },
-      properties: {
-        [titleProp]: { title: notionRichText(title || '無題', null).slice(0, 100) },
-      },
+      properties,
     },
   });
 

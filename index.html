@@ -643,6 +643,11 @@
           <select id="notion-picker-select"></select>
           <small class="field-hint">Notion 側で「コネクト」を接続したデータベースだけが出ます</small>
         </label>
+        <label class="field">
+          <span class="field-label">録音日時の保存先</span>
+          <select id="notion-picker-date"></select>
+          <small class="field-hint">日付プロパティを選ぶと、タイトルから日時を外してその列に入れます</small>
+        </label>
         <p id="notion-picker-error" class="field-hint notion-test-result"></p>
       </div>
       <div class="modal-footer">
@@ -660,12 +665,17 @@
         <h2 id="notion-progress-title">Notion に保存中…</h2>
       </div>
       <div class="modal-body">
-        <p id="notion-progress-body" style="font-size:14px; line-height:1.7;"></p>
+        <p id="notion-progress-body" style="font-size:14px; line-height:1.7; white-space:pre-line;"></p>
+        <label class="field field-row" id="notion-auto-close-row">
+          <input id="notion-auto-close" type="checkbox" />
+          <span>保存できたタブを自動的に閉じる</span>
+        </label>
         <div id="notion-progress-list" class="notion-progress-list"></div>
       </div>
-      <div class="modal-footer" id="notion-progress-footer" hidden>
-        <button id="btn-notion-close-tabs" class="btn btn-primary">閉じる</button>
-        <button id="btn-notion-keep-tabs" class="btn btn-ghost">残す</button>
+      <div class="modal-footer" id="notion-progress-footer">
+        <button id="btn-notion-cancel" class="btn btn-ghost">中止</button>
+        <button id="btn-notion-close-tabs" class="btn btn-primary" hidden>閉じる</button>
+        <button id="btn-notion-keep-tabs" class="btn btn-ghost" hidden>残す</button>
       </div>
     </div>
   </div>
@@ -689,9 +699,9 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.14.4"></script>
-  <script src="gemini.js?v=0.14.4"></script>
-  <script src="notion.js?v=0.14.4"></script>
-  <script src="app.js?v=0.14.4"></script>
+  <script src="icons.js?v=0.15.0"></script>
+  <script src="gemini.js?v=0.15.0"></script>
+  <script src="notion.js?v=0.15.0"></script>
+  <script src="app.js?v=0.15.0"></script>
 </body>
 </html>
