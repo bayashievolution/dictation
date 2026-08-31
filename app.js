@@ -1964,6 +1964,8 @@ function pickSilentMs({ levelMs, levelCanJudge, webMs, webActive }) {
 /** いま使える無音シグナルを集める */
 function currentSilenceSignal() {
   const d = state.silenceDetector;
+  // liveLastActivityAt が 0 ＝ Web Speech がまだ一度も聞き取っていない。
+  // その状態を「無音が続いている」と読んではいけない（判断材料が無いだけ）
   const webActive = !!state.liveRecognition && !!state.liveLastActivityAt;
   return pickSilentMs({
     levelMs: d ? d.silentMs() : 0,
@@ -2358,7 +2360,15 @@ function startLiveDisplay() {
     return;
   }
   state.liveRecognition = rec;
-  state.liveLastActivityAt = Date.now();  // 0 のままだと開始直後に「無音」に見える
+  // v0.18.11: ここで現在時刻を入れてはいけない。
+  // 入れると「録音開始からずっと無音」に見えて、まだ一言も喋っていない
+  // 3.0秒（最短チャンク長）の時点で区切ってしまう。実機 2026-08-31 20:42:
+  //   音声チャンク送信 長さ3.0秒 [幅5dB 判定不能 最長無音0ms 採用=webspeech]
+  // 表示はされないが Gemini への送信が1回まるまる無駄になる。
+  // 0 のままにしておけば currentSilenceSignal の webActive が false になり、
+  // Web Speech が実際に何か聞き取るまでこの手段は使われない
+  // （レベル検出器で「大きい側を知るまで判定しない」としたのと同じ原則）。
+  state.liveLastActivityAt = 0;
   try {
     rec.start();
     diagLog.info('リアルタイム表示 (Web Speech 並走) を開始');
