@@ -2139,7 +2139,12 @@ async function uploadSessionsToNotion(sessions) {
     } catch (e) {
       results.push({ session, ok: false, error: e.message });
       notionProgressAddRow(session.title, 'ng', e.message);
-      console.warn('[notion] アップロード失敗:', session.title, e.message);
+      // v0.15.2: どの保存先に送ろうとして失敗したかも残す。
+      // 以前はタブ名と理由だけで、あとからログを見ても保存先が特定できなかった。
+      console.warn(`[notion] アップロード失敗: ${session.title}`,
+        `／保存先: ${dest.title} (${dest.id})`,
+        `／日付列: ${dest.dateProp || 'なし'}`,
+        `／理由: ${e.message}`);
     }
     done += 1;
     if (targets.length > 1) els.notionProgressTitle.textContent = `Notion に保存中…（${done}/${targets.length}）`;
