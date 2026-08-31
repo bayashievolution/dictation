@@ -276,6 +276,7 @@ const state = {
   chunkStartedAt: 0,          // 今のチャンクを開始した時刻
   chunkStartedAtSilence: true,// 今のチャンクの「頭」が無音の切れ目だったか（録音開始直後は真）
   pendingChunkEdges: null,    // onstop に渡す { startsAtSilence, endsAtSilence }
+  finalChunkPending: false,   // 停止時、最後のチャンクがまだ送り出されていない (v0.18.6)
 
   sessions: [],
   activeId: null,
@@ -1145,6 +1146,33 @@ async function refineByChunks(fullText, progressTargetEl) {
 const MID_CHUNK_THRESHOLD = 3;      // 何段落溜まったら発火
 const MID_TIME_THRESHOLD_MS = 60000; // 最初の短チャンクから何ms経ったら発火
 
+/**
+ * 送信中の音声チャンクが全部確定するまで黙って待つ (v0.18.6)
+ *
+ * 停止直後の最終整形が、**最後のチャンクの到着を待たずに**走っていた。
+ * 実機ログ:
+ *   18:34:35 録音停止
+ *   18:34:36 ミドル整形開始 2段落      ← まだ2つしか届いていない
+ *   18:34:36 音声チャンク送信 6.9秒    ← 最後のチャンクはこの後
+ * 結果、最後の段落だけが繋ぎ直しの対象から漏れ、文の途中で切れたまま残っていた。
+ *
+ * ensureTranscriptSettled() は確認ダイアログを出す対話用なので、ここでは使えない。
+ *
+ * recorder.stop() から onstop までは非同期なので、カウンタが増える前に見にいくと
+ * 「0件」と誤認する。finalChunkPending でその隙間を埋める。
+ */
+async function waitForAudioSettled(timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while ((state.finalChunkPending || state.audioInFlightCount > 0) && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 100));
+  }
+  if (state.finalChunkPending || state.audioInFlightCount > 0) {
+    diagLog.info(`確定待ちが${(timeoutMs / 1000)}秒で時間切れ`
+      + `（残り${state.audioInFlightCount}件）。そのまま整形に進みます`);
+  }
+  state.finalChunkPending = false;
+}
+
 function maybeConsolidateShortChunks() {
   if (state.isConsolidatingShortChunks) return; // 多重実行防止
   if (!state.settings.aiEnabled || !state.settings.apiKey) return;
@@ -1543,6 +1571,9 @@ function stopRecording() {
   refreshAutoContext({ force: true });
   clearAllTimers();
   flushPendingToGemini().finally(async () => {
+    // v0.18.6: 最後のチャンクが届く前に整形を始めると、その段落だけが
+    // 繋ぎ直しの対象から漏れる（文の途中で切れたまま残る）
+    await waitForAudioSettled();
     // 録音停止時に、残っている short-refined パラグラフを強制的に
     // ミドル整形（refineWithGemini で見出し付け＋文脈統合）してからサマリ化
     const container = (state.bgTranscriptEl && recSessionId !== state.activeId)
@@ -1606,11 +1637,23 @@ const SILENCE_MARGIN_DB = 6;     // ノイズフロアからこれだけ上ま�
  * かといって一律に長くすると、切ってよい場所が見つからず強制区切りが増える
  * （それは v0.17 に戻るということ）。そこで段階的にする:
  *
- *   最短〜(最長-4秒)  … 700ms 必要。文の切れ目だけを狙う
- *   (最長-4秒)〜最長   … 350ms でも妥協する。強制で切るよりはマシ
+ *   最短〜(最長-4秒)  … 文の切れ目だけを狙う
+ *   (最長-4秒)〜最長   … 短い間でも妥協する。強制で切るよりはマシ
+ *
+ * v0.18.6 で数値を上げた。v0.18.5 で測定がまともになって初めて、実際の間の
+ * 長さが分かったため（2026-08-31 18:34 の実機ログ）:
+ *
+ *   1350ms … 文末（「〜黙ってみます。」）
+ *   1300ms … 文末（「〜終わりたいと思います。」）
+ *    950ms … **文の途中の言いよどみ**（「どのように…だったでしょうか」）
+ *
+ * 700ms だと 950ms の言いよどみを文の切れ目と判定して真っ二つにしていた。
+ * 1000ms なら分かれる。ただしこれは1回の録音から取った値なので、話し方が
+ * 変わればまた見直しが要る。外すほうに転んでも、切る場所が見つからず
+ * 最長秒数の強制区切りに落ちるだけで壊れはしない。
  */
-const SILENCE_HOLD_MS = 700;         // 通常。文の切れ目とみなす長さ
-const SILENCE_HOLD_LATE_MS = 350;    // 最長が近いときの妥協ライン
+const SILENCE_HOLD_MS = 1000;        // 通常。文の切れ目とみなす長さ
+const SILENCE_HOLD_LATE_MS = 500;    // 最長が近いときの妥協ライン
 const SILENCE_LATE_WINDOW_MS = 4000; // 最長のこれだけ手前から妥協を始める
 const SILENCE_POLL_MS = 50;      // 判定の刻み
 
@@ -1998,6 +2041,8 @@ async function startGeminiAudioRecording() {
         diagLog.info(`音声チャンクスキップ ${blob.size}B (<=${minBytes}, 無音判定)`);
       }
     }
+    // 停止時の最後のチャンク。ここまで来れば送り出し済み
+    state.finalChunkPending = false;
     // 録音継続中なら再スタート
     if (state.isRecording && state.mediaRecorder === recorder) {
       setTimeout(() => {
@@ -2100,7 +2145,8 @@ function stopGeminiAudioRecording() {
     diag: silenceDiag(stopSig.source),
   };
   if (recorder && recorder.state !== 'inactive') {
-    try { recorder.stop(); } catch {}
+    state.finalChunkPending = true;   // onstop で下ろす
+    try { recorder.stop(); } catch { state.finalChunkPending = false; }
   }
   if (state.silenceDetector) {
     try { state.silenceDetector.close(); } catch {}
