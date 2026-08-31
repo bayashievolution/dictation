@@ -2651,6 +2651,7 @@ mark.search-hit.current {
 .field input[type="text"],
 .field input[type="password"],
 .field input[type="number"],
+.field textarea,
 .field select {
   width: 100%;
   padding: 8px 10px;
@@ -2676,13 +2677,30 @@ mark.search-hit.current {
 }
 
 .field input:hover,
+.field textarea:hover,
 .field select:hover {
   border-color: #4a4a54;
 }
 
 .field input:focus,
+.field textarea:focus,
 .field select:focus {
   border-color: var(--accent);
+}
+
+/* v0.16.2: textarea が .field のスタイルから漏れていて、
+   ブラウザ既定の見た目（明るい枠・別フォント）のまま出ていた。
+   複数行なので行間と縦リサイズだけ個別に指定する。 */
+.field textarea {
+  line-height: 1.7;
+  resize: vertical;
+  min-height: 72px;
+}
+
+/* .field には placeholder の色指定が無く、ブラウザ既定のままだった */
+.field input::placeholder,
+.field textarea::placeholder {
+  color: var(--text-faint);
 }
 
 .field input[type="number"]::-webkit-inner-spin-button,
