@@ -132,6 +132,16 @@ const DEFAULT_SETTINGS = {
   // 最短を過ぎたら次の無音の切れ目で切り、最長に達したら無音でなくても切る。
   audioSilenceCut: true,
   audioChunkMaxSec: 20,
+  /* v0.19.0: 録音音声の一時保管（全文やり直し用）
+   *
+   * **既定は保持しない。** 「文字起こしはよいが録音の保存はダメ」という
+   * 同意の場面は普通にあるので、こちらを既定にする。
+   * この設定が制御するのは「端末に残すか」だけで、Gemini モードは live の
+   * 時点ですでに音声を Google に送っている（設定 UI にもそう書く）。 */
+  audioKeepRecording: false,
+  audioRetention: 'repass',   // repass / close / 1d / 7d / manual
+  // 音声認識用途では 128kbps は過剰。64kbps なら 90分で約43MB
+  audioBitrate: 64000,
   // v0.13.24: 旧 webspeechInterimDebounceMs / webspeechInterimOpacity (v0.13.9) は撤去。
   // 字幕ウィンドウ側の cap-para-interim を v0.13.17 で撤去済み・UI も v0.13.23 で
   // 削除済み。設定値だけ残しても読み手なしで意味ない。
@@ -277,6 +287,7 @@ const state = {
   chunkStartedAtSilence: true,// 今のチャンクの「頭」が無音の切れ目だったか（録音開始直後は真）
   pendingChunkEdges: null,    // onstop に渡す { startsAtSilence, endsAtSilence }
   finalChunkPending: false,   // 停止時、最後のチャンクがまだ送り出されていない (v0.18.6)
+  audioSeq: 0,                // 保管するチャンクの通し番号 (v0.19.0)
 
   sessions: [],
   activeId: null,
@@ -439,6 +450,11 @@ const els = {
   inputChunkSec: document.getElementById('input-chunk-sec'),
   inputSilenceCut: document.getElementById('input-silence-cut'),
   inputChunkMaxSec: document.getElementById('input-chunk-max-sec'),
+  inputAudioBitrate: document.getElementById('input-audio-bitrate'),
+  inputKeepRecording: document.getElementById('input-keep-recording'),
+  inputAudioRetention: document.getElementById('input-audio-retention'),
+  audioUsageText: document.getElementById('audio-usage-text'),
+  btnClearAudio: document.getElementById('btn-clear-audio'),
   inputGeminiLiveDisplay: document.getElementById('input-gemini-live-display'),
   inputMinChunkBytes: document.getElementById('input-min-chunk-bytes'),
   // v0.13.24: 旧 v0.13.9 interim 設定 UI（input-webspeech-interim-debounce /
@@ -2053,6 +2069,68 @@ function confirmedTailText(excludeEl, maxChars = 400) {
 }
 
 /**
+ * 録音チャンクを一時保管する (v0.19.0)
+ *
+ * 設定がオフなら何もしない（**既定はオフ**）。
+ * 保管に失敗しても録音と文字起こしは止めない。あくまで「やり直せたら嬉しい」
+ * 付加機能であって、これのために本筋を落とす価値は無い。
+ */
+function keepAudioChunk(blob) {
+  if (!state.settings.audioKeepRecording) return;
+  const sessionId = state.recordingSessionId || state.activeId;
+  if (!sessionId || !blob || !blob.size) return;
+  audioStorePut(sessionId, blob, state.audioSeq++).catch(e => {
+    // 容量不足などで失敗しうる。1回だけ知らせて、以後は黙って諦める
+    if (!state.audioStoreWarned) {
+      state.audioStoreWarned = true;
+      diagLog.info('音声の保管に失敗しました（録音と文字起こしは続きます）: ' + (e.message || e));
+    }
+  });
+}
+
+/**
+ * 期限切れの音声を掃除する (v0.19.0)
+ *
+ * **起動時に必ず呼ぶ。** 「タブを閉じたら消す」はクラッシュや強制リロードでは
+ * 走らないので、消し忘れを防ぐ本体はこちら。
+ */
+/** 設定画面の「保持中の音声: …」表示を更新する (v0.19.0) */
+async function refreshAudioUsage() {
+  if (!els.audioUsageText) return;
+  try {
+    const { sessions, totalBytes } = await audioStoreSummary();
+    els.audioUsageText.textContent = sessions.length === 0
+      ? '保持中の音声: なし'
+      : `保持中の音声: ${sessions.length}件 / ${formatBytes(totalBytes)}`;
+    if (els.btnClearAudio) els.btnClearAudio.disabled = sessions.length === 0;
+  } catch (e) {
+    // IndexedDB が使えない環境（プライベートモード等）でも設定画面は開けるべき
+    els.audioUsageText.textContent = '保持中の音声: 確認できません（' + (e.message || e) + '）';
+    if (els.btnClearAudio) els.btnClearAudio.disabled = true;
+  }
+}
+
+async function sweepStoredAudio() {
+  try {
+    const live = new Set(state.sessions.map(s => s.id));
+    const done = new Map(state.sessions
+      .filter(s => s.audioRepassDoneAt)
+      .map(s => [s.id, s.audioRepassDoneAt]));
+    const r = await audioStoreSweep({
+      // 保持がオフなら 'off' を渡して、残っている分を全部消す
+      retention: state.settings.audioKeepRecording ? state.settings.audioRetention : 'off',
+      liveSessionIds: live,
+      repassDoneAt: done,
+    });
+    if (r.deletedSessions > 0) {
+      diagLog.info(`保管していた音声を掃除: ${r.deletedSessions}件 / ${formatBytes(r.deletedBytes)}`);
+    }
+  } catch (e) {
+    console.warn('[audio] 掃除に失敗:', e.message || e);
+  }
+}
+
+/**
  * Gemini が空を返したチャンクを、画面から消してよいか (v0.18.1 / v0.18.10)
  *
  * 無音位置で区切るようになった結果、最後の区切りのあとに「中身が沈黙だけ」の
@@ -2147,7 +2225,12 @@ async function startGeminiAudioRecording() {
   }
 
   state.audioChunks = [];
-  const recorder = new MediaRecorder(state.audioStream, mimeType ? { mimeType } : undefined);
+  // v0.19.0: 音声認識用途では既定(約128kbps)は過剰。下げると保管サイズも送信量も減る
+  const recOpts = {};
+  if (mimeType) recOpts.mimeType = mimeType;
+  const bitrate = Number(state.settings.audioBitrate);
+  if (Number.isFinite(bitrate) && bitrate >= 16000) recOpts.audioBitsPerSecond = bitrate;
+  const recorder = new MediaRecorder(state.audioStream, recOpts);
   state.mediaRecorder = recorder;
 
   recorder.ondataavailable = (e) => {
@@ -2160,6 +2243,9 @@ async function startGeminiAudioRecording() {
       const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
       // 設定の minChunkBytes 未満は無音と見なしてスキップ（デフォ400: 従来1200より感度↑）
       const minBytes = Number.isFinite(state.settings.audioMinChunkBytes) ? state.settings.audioMinChunkBytes : 400;
+      // v0.19.0: 保管は「送るかどうか」とは独立に行う。
+      // 無音判定でスキップしたチャンクも、やり直しでは音声の連続性が要るので残す
+      keepAudioChunk(blob);
       if (blob.size > minBytes) {
         // 発話あり（と推定） → 長無音タイマーをリセット
         resetLongSilenceTimer();
@@ -2231,6 +2317,7 @@ async function startGeminiAudioRecording() {
 
   state.chunkStartedAt = Date.now();
   state.chunkStartedAtSilence = true;   // 録音開始直後は必ず「頭から」
+  state.audioSeq = 0;                   // v0.19.0: 保管の通し番号
 
   const cutChunk = (endedAtSilence, source) => {
     if (!state.mediaRecorder || state.mediaRecorder.state !== 'recording') return;
@@ -5363,6 +5450,10 @@ function openSettings() {
   els.inputChunkSec.value = state.settings.audioChunkSec || 12;
   if (els.inputSilenceCut) els.inputSilenceCut.checked = state.settings.audioSilenceCut !== false;
   if (els.inputChunkMaxSec) els.inputChunkMaxSec.value = state.settings.audioChunkMaxSec || 20;
+  if (els.inputAudioBitrate) els.inputAudioBitrate.value = String(state.settings.audioBitrate || 64000);
+  if (els.inputKeepRecording) els.inputKeepRecording.checked = !!state.settings.audioKeepRecording;
+  if (els.inputAudioRetention) els.inputAudioRetention.value = state.settings.audioRetention || 'repass';
+  refreshAudioUsage();
   if (els.inputGeminiLiveDisplay) els.inputGeminiLiveDisplay.checked = state.settings.geminiLiveDisplay !== false;
   if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
   if (els.inputWsCommitSec) {
@@ -5426,6 +5517,22 @@ function saveSettingsFromForm() {
   state.settings.audioDeviceId = els.inputAudioDevice ? els.inputAudioDevice.value : '';
   state.settings.audioChunkSec = Math.max(5, Math.min(60, Number(els.inputChunkSec.value) || 12));
   if (els.inputSilenceCut) state.settings.audioSilenceCut = els.inputSilenceCut.checked;
+  if (els.inputAudioBitrate) {
+    const br = Number(els.inputAudioBitrate.value);
+    state.settings.audioBitrate = Number.isFinite(br) && br >= 16000 ? br : 64000;
+  }
+  if (els.inputKeepRecording) {
+    const wasOn = !!state.settings.audioKeepRecording;
+    state.settings.audioKeepRecording = els.inputKeepRecording.checked;
+    // オフに切り替えたら、残っている分をその場で消す（次の起動を待たない）
+    if (wasOn && !state.settings.audioKeepRecording) {
+      audioStoreClearAll()
+        .then(n => { if (n > 0) diagLog.info(`保持をオフにしたので音声 ${n} 件を消しました`); })
+        .catch(() => {})
+        .finally(refreshAudioUsage);
+    }
+  }
+  if (els.inputAudioRetention) state.settings.audioRetention = els.inputAudioRetention.value || 'repass';
   if (els.inputChunkMaxSec) {
     // 最長は最短より短くできない（短いと無音を探す余地が消える）
     state.settings.audioChunkMaxSec = Math.max(
@@ -5770,6 +5877,8 @@ function closeSession(id) {
   const wasActive = state.activeId === id;
   // 録音対象セッションが閉じられるなら（BGでも）録音を止める
   if (state.isRecording && state.recordingSessionId === id) stopRecording();
+  // v0.19.0: タブが消えるなら、その音声も消す（設定に関係なく）
+  audioStoreDeleteSession(id).catch(() => {});
   state.sessions.splice(idx, 1);
   if (state.sessions.length === 0) {
     createSession({ activate: true, skipSave: true });
@@ -5800,6 +5909,8 @@ function closeMultipleSessions(ids, { skipConfirm = false } = {}) {
   }
   const activeIsTarget = targets.some(s => s.id === state.activeId);
   const idSet = new Set(targets.map(s => s.id));
+  // v0.19.0: 消えるタブの音声も消す
+  for (const id of idSet) audioStoreDeleteSession(id).catch(() => {});
   state.sessions = state.sessions.filter(s => !idSet.has(s.id));
   if (state.sessions.length === 0) {
     createSession({ activate: true, skipSave: true });
@@ -7260,7 +7371,23 @@ renderInnerTabs();
 if (typeof renderIcons === 'function') renderIcons();
 els.zoomRange.value = state.settings.appZoom;
 els.zoomPercent.textContent = state.settings.appZoom + '%';
+if (els.btnClearAudio) {
+  els.btnClearAudio.addEventListener('click', async () => {
+    if (!confirm('保持している録音音声をすべて消します。よろしいですか？\n（文字起こしの結果は消えません）')) return;
+    try {
+      const n = await audioStoreClearAll();
+      diagLog.info(`保持していた音声 ${n} 件を手動で消しました`);
+    } catch (e) {
+      alert('消せませんでした: ' + (e.message || e));
+    }
+    refreshAudioUsage();
+  });
+}
+
 initSessions();
+// v0.19.0: 期限切れの音声を掃除する。「タブを閉じたら消す」はクラッシュや
+// 強制リロードでは走らないので、消し忘れを防ぐ本体はこちら
+sweepStoredAudio();
 renderTabs();
 loadActiveSessionIntoDOM();
 updateActionButtons();

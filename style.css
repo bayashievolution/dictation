@@ -2953,3 +2953,22 @@ body.chat-active #zoom-bar {
   color: var(--text-faint);
   vertical-align: middle;
 }
+
+/* v0.19.0: 録音の保持 */
+.audio-usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+/* 送信先についての注意書き。既存の --danger を使う（新しい色を増やさない） */
+.field-hint.warn-hint {
+  display: block;
+  border-left: 3px solid var(--danger);
+  padding-left: 10px;
+  color: var(--text);
+}
+.btn.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}

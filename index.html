@@ -459,6 +459,59 @@
                 </div>
                 <small class="field-hint">このサイズ未満の音声チャンクは無音とみなしてスキップ。小声も拾いたいなら下げる（既定 400）／無駄送信を減らすなら上げる。</small>
               </label>
+              <label class="field">
+                <span class="field-label">音質（kbps）</span>
+                <select id="input-audio-bitrate">
+                  <option value="32000">32 — 最小（90分で約21MB）</option>
+                  <option value="64000">64 — 標準（90分で約43MB）</option>
+                  <option value="96000">96 — 高め（90分で約65MB）</option>
+                  <option value="128000">128 — 従来（90分で約86MB）</option>
+                </select>
+                <small class="field-hint">音声認識用途では 64kbps で十分です。下げると送信量と保管サイズが減ります。</small>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <h3 class="field-group-title">録音の保持</h3>
+          <label class="field field-row">
+            <input id="input-keep-recording" type="checkbox" />
+            <span>録音を端末に一時保存する（全文やり直し用）</span>
+          </label>
+          <div class="field">
+            <small class="field-hint">
+              録音が終わったあとで、<strong>全文をもう一度 Gemini に通して話者判別つきで作り直す</strong>ための機能です。
+              チャンクに分けずに丸ごと渡すため、話者の区別や前後関係の精度が上がります。
+            </small>
+          </div>
+          <div class="field">
+            <small class="field-hint warn-hint">
+              <strong>この設定が決めるのは「端末に残すかどうか」だけです。</strong>
+              Gemini モードは、この設定に関係なく文字起こしのために音声を Google へ送信しています。
+              やり直しを実行すると録音全体がアップロードされ、Google 側で48時間後に自動削除されます。
+              録音の保存自体が許されない場面では、この設定をオフにしたうえで、
+              Gemini モードを使うことの可否も確認してください。
+            </small>
+          </div>
+          <label class="field">
+            <span class="field-label">いつ消すか</span>
+            <select id="input-audio-retention">
+              <option value="repass">やり直しが終わったら消す（推奨・24時間で自動失効）</option>
+              <option value="close">タブを閉じたら消す</option>
+              <option value="1d">1日たったら消す</option>
+              <option value="7d">7日たったら消す</option>
+              <option value="manual">手動で消すまで残す</option>
+            </select>
+            <small class="field-hint">
+              どの設定でも<strong>タブを閉じた時点でその録音は消えます</strong>。
+              起動のたびに期限切れを掃除するので、途中でブラウザが落ちても残りません。
+            </small>
+          </label>
+          <div class="field">
+            <div class="audio-usage-row">
+              <span id="audio-usage-text" class="field-hint">保持中の音声: 確認中…</span>
+              <button type="button" id="btn-clear-audio" class="btn btn-ghost btn-sm">すべて消す</button>
             </div>
           </div>
         </div>
@@ -806,9 +859,12 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.17.4"></script>
-  <script src="gemini.js?v=0.17.4"></script>
-  <script src="notion.js?v=0.17.4"></script>
-  <script src="app.js?v=0.17.4"></script>
+  <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
+       （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
+  <script src="icons.js?v=0.19.0"></script>
+  <script src="gemini.js?v=0.19.0"></script>
+  <script src="notion.js?v=0.19.0"></script>
+  <script src="audio-store.js?v=0.19.0"></script>
+  <script src="app.js?v=0.19.0"></script>
 </body>
 </html>
