@@ -2308,9 +2308,15 @@ function updateRepassButton() {
   if (!els.btnRepass) return;
   const r = repassState();
   els.btnRepass.classList.toggle('firing', r.running);
+  // v0.21.2: 結果が残っていれば、音声が消えていても貼り直せる。
+  // ボタンの説明もそれに合わせる（押す前に何が起きるか分かるように）
+  const s = getActiveSession();
+  const hasSaved = !!(s && s.repass && s.repass.turns && s.repass.turns.length);
   els.btnRepass.title = r.running
     ? 'やり直しを中止する'
-    : '保管した録音をまとめて投げ直し、話者付きで作り直す（録音の保持がオンのときだけ）';
+    : hasSaved
+      ? '話者付きの結果を貼り直す／録音が残っていれば作り直す'
+      : '保管した録音をまとめて投げ直し、話者付きで作り直す（録音の保持がオンのときだけ）';
 }
 
 /**
@@ -2346,6 +2352,12 @@ async function repassWithSpeakers() {
     return;
   }
   if (!segments.length) {
+    // v0.21.2: 音声が消えていても、結果が残っていれば貼り直せる。
+    // 「もう2度とできない」を先に否定する
+    if (session.repass && session.repass.turns && session.repass.turns.length) {
+      restoreRepassResult(session);
+      return;
+    }
     alert(explainNoAudioForRepass({
       keepRecording: !!state.settings.audioKeepRecording,
       retention: state.settings.audioRetention,
@@ -2360,6 +2372,24 @@ async function repassWithSpeakers() {
   const approxSec = Math.round(totalBytes * 8 / bps);
   const approxTokens = approxSec * 32;
   const mins = Math.max(1, Math.round(approxSec / 60));
+
+  // v0.21.2: 前の結果があるなら、投げ直す前に**安いほう**を先に出す。
+  // 「画面から消えただけ」なら、貼り直しは一瞬でトークンもかからない
+  const saved = session.repass;
+  if (saved && saved.turns && saved.turns.length) {
+    const when = new Date(saved.doneAt).toLocaleString('ja-JP');
+    if (confirm(
+      `${when} に作った話者付きの結果が、このタブに保存されています。\n\n`
+      + `　発言: ${saved.turns.length}件\n`
+      + `　話者: ${(saved.speakers || []).length}人\n\n`
+      + `この結果を画面に貼り直しますか？（トークンはかかりません）\n\n`
+      + `［OK］保存された結果を貼り直す\n`
+      + `［キャンセル］録音からもう一度作り直す（前の結果は上書きされます）`
+    )) {
+      restoreRepassResult(session, { ask: false });
+      return;
+    }
+  }
 
   if (!confirm(
     `この録音を話者付きで作り直します。\n\n`
@@ -2396,6 +2426,7 @@ async function repassWithSpeakers() {
   diagLog.info(`話者付きやり直し開始: ${segments.length}区間 / ${formatBytes(totalBytes)} / 約${mins}分`);
 
   const rosters = [];
+  const allTurns = [];   // v0.21.2: セッションに残して、あとから貼り直せるようにする
   let prevTail = '';
   let wrote = 0;
   let stoppedBy = null;
@@ -2439,6 +2470,7 @@ async function repassWithSpeakers() {
           const el = createParagraphEl('', 'paragraph refined');
           setParagraphContent(el, formatSpeakerTurn(t));
           container.insertBefore(el, progressEl);
+          allTurns.push(t);
           wrote++;
         }
         if (out.turns.length) prevTail = out.turns[out.turns.length - 1].text;
@@ -2480,6 +2512,9 @@ async function repassWithSpeakers() {
   if (!inBg) { updateActionButtons(); autoScroll(); }
 
   const roster = mergeSpeakerRosters(rosters);
+  // v0.21.2: 中断でも、書き出せた分は残す。ここまでの結果も作り直せない
+  saveRepassResult(session, { speakers: mergeSpeakerRosters(rosters), turns: allTurns });
+
   if (stoppedBy) {
     setStatus('error', `やり直し中断（${wrote}発言まで）`);
     alert(`途中で止まりました: ${stoppedBy}\n\n`
@@ -2506,9 +2541,82 @@ async function repassWithSpeakers() {
     + `　 名前が分かっているなら、タグアイコンの「話者」に書いておくと安定します。\n\n`
     + (swept && swept.deletedSessions > 0
         ? `※ 設定にしたがって、保管していた録音（${formatBytes(swept.deletedBytes)}）を消しました。\n`
-          + `　 この録音はもうやり直せません。何度か試したいときは、次の録音の前に\n`
-          + `　 設定 →「いつ消すか」を変えておいてください。`
+          + `　 録音からの作り直しはもうできませんが、**この結果はタブに保存してあります**。\n`
+          + `　 間違って消しても、同じボタンから貼り直せます。\n`
+          + `　 別の設定で試し直したいときは、次の録音の前に「いつ消すか」を変えてください。`
         : `※ 保管した録音は設定にしたがって残してあります。もう一度やり直せます。`));
+}
+
+/* ───────── やり直しの結果を残す (v0.21.2) ─────────
+ *
+ * v0.21.1 までは、話者付きの結果を**取り消し履歴にしか置いていなかった**。
+ * 「間違えて元に戻すボタンを押したら、もう2度と話者判別はできないのでは」
+ * という指摘のとおりで、これは設計の穴だった。
+ *
+ * 消えて困るのは録音ではなく**結果そのもの**。
+ * 結果はテキストなので数十KBしかなく、残しても録音のような
+ * 二次利用の問題が無い（「文字起こしはよいが録音はダメ」という同意の形に
+ * そのまま収まる）。いちばん高価で二度と作れないものを、
+ * リロードで消える場所にしか置いていなかったのが間違い。
+ *
+ * ■ 保存するのは結果だけ
+ *
+ * やり直し**前**の文字起こしは保存しない。取り消し履歴で戻せるうえ、
+ * 戻したあとは画面にあるものがそれになる（貼り直しは pushUndo してから
+ * 行うので、そこからまた戻せる）。両方を貯めると localStorage を
+ * 二重に食うだけで、行き来はできている。
+ */
+
+/** 結果をセッションに残す。turns が空なら何もしない（空で上書きしない） */
+function saveRepassResult(session, { speakers, turns }) {
+  if (!session || !turns || !turns.length) return;
+  session.repass = {
+    doneAt: Date.now(),
+    speakers: (speakers || []).map(x => ({ label: x.label, note: x.note || '' })),
+    // 画面の HTML ではなくプレーンな発言の配列で持つ。
+    // 保存量が小さく、貼り直すときに段落を作り直せる
+    turns: turns.map(t => ({ speaker: t.speaker, text: t.text })),
+  };
+  persistSessions();
+  updateRepassButton();
+}
+
+/**
+ * 残してある結果を画面に貼り直す (v0.21.2)
+ *
+ * やり直し本体と同じ形（1発言＝1段落）で組み直す。
+ * **先に pushUndo する**ので、貼り直しも取り消せる。
+ */
+function restoreRepassResult(session, { ask = true } = {}) {
+  const saved = session && session.repass;
+  if (!saved || !saved.turns || !saved.turns.length) return false;
+
+  const when = new Date(saved.doneAt).toLocaleString('ja-JP');
+  const names = (saved.speakers || []).map(x => x.label).join('、');
+  // 呼び出し側ですでに聞いている場合は二重に聞かない
+  if (ask && !confirm(
+    `${when} に作った話者付きの結果が、このタブに保存されています。\n\n`
+    + `　発言: ${saved.turns.length}件\n`
+    + `　話者: ${(saved.speakers || []).length}人${names ? `（${names}）` : ''}\n\n`
+    + `いまの文字起こしを、この結果で置き換えますか？\n`
+    + `（いまの内容は Ctrl+Z で戻せます）`
+  )) return false;
+
+  pushUndo('話者付きの結果を貼り直し', 'pane-transcript');
+  const container = getWriteContainer();
+  Array.from(container.childNodes).forEach(n => n.remove());
+  for (const t of saved.turns) {
+    const el = createParagraphEl('', 'paragraph refined');
+    setParagraphContent(el, formatSpeakerTurn(t));
+    container.appendChild(el);
+  }
+  if (container !== els.confirmed) syncBgToSession(); else snapshotActiveToSession();
+  persistSessions();
+  updateActionButtons();
+  autoScroll();
+  diagLog.info(`話者付きの結果を貼り直し: ${saved.turns.length}発言`);
+  setStatus('idle', `結果を貼り直しました（${saved.turns.length}発言）`);
+  return true;
 }
 
 /**
@@ -6320,12 +6428,33 @@ function initSessions() {
   }
 }
 
+/**
+ * セッションを localStorage に保存する
+ *
+ * v0.21.2: 失敗を黙らなくした。ここは全セッションを1つのキーに入れているので、
+ * 容量超過で落ちると**その回の変更が丸ごと消える**。console にしか出していないと、
+ * 利用者は保存できていないことに気づかないまま書き続けることになる。
+ * （やり直しの結果を残すようにして保存量が増えたので、なおさら黙っていられない）
+ */
+let _persistFailedAt = 0;
 function persistSessions() {
   try {
     localStorage.setItem(SESSIONS_KEY, JSON.stringify(state.sessions));
     if (state.activeId) localStorage.setItem(ACTIVE_TAB_KEY, state.activeId);
+    _persistFailedAt = 0;
   } catch (e) {
     console.error('persistSessions failed', e);
+    // 保存のたびに出すとうるさいので、1分に1回だけ知らせる
+    const now = Date.now();
+    if (now - _persistFailedAt > 60000) {
+      _persistFailedAt = now;
+      const quota = e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || ''));
+      const msg = quota
+        ? '保存領域がいっぱいで、いまの内容を保存できませんでした。古いタブを削除するか、HTMLで保存してください'
+        : '内容を保存できませんでした: ' + (e.message || e);
+      diagLog.info(msg);
+      setStatus('error', quota ? '保存領域がいっぱいです' : '保存に失敗しました');
+    }
   }
 }
 
@@ -6415,6 +6544,7 @@ function migrateMemoTaskItems() {
 
 function loadActiveSessionIntoDOM() {
   renderDictBar();   // v0.20.0: タブごとに辞書が違うので、切り替えたら描き直す
+  updateRepassButton();   // v0.21.2: 保存済みの結果もタブごとに違う
   const s = getActiveSession();
   els.confirmed.innerHTML = s?.transcript || '';
   els.memo.innerHTML = s?.memo || '';
