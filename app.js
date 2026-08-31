@@ -2574,9 +2574,22 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
       // v0.17.0: Web Speech が聞き取っていたなら、その文字は捨てない。
       // Gemini が空でも「聞こえていた内容」は残っているほうが役に立つ
       targetEl.className = 'paragraph needs-retry';
+      /* v0.19.3: 文言を正直にする。
+       *
+       * 実機で番組終わりのジングル（音楽）にこれが付いた。従来の
+       * 「（音声不明瞭・再試行可）」は2点で嘘をついていた:
+       *   - 「音声不明瞭」… 不明瞭なのではなく、そもそも言葉ではない
+       *   - 「再試行可」  … 再試行はテキストを整形し直す仕組みで、
+       *                     中身が空のこれを再試行しても何も起きない
+       *
+       * 音楽かどうかの判別は作らない。hadSpeech は「大きい音があったか」を
+       * 見ているだけなので鳴り続ける音楽は素通りするが、それを直すには
+       * 変調スペクトルのような別の特徴量が要る。ここで得られるものに対して
+       * 大きすぎる。**何秒ぶんが文字にならなかったか**が分かれば用は足りる。 */
+      const sec = ((edges && edges.durationMs) || 0) / 1000;
       setParagraphContent(targetEl, provisionalText
         ? provisionalText + '　[Gemini は聞き取れず・Web Speech の結果です]'
-        : '（音声不明瞭・再試行可）');
+        : `（この${sec ? sec.toFixed(1) + '秒' : '区間'}は言葉として聞き取れませんでした。音楽や物音の可能性があります）`);
       persist();
     }
   } catch (e) {
