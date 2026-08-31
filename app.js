@@ -271,7 +271,7 @@ const state = {
   audioChunkTimer: null,
   audioInFlightCount: 0,
   // v0.18.0: 無音位置で切るための状態
-  silenceDetector: null,      // { isSilent(), db(), close() }
+  silenceDetector: null,      // { silentMs(), db(), close() }
   chunkStartedAt: 0,          // 今のチャンクを開始した時刻
   chunkStartedAtSilence: true,// 今のチャンクの「頭」が無音の切れ目だったか（録音開始直後は真）
   pendingChunkEdges: null,    // onstop に渡す { startsAtSilence, endsAtSilence }
@@ -1592,11 +1592,25 @@ function stopRecording() {
  * -40dB のような固定値にすると、静かな部屋の小声が丸ごと「無音」に落ちて、
  * 発話の途中で切るという元の失敗に戻る。
  * そこで**その場の暗騒音（ノイズフロア）を推定し、そこから何dB上か**で判定する。
- * 推定の作り方は下の①②と isSilent() のコメントを参照（どれも合成音のテストで
+ * 推定の作り方は下の①②と silentMs() のコメントを参照（どれも合成音のテストで
  * 実際に失敗を出してから足した対策で、思いつきの安全策ではない）。
  */
 const SILENCE_MARGIN_DB = 6;     // ノイズフロアからこれだけ上までは「無音」とみなす
-const SILENCE_HOLD_MS = 350;     // これだけ continuous に無音が続いたら「切れ目」
+/* 「どれだけ静かなら文の切れ目か」(v0.18.2)
+ *
+ * v0.18.0/0.18.1 は 350ms 一本だった。実機で「…しかし、最初冒頭 / の方に喋り始めた」
+ * と真っ二つになった。日本語の話し言葉では、考えながら喋るときの言いよどみが
+ * 350ms を軽く超える。350ms は「文の切れ目」ではなく「息継ぎ」まで拾ってしまう。
+ *
+ * かといって一律に長くすると、切ってよい場所が見つからず強制区切りが増える
+ * （それは v0.17 に戻るということ）。そこで段階的にする:
+ *
+ *   最短〜(最長-4秒)  … 700ms 必要。文の切れ目だけを狙う
+ *   (最長-4秒)〜最長   … 350ms でも妥協する。強制で切るよりはマシ
+ */
+const SILENCE_HOLD_MS = 700;         // 通常。文の切れ目とみなす長さ
+const SILENCE_HOLD_LATE_MS = 350;    // 最長が近いときの妥協ライン
+const SILENCE_LATE_WINDOW_MS = 4000; // 最長のこれだけ手前から妥協を始める
 const SILENCE_POLL_MS = 50;      // 判定の刻み
 const SILENCE_CALIBRATE_MS = 1000; // 開始直後、暗騒音を実測する時間
 // フロアからこれだけ上の音を一度でも聞くまでは、無音判定を許さない。
@@ -1663,14 +1677,17 @@ function createSilenceDetector(stream) {
   }, SILENCE_POLL_MS);
 
   return {
-    /** SILENCE_HOLD_MS 以上ずっと静かなら true（＝ここで切ってよい） */
-    isSilent() {
+    /**
+     * いま何 ms 静かが続いているか（0 = 静かではない）。
+     * どれだけ続いたら切るかの判断は decideChunkCut 側に置く。
+     */
+    silentMs() {
       // 喋っている最中に録音を開始すると、初期実測が発話レベルをフロアだと
       // 思い込み、発話中ずっと「無音」に見える。そのまま切ると Gemini に
       // 「きれいに切れた」と嘘を伝えることになるので、大きい側を一度も
       // 聞いていないうちは判定しない（＝従来どおり最長秒数で切る）。
-      if (!heardSpeech) return false;
-      return silentSinceMs > 0 && (Date.now() - silentSinceMs) >= SILENCE_HOLD_MS;
+      if (!heardSpeech || !silentSinceMs) return 0;
+      return Date.now() - silentSinceMs;
     },
     db() { return lastDb; },
     floorDb() { return noiseFloorDb === null ? -99 : noiseFloorDb; },
@@ -1687,7 +1704,7 @@ function createSilenceDetector(stream) {
 }
 
 /**
- * 「いまチャンクを切るべきか」の判断 (v0.18.0)
+ * 「いまチャンクを切るべきか」の判断 (v0.18.0 / しきい値は v0.18.2)
  *
  *   0 ─────── minMs ─────────────── maxMs
  *   |  絶対切らない  |  無音になったら切る  | 無音でなくても切る
@@ -1698,11 +1715,15 @@ function createSilenceDetector(stream) {
  *
  * @returns {null|'silence'|'forced'} null = まだ切らない
  */
-function decideChunkCut({ elapsed, minMs, maxMs, useSilenceCut, isSilent }) {
+function decideChunkCut({ elapsed, minMs, maxMs, useSilenceCut, silentMs }) {
   if (elapsed >= maxMs) return 'forced';
   if (!useSilenceCut) return null;          // 従来動作では minMs === maxMs なので上で切れる
   if (elapsed < minMs) return null;
-  return isSilent ? 'silence' : null;
+  // 最長が近づいたら、短い間でも妥協する（強制で切るよりはマシ）
+  const needed = elapsed >= maxMs - SILENCE_LATE_WINDOW_MS
+    ? SILENCE_HOLD_LATE_MS
+    : SILENCE_HOLD_MS;
+  return (silentMs || 0) >= needed ? 'silence' : null;
 }
 
 /**
@@ -1792,7 +1813,9 @@ async function startGeminiAudioRecording() {
         // 発話あり（と推定） → 長無音タイマーをリセット
         resetLongSilenceTimer();
         const edges = state.pendingChunkEdges || { startsAtSilence: false, endsAtSilence: false };
+        // 長さも出す。強制区切りばかりになっていないかを実機ログで見分けるため
         diagLog.info(`音声チャンク送信 ${blob.size}B (>${minBytes}) `
+          + `長さ${((edges.durationMs || 0) / 1000).toFixed(1)}秒 `
           + `切り口 頭=${edges.startsAtSilence ? '無音' : '強制'} 尻=${edges.endsAtSilence ? '無音' : '強制'}`);
         // 未確定分はここで確定（次のチャンクに持ち越さない）。
         // 送らなかったチャンクでは取り出さず、次まで溜め続ける
@@ -1862,6 +1885,7 @@ async function startGeminiAudioRecording() {
       endsAtSilence: !!endedAtSilence,
       // 検出器が無いときは undefined のまま（＝判断材料なし）にしておく
       hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
+      durationMs: Date.now() - state.chunkStartedAt,
     };
     if (state.silenceDetector) state.silenceDetector.resetChunkSpeech();
     state.mediaRecorder.stop(); // onstop で送信＋再スタート
@@ -1872,7 +1896,7 @@ async function startGeminiAudioRecording() {
     const cut = decideChunkCut({
       elapsed: Date.now() - state.chunkStartedAt,
       minMs, maxMs, useSilenceCut,
-      isSilent: useSilenceCut && state.silenceDetector.isSilent(),
+      silentMs: useSilenceCut ? state.silenceDetector.silentMs() : 0,
     });
     if (cut) cutChunk(cut === 'silence');
   }, SILENCE_POLL_MS);
@@ -1893,8 +1917,10 @@ function stopGeminiAudioRecording() {
   // （利用者が文の途中で停止したなら「強制」＝続きを作らせない）
   state.pendingChunkEdges = {
     startsAtSilence: !!state.chunkStartedAtSilence,
-    endsAtSilence: !!(state.silenceDetector && state.silenceDetector.isSilent()),
+    endsAtSilence: !!(state.silenceDetector
+      && state.silenceDetector.silentMs() >= SILENCE_HOLD_LATE_MS),
     hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
+    durationMs: state.chunkStartedAt ? Date.now() - state.chunkStartedAt : 0,
   };
   if (recorder && recorder.state !== 'inactive') {
     try { recorder.stop(); } catch {}
