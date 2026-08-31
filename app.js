@@ -272,6 +272,7 @@ const state = {
   audioInFlightCount: 0,
   // v0.18.0: 無音位置で切るための状態
   silenceDetector: null,      // { silentMs(), db(), close() }
+  liveLastActivityAt: 0,      // Web Speech が最後に「音声あり」を示した時刻 (v0.18.4)
   chunkStartedAt: 0,          // 今のチャンクを開始した時刻
   chunkStartedAtSilence: true,// 今のチャンクの「頭」が無音の切れ目だったか（録音開始直後は真）
   pendingChunkEdges: null,    // onstop に渡す { startsAtSilence, endsAtSilence }
@@ -1679,6 +1680,9 @@ function createSilenceDetector(stream) {
   let lastDb = -99;
   let speechInChunk = false;   // いまのチャンクの中で発話らしい音量を見たか
   let longestSilentInChunk = 0; // 同上・いちばん長かった無音（診断用）
+  // チャンク全体の音量の振れ幅（診断用）。窓の値だけだと、そのチャンクに
+  // そもそも十分な差があったのかが分からない
+  let chunkMinDb = Infinity, chunkMaxDb = -Infinity;
 
   // 直近の窓の最小/最大。バケツ2本を回して「直近 4〜8 秒」を見る
   let curMin = Infinity, curMax = -Infinity;
@@ -1707,6 +1711,8 @@ function createSilenceDetector(stream) {
     if (db > DIGITAL_SILENCE_DB) {
       if (db < curMin) curMin = db;
       if (db > curMax) curMax = db;
+      if (db < chunkMinDb) chunkMinDb = db;
+      if (db > chunkMaxDb) chunkMaxDb = db;
       if (now - bucketStartedAt >= SILENCE_WINDOW_MS) {
         prevMin = curMin; prevMax = curMax;
         curMin = Infinity; curMax = -Infinity;
@@ -1748,8 +1754,16 @@ function createSilenceDetector(stream) {
     sawSpeechInChunk() { return speechInChunk; },
     /** いまのチャンクの中でいちばん長かった無音（ms・診断用） */
     longestSilentMsInChunk() { return longestSilentInChunk; },
+    /** そのチャンク全体での音量の振れ幅 [最小, 最大]（診断用） */
+    chunkRangeDb() {
+      return [Number.isFinite(chunkMinDb) ? chunkMinDb : -99,
+              Number.isFinite(chunkMaxDb) ? chunkMaxDb : -99];
+    },
     /** チャンクを切ったときに呼ぶ */
-    resetChunkSpeech() { speechInChunk = false; longestSilentInChunk = 0; },
+    resetChunkSpeech() {
+      speechInChunk = false; longestSilentInChunk = 0;
+      chunkMinDb = Infinity; chunkMaxDb = -Infinity;
+    },
     close() {
       clearInterval(timer);
       try { src.disconnect(); } catch {}
@@ -1804,12 +1818,50 @@ function decideChunkCut({ elapsed, minMs, maxMs, useSilenceCut, silentMs }) {
  *   最長無音 3000ms なのに強制で切れている → 区切りの判断がおかしい
  *   最長無音 0ms なのに黙っていた          → 検出器がおかしい
  */
-function silenceDiag() {
+/**
+ * 「何 ms 声が途切れているか」を、使える手段から選ぶ (v0.18.4)
+ *
+ * 音量だけに頼っていたら、実機で床-38dB / 天井-34dB という**差が4dBしかない**
+ * 音が来た。20秒の中に発話と3秒の沈黙が両方入っているのにこの差では、
+ * 大きい側と小さい側を区別できない（`autoGainControl:false` は要求済みなので、
+ * Chrome の外側 ── Windows の音声拡張やドライバ、マイク本体 ── で平坦化されている）。
+ *
+ * そこで Web Speech を第二の手段にする。並走している音声認識器が「いま声が
+ * 出ているか」を判断してくれるので、**音量が平坦でも効く**。
+ *
+ * 優先順位を明確にする（両方を混ぜない）:
+ *   1. 音量で判定できるなら音量（合成音で検証済みの経路）
+ *   2. 無理なら Web Speech（音量に依存しない）
+ *   3. どちらも無理なら 0 ＝ 最長秒数での強制区切り（v0.17 と同じ）
+ *
+ * @returns {{ms: number, source: 'level'|'webspeech'|'none'}}
+ */
+function pickSilentMs({ levelMs, levelCanJudge, webMs, webActive }) {
+  if (levelCanJudge) return { ms: levelMs || 0, source: 'level' };
+  if (webActive) return { ms: webMs || 0, source: 'webspeech' };
+  return { ms: 0, source: 'none' };
+}
+
+/** いま使える無音シグナルを集める */
+function currentSilenceSignal() {
   const d = state.silenceDetector;
-  if (!d) return '';
-  return `[床${d.floorDb().toFixed(0)} 天${d.peakDb().toFixed(0)} `
+  const webActive = !!state.liveRecognition && !!state.liveLastActivityAt;
+  return pickSilentMs({
+    levelMs: d ? d.silentMs() : 0,
+    levelCanJudge: !!d && d.canJudge(),
+    webMs: webActive ? Date.now() - state.liveLastActivityAt : 0,
+    webActive,
+  });
+}
+
+function silenceDiag(source) {
+  const d = state.silenceDetector;
+  if (!d) return `[検出器なし 採用=${source || '?'}]`;
+  const [lo, hi] = d.chunkRangeDb();
+  return `[窓 床${d.floorDb().toFixed(0)} 天${d.peakDb().toFixed(0)} `
+    + `/ チャンク全体 ${lo.toFixed(0)}〜${hi.toFixed(0)} (幅${(hi - lo).toFixed(0)}dB) `
     + `${d.canJudge() ? '判定可' : '判定不能'} 最長無音${d.longestSilentMsInChunk()}ms `
-    + `ctx=${d.ctxState()}]`;
+    + `採用=${source || '?'} ctx=${d.ctxState()}]`;
 }
 
 function shouldDropEmptyChunk(provisionalText, edges) {
@@ -1847,6 +1899,15 @@ async function startGeminiAudioRecording() {
     showMicDeniedGuide(e.message || e.name);
     return;
   }
+
+  // v0.18.4: 要求した制約が本当に効いているかは getSettings() でしか分からない。
+  // autoGainControl が true のままだと、静かになるとゲインが上がって暗騒音が
+  // 発話と同じ音量まで持ち上がり、無音が無音に見えなくなる
+  try {
+    const st = state.audioStream.getAudioTracks()[0]?.getSettings?.() || {};
+    diagLog.info(`マイク実設定 AGC=${st.autoGainControl} ノイズ抑制=${st.noiseSuppression} `
+      + `エコー除去=${st.echoCancellation} ${st.sampleRate || '?'}Hz`);
+  } catch (e) { /* getSettings 非対応でも録音は続ける */ }
 
   // v0.18.0: 無音位置で切るための検出器。作れなかった場合は null になり、
   // 従来どおりの固定間隔にフォールバックする（録音自体は止めない）。
@@ -1951,7 +2012,7 @@ async function startGeminiAudioRecording() {
   state.chunkStartedAt = Date.now();
   state.chunkStartedAtSilence = true;   // 録音開始直後は必ず「頭から」
 
-  const cutChunk = (endedAtSilence) => {
+  const cutChunk = (endedAtSilence, source) => {
     if (!state.mediaRecorder || state.mediaRecorder.state !== 'recording') return;
     state.pendingChunkEdges = {
       startsAtSilence: !!state.chunkStartedAtSilence,
@@ -1959,7 +2020,7 @@ async function startGeminiAudioRecording() {
       // 検出器が無いときは undefined のまま（＝判断材料なし）にしておく
       hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
       durationMs: Date.now() - state.chunkStartedAt,
-      diag: silenceDiag(),
+      diag: silenceDiag(source),
     };
     if (state.silenceDetector) state.silenceDetector.resetChunkSpeech();
     state.mediaRecorder.stop(); // onstop で送信＋再スタート
@@ -1967,12 +2028,13 @@ async function startGeminiAudioRecording() {
 
   state.audioChunkTimer = setInterval(() => {
     if (!state.mediaRecorder || state.mediaRecorder.state !== 'recording') return;
+    const sig = useSilenceCut ? currentSilenceSignal() : { ms: 0, source: 'none' };
     const cut = decideChunkCut({
       elapsed: Date.now() - state.chunkStartedAt,
       minMs, maxMs, useSilenceCut,
-      silentMs: useSilenceCut ? state.silenceDetector.silentMs() : 0,
+      silentMs: sig.ms,
     });
-    if (cut) cutChunk(cut === 'silence');
+    if (cut) cutChunk(cut === 'silence', sig.source);
   }, SILENCE_POLL_MS);
 
   // 時間しきい値（60秒経過）だけでも発火できるよう、ウォッチドッグを常駐させる
@@ -1989,13 +2051,13 @@ function stopGeminiAudioRecording() {
   state.mediaRecorder = null; // onstop の再スタートを抑止
   // 最後のチャンクの切り口。尻は検出器の実測に従う
   // （利用者が文の途中で停止したなら「強制」＝続きを作らせない）
+  const stopSig = currentSilenceSignal();
   state.pendingChunkEdges = {
     startsAtSilence: !!state.chunkStartedAtSilence,
-    endsAtSilence: !!(state.silenceDetector
-      && state.silenceDetector.silentMs() >= SILENCE_HOLD_LATE_MS),
+    endsAtSilence: stopSig.ms >= SILENCE_HOLD_LATE_MS,
     hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
     durationMs: state.chunkStartedAt ? Date.now() - state.chunkStartedAt : 0,
-    diag: silenceDiag(),
+    diag: silenceDiag(stopSig.source),
   };
   if (recorder && recorder.state !== 'inactive') {
     try { recorder.stop(); } catch {}
@@ -2037,11 +2099,15 @@ function buildLiveDisplayRecognition() {
 
   rec.onresult = (event) => {
     let interim = '';
+    let gotText = false;
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const r = event.results[i];
-      if (r.isFinal) state.liveFinals = (state.liveFinals || '') + r[0].transcript;
-      else interim += r[0].transcript;
+      if (r.isFinal) { state.liveFinals = (state.liveFinals || '') + r[0].transcript; gotText = true; }
+      else { interim += r[0].transcript; if (r[0].transcript) gotText = true; }
     }
+    // v0.18.4: 「いま声が出ているか」の記録。音量ではなく音声認識器の判断なので、
+    // マイク側のゲイン調整で音量が平坦化されていても効く
+    if (gotText) state.liveLastActivityAt = Date.now();
     // BG録音中は共有の #interim に書かない（表示中の別タブに漏れるため）
     if (isBgRecording()) els.interim.textContent = '';
     else els.interim.textContent = (state.liveFinals || '') + interim;
@@ -2073,6 +2139,7 @@ function startLiveDisplay() {
     return;
   }
   state.liveRecognition = rec;
+  state.liveLastActivityAt = Date.now();  // 0 のままだと開始直後に「無音」に見える
   try {
     rec.start();
     diagLog.info('リアルタイム表示 (Web Speech 並走) を開始');
