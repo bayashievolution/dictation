@@ -207,6 +207,10 @@ function notionRichTextFromNode(node) {
     if (tag === 'br') { items.push(...notionRichText('\n', ann)); return; }
     // チェックボックス自身は本文に出さない
     if (tag === 'input') return;
+    // v0.15.1: 入れ子のリストは親項目の本文に混ぜない。
+    // これをしないと <li>親<ul><li>子</li></ul></li> が「親子」という1行に潰れる。
+    // 入れ子は notionListBlocks が子ブロックとして別に組み立てる。
+    if (tag === 'ul' || tag === 'ol') return;
     const next = { ...(ann || {}) };
     if (tag === 'strong' || tag === 'b') next.bold = true;
     if (tag === 'em' || tag === 'i') next.italic = true;
@@ -240,6 +244,50 @@ const notionBlock = {
   divider: () => ({ object: 'block', type: 'divider', divider: {} }),
   toggle: (rich, children) => ({ object: 'block', type: 'toggle', toggle: { rich_text: rich, ...(children?.length ? { children } : {}) } }),
 };
+
+/** rich_text 配列が実質空か（改行・空白だけか） */
+function notionRichIsBlank(rich) {
+  return !rich.length || !rich.map(r => r.text.content).join('').trim();
+}
+
+/**
+ * ul / ol を Notion のリストブロック配列にする。入れ子は children として保持する。
+ *
+ * Notion は 1 リクエストで「ブロック + その子」の 1 段までしか入れ子を送れない。
+ * このアプリはペインを toggle にしてその中へ入れるので、
+ *   toggle → リスト項目 → 入れ子のリスト項目
+ * が上限。それより深いものは同じ段に並べて内容を落とさないようにする。
+ *
+ * @param {Element} listEl ul か ol
+ * @param {number} depth 0 = ペント直下のリスト
+ */
+function notionListBlocks(listEl, depth = 0) {
+  const make = listEl.tagName.toLowerCase() === 'ol' ? notionBlock.numbered : notionBlock.bulleted;
+  const out = [];
+  for (const li of Array.from(listEl.children)) {
+    if (li.tagName.toLowerCase() !== 'li') continue;
+
+    const rich = notionRichTextFromNode(li);   // 入れ子リストは除外済み
+    const kids = [];
+    for (const sub of Array.from(li.children)) {
+      const st = sub.tagName.toLowerCase();
+      if (st === 'ul' || st === 'ol') kids.push(...notionListBlocks(sub, depth + 1));
+    }
+
+    if (notionRichIsBlank(rich)) {
+      out.push(...kids);            // 本文が空の項目は捨てて、子だけ拾う
+      continue;
+    }
+    const block = make(rich);
+    if (kids.length && depth < 1) {
+      block[block.type].children = kids;
+      out.push(block);
+    } else {
+      out.push(block, ...kids);     // 深すぎる段は同じ高さに並べる
+    }
+  }
+  return out;
+}
 
 /**
  * このアプリのペインが持つ HTML を Notion ブロック配列に変換する。
@@ -278,10 +326,8 @@ function notionBlocksFromHtml(html) {
         return;
       }
       case 'ul':
-        for (const li of el.children) pushText(li, notionBlock.bulleted);
-        return;
       case 'ol':
-        for (const li of el.children) pushText(li, notionBlock.numbered);
+        blocks.push(...notionListBlocks(el, 0));
         return;
       case 'li':  // 親なしで裸の li が来た場合
         pushText(el, notionBlock.bulleted); return;

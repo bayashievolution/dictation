@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ばっさんディクテーション (β)",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "description": "【β版】リアルタイム文字起こし＋Gemini AI整形・要約・質問。Chromeサイドパネルで講義スライドと並べて使える。安定版と並行インストール可能。",
   "author": "bayashi",
   "permissions": [
