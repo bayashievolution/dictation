@@ -1947,6 +1947,73 @@ function silenceDiag(source) {
     + `採用=${source || '?'} ctx=${d.ctxState()}]`;
 }
 
+/* ───────── Web Speech の遅れによる二重表示 (v0.18.8) ─────────
+ *
+ * Web Speech の「確定」は遅れて届く。あるチャンクの音声に対応する文字が、
+ * そのチャンクを切った**後**に確定し、次のチャンクの「未確定分」として付く。
+ *
+ * 実機 2026-08-31 18:48:
+ *   チャンク3(16.0秒) … 「はい、3秒間黙りました…報告します。」の音声が入っている
+ *   チャンク4( 2.3秒) … 残りのほぼ沈黙。Gemini は空を返した
+ *   → チャンク3の音声に対応する Web Speech の文字がチャンク4に付いていたため、
+ *     v0.17.0 の「Gemini が空でも Web Speech の結果は捨てない」が働いて、
+ *     **すでに画面にある文がもう一度出た**
+ *
+ * 時刻で対応づけ直すことはできない（Web Speech は確定の元になった音声の時刻を
+ * 教えてくれない）。なので「すでに画面にあるものは出さない」で対処する。
+ * 消してよいと分かるのは**同じ内容が確かに残っているとき**だけなので、
+ * 取りこぼしにはならない。
+ */
+
+/** 比較用に表記のゆれを落とす（空白・句読点・注記を除く） */
+function normalizeForCompare(text) {
+  return (text || '')
+    .replace(/\[[^\]]*\]/g, '')                      // [Gemini は聞き取れず…] のような注記
+    .replace(/[\s\u3000]/g, '')
+    .replace(/[、。，．,.!?！？・「」『』（）()]/g, '');
+}
+
+/** 2文字ずつの並びの集合（語の切れ目が engine ごとに違っても比べられる） */
+function bigrams(str) {
+  const set = new Set();
+  for (let i = 0; i < str.length - 1; i++) set.add(str.slice(i, i + 2));
+  return set;
+}
+
+/**
+ * provisionalText が、すでに確定している末尾の文とほぼ同じ内容か
+ *
+ * Gemini と Web Speech では表記が違う（「はい、3秒間黙りました。」と
+ * 「はい 3秒間 黙りました」）ので、完全一致では判定できない。
+ * 2文字の並びがどれだけ重なるかで見る。
+ */
+function isDuplicateOfTail(provisionalText, tailText, threshold = 0.7) {
+  const a = normalizeForCompare(provisionalText);
+  const b = normalizeForCompare(tailText);
+  // 短すぎる文字列は偶然一致しうるので判定しない（取りこぼすより残すほうがマシ）
+  if (a.length < 8 || b.length < 8) return false;
+  if (b.includes(a)) return true;
+  const ba = bigrams(a), bb = bigrams(b);
+  if (ba.size === 0) return false;
+  let hit = 0;
+  for (const g of ba) if (bb.has(g)) hit++;
+  return hit / ba.size >= threshold;
+}
+
+/** 指定要素を除いた、直近の確定テキスト（末尾 maxChars 文字） */
+function confirmedTailText(excludeEl, maxChars = 400) {
+  const container = excludeEl && excludeEl.parentElement;
+  if (!container) return '';
+  const parts = [];
+  for (const child of container.children) {
+    if (child === excludeEl) continue;
+    const t = (child.innerText || '').trim();
+    if (t) parts.push(t);
+  }
+  const all = parts.join('\n');
+  return all.length > maxChars ? all.slice(-maxChars) : all;
+}
+
 function shouldDropEmptyChunk(provisionalText, edges) {
   if (provisionalText) return false;
   return !!edges && edges.hadSpeech === false;
@@ -2299,6 +2366,12 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
       // 沈黙だけのチャンク。従来はこれが「（音声不明瞭・再試行可）」として
       // 画面に残っていた（判断根拠は shouldDropEmptyChunk のコメント）
       diagLog.info('沈黙のみのチャンクだったので表示しない');
+      targetEl.remove();
+      persist();
+    } else if (isDuplicateOfTail(provisionalText, confirmedTailText(targetEl))) {
+      // v0.18.8: Web Speech の確定が遅れて次のチャンクに付いた分。
+      // 同じ内容がすでに画面にあるので出さない（判断根拠は上のコメント）
+      diagLog.info('Web Speech の確定が直前の内容と重複していたので表示しない');
       targetEl.remove();
       persist();
     } else {
