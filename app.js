@@ -1642,6 +1642,23 @@ const SILENCE_POLL_MS = 50;      // 判定の刻み
  * 強制区切りに落ちるほうが正しい。実害も小さい（そんなチャンクは中身が沈黙なので
  * 送信閾値で捨てられる）。喋り直せば復帰する。
  */
+/* どの周波数を見るか (v0.18.5)
+ *
+ * v0.18.4 まで全帯域の RMS を測っていた。実機で「発話と3秒の沈黙の差が4dB」に
+ * なったのは、外部のゲイン調整ではなく**測る場所が間違っていた**から。
+ *
+ *   エアコンの効いた部屋でノートPCの近くで小声 →
+ *   エアコンの低域（ゴーッという成分）が全帯域 RMS を支配し、
+ *   その上に乗っている小声の差が埋もれる
+ *
+ * 会場で問題になる暗騒音は、空調・プロジェクタの送風・PC のファンなど、
+ * たいてい低域が主。全帯域で測っている限りどの会場でも同じ失敗をする。
+ * なので**人の声の帯域だけ**を見る。電話帯域（300〜3400Hz）が定番で、
+ * 日本語の音声認識でもこの範囲に主要な情報が入る。
+ */
+const VOICE_BAND_LOW_HZ = 300;
+const VOICE_BAND_HIGH_HZ = 3400;
+
 const SILENCE_WINDOW_MS = 4000;       // 最小/最大を集めるバケツの長さ（窓は最大この2倍）
 const SILENCE_DYNAMIC_RANGE_DB = 10;  // 窓内の最大-最小がこれ未満なら判定しない
 // 完全なゼロ（-95dB 未満）は「静かな部屋」ではなく「まだ音が流れていない」。
@@ -1657,6 +1674,8 @@ function createSilenceDetector(stream) {
     src = ctx.createMediaStreamSource(stream);
     analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
+    // 既定 0.8 だと周波数データが平滑化され、短い切れ目が鈍る
+    analyser.smoothingTimeConstant = 0;
     src.connect(analyser);
     // 自動再生ポリシーで suspended のまま作られることがある。
     // そのままだと解析値が常にゼロになり、無音判定が一切効かなくなる
@@ -1675,9 +1694,16 @@ function createSilenceDetector(stream) {
     return null;
   }
 
-  const buf = new Float32Array(analyser.fftSize);
+  const buf = new Float32Array(analyser.fftSize);       // 時間領域（音が流れているかの確認用）
+  const freq = new Float32Array(analyser.frequencyBinCount); // 周波数領域（判定はこちら）
+  // 声の帯域に対応するビンの範囲を求めておく
+  const binHz = (ctx.sampleRate || 48000) / analyser.fftSize;
+  const binLo = Math.max(1, Math.floor(VOICE_BAND_LOW_HZ / binHz));
+  const binHi = Math.min(analyser.frequencyBinCount - 1, Math.ceil(VOICE_BAND_HIGH_HZ / binHz));
+
   let silentSinceMs = 0;    // 無音が始まった時刻（0 = いま無音ではない）
-  let lastDb = -99;
+  let lastDb = -99;      // 声の帯域（判定に使う値）
+  let lastWideDb = -99;  // 全帯域（比較用。v0.18.4 まではこちらで判定していた）
   let speechInChunk = false;   // いまのチャンクの中で発話らしい音量を見たか
   let longestSilentInChunk = 0; // 同上・いちばん長かった無音（診断用）
   // チャンク全体の音量の振れ幅（診断用）。窓の値だけだと、そのチャンクに
@@ -1698,17 +1724,30 @@ function createSilenceDetector(stream) {
   };
 
   const timer = setInterval(() => {
+    // 音がそもそも流れているか（時間領域）。完全なゼロなら「まだ来ていない」
     analyser.getFloatTimeDomainData(buf);
     let sum = 0;
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
     const rms = Math.sqrt(sum / buf.length);
-    const db = rms > 0 ? 20 * Math.log10(rms) : -99;
+    const wideDb = rms > 0 ? 20 * Math.log10(rms) : -99;
+
+    // 判定は声の帯域だけで行う（空調などの低域に埋もれさせない）
+    analyser.getFloatFrequencyData(freq);
+    let power = 0;
+    for (let i = binLo; i <= binHi; i++) {
+      const v = freq[i];
+      if (Number.isFinite(v)) power += Math.pow(10, v / 10);
+    }
+    const db = power > 0 ? 10 * Math.log10(power) : -99;
     lastDb = db;
+    lastWideDb = wideDb;
     const now = Date.now();
 
     // 完全なゼロは「まだ音が流れていない」。フロアの材料にしないし、
-    // 無音とも見なさない（材料にすると v0.18.2 のデッドロックが再発する）
-    if (db > DIGITAL_SILENCE_DB) {
+    // 無音とも見なさない（材料にすると v0.18.2 のデッドロックが再発する）。
+    // 判断は時間領域の広帯域値で行う（帯域を絞った値はゼロ入力でも -99 とは限らない）
+    const hasSignal = wideDb > DIGITAL_SILENCE_DB;
+    if (hasSignal) {
       if (db < curMin) curMin = db;
       if (db > curMax) curMax = db;
       if (db < chunkMinDb) chunkMinDb = db;
@@ -1720,8 +1759,8 @@ function createSilenceDetector(stream) {
       }
     }
 
-    const quiet = db > DIGITAL_SILENCE_DB && canJudge() && db < floorDb() + SILENCE_MARGIN_DB;
-    if (db > DIGITAL_SILENCE_DB && canJudge() && db >= floorDb() + SILENCE_DYNAMIC_RANGE_DB) {
+    const quiet = hasSignal && canJudge() && db < floorDb() + SILENCE_MARGIN_DB;
+    if (hasSignal && canJudge() && db >= floorDb() + SILENCE_DYNAMIC_RANGE_DB) {
       speechInChunk = true;
     }
 
@@ -1744,6 +1783,7 @@ function createSilenceDetector(stream) {
       return Date.now() - silentSinceMs;
     },
     db() { return lastDb; },
+    wideDb() { return lastWideDb; },
     floorDb() { const f = floorDb(); return Number.isFinite(f) ? f : -99; },
     peakDb() { const p = peakDb(); return Number.isFinite(p) ? p : -99; },
     /** 大きい側と小さい側の区別がついているか（診断用） */
@@ -1858,8 +1898,8 @@ function silenceDiag(source) {
   const d = state.silenceDetector;
   if (!d) return `[検出器なし 採用=${source || '?'}]`;
   const [lo, hi] = d.chunkRangeDb();
-  return `[窓 床${d.floorDb().toFixed(0)} 天${d.peakDb().toFixed(0)} `
-    + `/ チャンク全体 ${lo.toFixed(0)}〜${hi.toFixed(0)} (幅${(hi - lo).toFixed(0)}dB) `
+  return `[声帯域 窓${d.floorDb().toFixed(0)}〜${d.peakDb().toFixed(0)} `
+    + `全体${lo.toFixed(0)}〜${hi.toFixed(0)}(幅${(hi - lo).toFixed(0)}dB) `
     + `${d.canJudge() ? '判定可' : '判定不能'} 最長無音${d.longestSilentMsInChunk()}ms `
     + `採用=${source || '?'} ctx=${d.ctxState()}]`;
 }
