@@ -67,6 +67,67 @@ function buildNoInventionRule() {
 }
 
 /**
+ * チャンクの「切り口」をモデルに正直に伝えるブロックを作る (v0.18.0)
+ *
+ * v0.17.1 で「この音声は断片です」と教えたら捏造は止まったが、あれは全チャンクに
+ * 無条件で言っていた。v0.18.0 で無音位置を狙って切るようになった結果、
+ * 大半のチャンクは**文の切れ目で始まり、文の切れ目で終わる**ようになる。
+ * それを「断片だ」と言い続けるのは今度はこちらが嘘をついていることになり、
+ * 実際には最後まで聞こえている文まで途中で止めさせかねない。
+ *
+ * なので切り口の実態に合わせて言うことを変える。片側だけ強制的に切れた場合は
+ * その側だけ警告する。
+ *
+ * @param {{startsAtSilence?: boolean, endsAtSilence?: boolean}} [edges]
+ *   省略時は「両側とも不明」＝ v0.17.1 と同じ最大限の警告（後方互換）
+ */
+function buildChunkEdgeRule(edges) {
+  const head = edges && edges.startsAtSilence === true;
+  const tail = edges && edges.endsAtSilence === true;
+
+  if (head && tail) {
+    return [
+      '■ この音声の切り出しについて',
+      'これは長い録音の一部ですが、**前後とも無音の切れ目で区切られています。**',
+      '聞こえた範囲はそれ自体でひとまとまりになっているはずです。',
+      '- 聞こえたとおりに書く。前後を推測して足さない',
+    ].join('\n');
+  }
+
+  const lines = ['■ 最重要：この音声は「断片」です'];
+  if (!head && !tail) {
+    lines.push(
+      'これは長い録音を機械的に切り出したものです。',
+      '**文の途中から始まり、文の途中で終わることがあります。それが正常な入力です。**',
+    );
+  } else if (!head) {
+    lines.push(
+      'これは長い録音を機械的に切り出したもので、**文の途中から始まっている可能性があります。**',
+      '（終わりのほうは無音の切れ目なので、最後まで聞こえているはずです）',
+    );
+  } else {
+    lines.push(
+      'これは長い録音を機械的に切り出したもので、**文の途中で終わっている可能性があります。**',
+      '（始まりは無音の切れ目なので、頭から聞こえているはずです）',
+    );
+  }
+  if (!head) {
+    lines.push(
+      '- 途中から始まっていても、聞こえたとおりに書く。前を推測して補わない',
+      '  （例: 音声が「はないので大丈夫ですが」で始まるなら、そのまま書く。',
+      '   「実害」などの頭を勝手に足さない）',
+    );
+  }
+  if (!tail) {
+    lines.push(
+      '- 途中で終わっていても、**続きを作らない**。聞こえたところで止める',
+      '  （文として不完全なまま終わってよい。整った文にするために言葉を足さない）',
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
  * 生チャンクを Gemini で整形する
  * @param {object} args
  * @param {string} args.apiKey - Gemini API キー
@@ -532,7 +593,7 @@ async function chatWithGemini({ apiKey, contextSources, history, question }) {
  * @param {string} [args.contextHint]
  * @returns {Promise<string>}
  */
-async function transcribeAudioWithGemini({ apiKey, audioBlob, contextHint, sessionContext }) {
+async function transcribeAudioWithGemini({ apiKey, audioBlob, contextHint, sessionContext, edges }) {
   if (!apiKey) throw new Error('Gemini API キーが設定されていません');
   if (!audioBlob || audioBlob.size === 0) return '';
 
@@ -542,14 +603,7 @@ async function transcribeAudioWithGemini({ apiKey, audioBlob, contextHint, sessi
     'あなたは日本語音声認識と整形を同時に行う編集者です。',
     '以下のルールに従って、入力音声を文字起こしし、読みやすく整形してください。',
     '',
-    '■ 最重要：この音声は「断片」です',
-    'これは長い録音を一定時間で機械的に切り出したものです。',
-    '**文の途中から始まり、文の途中で終わるのが普通です。それが正常な入力です。**',
-    '- 途中から始まっていても、聞こえたとおりに書く。前を推測して補わない',
-    '  （例: 音声が「はないので大丈夫ですが」で始まるなら、そのまま書く。',
-    '   「実害」などの頭を勝手に足さない）',
-    '- 途中で終わっていても、**続きを作らない**。聞こえたところで止める',
-    '  （文として不完全なまま終わってよい。整った文にするために言葉を足さない）',
+    buildChunkEdgeRule(edges),
     '',
     '■ 整形のルール',
     '- 句読点と改行を適切に補完',

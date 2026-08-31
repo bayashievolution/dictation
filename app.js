@@ -128,6 +128,10 @@ const DEFAULT_SETTINGS = {
   audioDeviceId: '',
   audioChunkSec: 12,
   audioMinChunkBytes: 400, // 旧1200から感度↑。小さい発話（小声・短語）もGeminiへ送る
+  // v0.18.0: 無音位置での区切り。audioChunkSec は「最短」、audioChunkMaxSec は「最長」。
+  // 最短を過ぎたら次の無音の切れ目で切り、最長に達したら無音でなくても切る。
+  audioSilenceCut: true,
+  audioChunkMaxSec: 20,
   // v0.13.24: 旧 webspeechInterimDebounceMs / webspeechInterimOpacity (v0.13.9) は撤去。
   // 字幕ウィンドウ側の cap-para-interim を v0.13.17 で撤去済み・UI も v0.13.23 で
   // 削除済み。設定値だけ残しても読み手なしで意味ない。
@@ -266,6 +270,11 @@ const state = {
   audioChunks: [],
   audioChunkTimer: null,
   audioInFlightCount: 0,
+  // v0.18.0: 無音位置で切るための状態
+  silenceDetector: null,      // { isSilent(), db(), close() }
+  chunkStartedAt: 0,          // 今のチャンクを開始した時刻
+  chunkStartedAtSilence: true,// 今のチャンクの「頭」が無音の切れ目だったか（録音開始直後は真）
+  pendingChunkEdges: null,    // onstop に渡す { startsAtSilence, endsAtSilence }
 
   sessions: [],
   activeId: null,
@@ -426,6 +435,8 @@ const els = {
   modeGemini: document.getElementById('mode-gemini'),
   inputAudioDevice: document.getElementById('input-audio-device'),
   inputChunkSec: document.getElementById('input-chunk-sec'),
+  inputSilenceCut: document.getElementById('input-silence-cut'),
+  inputChunkMaxSec: document.getElementById('input-chunk-max-sec'),
   inputGeminiLiveDisplay: document.getElementById('input-gemini-live-display'),
   inputMinChunkBytes: document.getElementById('input-min-chunk-bytes'),
   // v0.13.24: 旧 v0.13.9 interim 設定 UI（input-webspeech-interim-debounce /
@@ -1560,6 +1571,135 @@ function stopRecording() {
 
 /* ───────── Gemini Audio recording mode ───────── */
 
+/* ───────── 無音検出（v0.18.0）─────────
+ *
+ * v0.17 まで、Gemini へ送るチャンクは setInterval で 12 秒ちょうどに切っていた。
+ * 喋っている真っ最中だろうと問答無用で切るので、
+ *
+ *   「実害 | はないので大丈夫ですが」   ← 単語の途中で切れる
+ *
+ * が普通に起きる。ここから v0.17.1（捏造）と v0.17.2（繋ぎ直し）の問題が生えていた。
+ * どちらも**切り方が乱暴なことの後始末**であって、根治ではない。
+ *
+ * さらに悪いことに、stop → start の再開には 40ms の空白があり、その間の音は
+ * どこにも記録されない。発話の途中で切ると、その 40ms 分の音が消える。
+ *
+ * なので「最短を過ぎたら、次の無音の切れ目で切る」に変える。無音の位置で切れば
+ * 40ms の空白も無音に落ちるので、音の欠落も同時に消える。
+ *
+ * ■ しきい値を固定値にしない理由
+ * このアプリの利用者は「小さい声を拾ってくれるから」Gemini モードを使っている。
+ * -40dB のような固定値にすると、静かな部屋の小声が丸ごと「無音」に落ちて、
+ * 発話の途中で切るという元の失敗に戻る。
+ * そこで**その場の暗騒音（ノイズフロア）を推定し、そこから何dB上か**で判定する。
+ * 推定の作り方は下の①②と isSilent() のコメントを参照（どれも合成音のテストで
+ * 実際に失敗を出してから足した対策で、思いつきの安全策ではない）。
+ */
+const SILENCE_MARGIN_DB = 6;     // ノイズフロアからこれだけ上までは「無音」とみなす
+const SILENCE_HOLD_MS = 350;     // これだけ continuous に無音が続いたら「切れ目」
+const SILENCE_POLL_MS = 50;      // 判定の刻み
+const SILENCE_CALIBRATE_MS = 1000; // 開始直後、暗騒音を実測する時間
+// フロアからこれだけ上の音を一度でも聞くまでは、無音判定を許さない。
+// 「静か」は相対的な概念なので、大きい側を知らないうちは判定できない。
+const SILENCE_SPEECH_MARGIN_DB = 10;
+
+function createSilenceDetector(stream) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  let ctx, analyser, src;
+  try {
+    ctx = new Ctx();
+    src = ctx.createMediaStreamSource(stream);
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    src.connect(analyser);
+    // 自動再生ポリシーで suspended のまま作られることがある。
+    // そのままだと解析値が常にゼロになり、無音判定が一切効かなくなる
+    // （＝最長秒数での強制区切りに落ちるだけなので致命的ではないが、機能しない）
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  } catch (e) {
+    console.warn('[silence] AudioContext を作れませんでした:', e);
+    try { ctx && ctx.close(); } catch {}
+    return null;
+  }
+
+  const buf = new Float32Array(analyser.fftSize);
+  let noiseFloorDb = null;  // 開始直後の実測で決める（固定値から始めない）
+  let silentSinceMs = 0;    // 無音が始まった時刻（0 = いま無音ではない）
+  let lastDb = -99;
+  let heardSpeech = false;  // フロアより明確に大きい音を聞いたことがあるか
+  const startedAt = Date.now();
+
+  const timer = setInterval(() => {
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    const rms = Math.sqrt(sum / buf.length);
+    const db = rms > 0 ? 20 * Math.log10(rms) : -99;
+    lastDb = db;
+
+    // ① 開始直後: その場の暗騒音を実測する。固定値(-60dB)から始めると、
+    //    うるさい部屋では暗騒音がずっと「発話」に見えて無音が一生見つからない。
+    if (noiseFloorDb === null || Date.now() - startedAt < SILENCE_CALIBRATE_MS) {
+      noiseFloorDb = noiseFloorDb === null ? db : Math.min(noiseFloorDb, db);
+      return;
+    }
+
+    const quiet = db < noiseFloorDb + SILENCE_MARGIN_DB;
+    if (db >= noiseFloorDb + SILENCE_SPEECH_MARGIN_DB) heardSpeech = true;
+
+    // ② フロアの学習は「静かだと判定できているとき」だけ行う。
+    //    常時追従させると、喋り続けたときにフロアが発話レベルまで持ち上がり、
+    //    発話そのものが無音に見えてしまう（＝発話の途中で切るという元の失敗に戻る）。
+    //    実測: 常時追従だと -25dB で1分喋り続けただけでフロアが -28dB まで上がった。
+    if (quiet) {
+      // 下がるときは速く（すぐ静かさに追従）、上がるときは遅く（空調などをゆっくり学習）
+      noiseFloorDb += (db - noiseFloorDb) * (db < noiseFloorDb ? 0.25 : 0.05);
+      if (!silentSinceMs) silentSinceMs = Date.now();
+    } else {
+      silentSinceMs = 0;
+    }
+  }, SILENCE_POLL_MS);
+
+  return {
+    /** SILENCE_HOLD_MS 以上ずっと静かなら true（＝ここで切ってよい） */
+    isSilent() {
+      // 喋っている最中に録音を開始すると、初期実測が発話レベルをフロアだと
+      // 思い込み、発話中ずっと「無音」に見える。そのまま切ると Gemini に
+      // 「きれいに切れた」と嘘を伝えることになるので、大きい側を一度も
+      // 聞いていないうちは判定しない（＝従来どおり最長秒数で切る）。
+      if (!heardSpeech) return false;
+      return silentSinceMs > 0 && (Date.now() - silentSinceMs) >= SILENCE_HOLD_MS;
+    },
+    db() { return lastDb; },
+    floorDb() { return noiseFloorDb === null ? -99 : noiseFloorDb; },
+    close() {
+      clearInterval(timer);
+      try { src.disconnect(); } catch {}
+      try { ctx.close(); } catch {}
+    },
+  };
+}
+
+/**
+ * 「いまチャンクを切るべきか」の判断 (v0.18.0)
+ *
+ *   0 ─────── minMs ─────────────── maxMs
+ *   |  絶対切らない  |  無音になったら切る  | 無音でなくても切る
+ *
+ * minMs 未満で切らないのは、短すぎるチャンクは文脈が無くて精度が落ちるから。
+ * maxMs で諦めるのは、ずっと喋り続けられたときにチャンクが無限に伸びて
+ * 画面が止まる（＆ Gemini の入力上限に当たる）のを防ぐため。
+ *
+ * @returns {null|'silence'|'forced'} null = まだ切らない
+ */
+function decideChunkCut({ elapsed, minMs, maxMs, useSilenceCut, isSilent }) {
+  if (elapsed >= maxMs) return 'forced';
+  if (!useSilenceCut) return null;          // 従来動作では minMs === maxMs なので上で切れる
+  if (elapsed < minMs) return null;
+  return isSilent ? 'silence' : null;
+}
+
 async function startGeminiAudioRecording() {
   if (!state.settings.apiKey) {
     alert('Gemini Audio モードは API キーが必要です');
@@ -1591,6 +1731,19 @@ async function startGeminiAudioRecording() {
     return;
   }
 
+  // v0.18.0: 無音位置で切るための検出器。作れなかった場合は null になり、
+  // 従来どおりの固定間隔にフォールバックする（録音自体は止めない）。
+  // 前回の分が残っていたら必ず閉じる（AudioContext はページあたりの生成数に
+  // 上限があり、漏らすと数回の録音で作れなくなる）
+  if (state.silenceDetector) {
+    try { state.silenceDetector.close(); } catch {}
+    state.silenceDetector = null;
+  }
+  if (state.audioChunkTimer) { clearInterval(state.audioChunkTimer); state.audioChunkTimer = null; }
+  state.silenceDetector = state.settings.audioSilenceCut !== false
+    ? createSilenceDetector(state.audioStream)
+    : null;
+
   let mimeType = 'audio/webm;codecs=opus';
   if (!MediaRecorder.isTypeSupported(mimeType)) {
     mimeType = 'audio/webm';
@@ -1614,10 +1767,12 @@ async function startGeminiAudioRecording() {
       if (blob.size > minBytes) {
         // 発話あり（と推定） → 長無音タイマーをリセット
         resetLongSilenceTimer();
-        diagLog.info(`音声チャンク送信 ${blob.size}B (>${minBytes})`);
+        const edges = state.pendingChunkEdges || { startsAtSilence: false, endsAtSilence: false };
+        diagLog.info(`音声チャンク送信 ${blob.size}B (>${minBytes}) `
+          + `切り口 頭=${edges.startsAtSilence ? '無音' : '強制'} 尻=${edges.endsAtSilence ? '無音' : '強制'}`);
         // 未確定分はここで確定（次のチャンクに持ち越さない）。
         // 送らなかったチャンクでは取り出さず、次まで溜め続ける
-        sendAudioChunkToGemini(blob, takeLiveFinals());
+        sendAudioChunkToGemini(blob, takeLiveFinals(), edges);
       } else {
         diagLog.info(`音声チャンクスキップ ${blob.size}B (<=${minBytes}, 無音判定)`);
       }
@@ -1626,7 +1781,14 @@ async function startGeminiAudioRecording() {
     if (state.isRecording && state.mediaRecorder === recorder) {
       setTimeout(() => {
         if (state.isRecording && recorder.state === 'inactive') {
-          try { recorder.start(); } catch (e) { console.warn('restart failed', e); }
+          try {
+            recorder.start();
+            // 次チャンクの「頭」は、直前のチャンクの「尻」と同じ切り口になる。
+            // 無音で切ったなら頭も無音始まり、強制で切ったなら文の途中から始まる。
+            state.chunkStartedAtSilence = !!(state.pendingChunkEdges
+              && state.pendingChunkEdges.endsAtSilence);
+            state.chunkStartedAt = Date.now();
+          } catch (e) { console.warn('restart failed', e); }
         }
       }, 40);
     }
@@ -1647,20 +1809,46 @@ async function startGeminiAudioRecording() {
   state.isRecording = true;
   state.shouldAutoRestart = true;
   state.recordingSessionId = state.activeId; // BG録音用に固定
-  diagLog.info(`録音開始 (Gemini) session=${state.recordingSessionId?.slice(-6)} chunkSec=${state.settings.audioChunkSec || 12}`);
+  diagLog.info(`録音開始 (Gemini) session=${state.recordingSessionId?.slice(-6)} `
+    + `最短=${state.settings.audioChunkSec || 12}秒 `
+    + (state.settings.audioSilenceCut !== false && state.silenceDetector
+        ? `最長=${state.settings.audioChunkMaxSec || 20}秒 (無音位置で区切る)`
+        : '(固定間隔)'));
   setRecordingUI(true);
   startContextExtractTimer();   // v0.16.1
   startLiveDisplay();           // v0.17.0
   setStatus('listening', '録音中 (Gemini)');
   resetLongSilenceTimer();
 
-  // チャンク区切り
-  const intervalMs = Math.max(5, Math.min(60, state.settings.audioChunkSec || 12)) * 1000;
+  // チャンク区切り（v0.18.0: 無音位置で切る。判断は decideChunkCut）
+  const minMs = Math.max(5, Math.min(60, state.settings.audioChunkSec || 12)) * 1000;
+  const useSilenceCut = state.settings.audioSilenceCut !== false && !!state.silenceDetector;
+  // 最長は最短より短くできない。既定は 20 秒
+  const maxMs = useSilenceCut
+    ? Math.max(minMs + 2000, Math.min(90, state.settings.audioChunkMaxSec || 20) * 1000)
+    : minMs;
+
+  state.chunkStartedAt = Date.now();
+  state.chunkStartedAtSilence = true;   // 録音開始直後は必ず「頭から」
+
+  const cutChunk = (endedAtSilence) => {
+    if (!state.mediaRecorder || state.mediaRecorder.state !== 'recording') return;
+    state.pendingChunkEdges = {
+      startsAtSilence: !!state.chunkStartedAtSilence,
+      endsAtSilence: !!endedAtSilence,
+    };
+    state.mediaRecorder.stop(); // onstop で送信＋再スタート
+  };
+
   state.audioChunkTimer = setInterval(() => {
-    if (state.mediaRecorder && state.mediaRecorder.state === 'recording') {
-      state.mediaRecorder.stop(); // onstop で送信＋再スタート
-    }
-  }, intervalMs);
+    if (!state.mediaRecorder || state.mediaRecorder.state !== 'recording') return;
+    const cut = decideChunkCut({
+      elapsed: Date.now() - state.chunkStartedAt,
+      minMs, maxMs, useSilenceCut,
+      isSilent: useSilenceCut && state.silenceDetector.isSilent(),
+    });
+    if (cut) cutChunk(cut === 'silence');
+  }, SILENCE_POLL_MS);
 
   // 時間しきい値（60秒経過）だけでも発火できるよう、ウォッチドッグを常駐させる
   if (state.midChunkWatchdog) clearInterval(state.midChunkWatchdog);
@@ -1674,8 +1862,18 @@ function stopGeminiAudioRecording() {
   }
   const recorder = state.mediaRecorder;
   state.mediaRecorder = null; // onstop の再スタートを抑止
+  // 最後のチャンクの切り口。尻は検出器の実測に従う
+  // （利用者が文の途中で停止したなら「強制」＝続きを作らせない）
+  state.pendingChunkEdges = {
+    startsAtSilence: !!state.chunkStartedAtSilence,
+    endsAtSilence: !!(state.silenceDetector && state.silenceDetector.isSilent()),
+  };
   if (recorder && recorder.state !== 'inactive') {
     try { recorder.stop(); } catch {}
+  }
+  if (state.silenceDetector) {
+    try { state.silenceDetector.close(); } catch {}
+    state.silenceDetector = null;
   }
   if (state.audioStream) {
     state.audioStream.getTracks().forEach(t => t.stop());
@@ -1776,7 +1974,7 @@ function takeLiveFinals() {
   return t;
 }
 
-async function sendAudioChunkToGemini(blob, provisionalText = '') {
+async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) {
   state.audioInFlightCount++;
   const container = getWriteContainer();
   const inBg = container !== els.confirmed;
@@ -1802,6 +2000,7 @@ async function sendAudioChunkToGemini(blob, provisionalText = '') {
       sessionContext: getSessionContextForAi(),
       audioBlob: blob,
       contextHint: getContextForGemini(),
+      edges,
     });
     if (text && text.trim()) {
       // Geminiオーディオ経由の短チャンクは `.short-refined` とマーク。
@@ -4725,6 +4924,8 @@ function openSettings() {
     els.modeWebSpeech.checked = true;
   }
   els.inputChunkSec.value = state.settings.audioChunkSec || 12;
+  if (els.inputSilenceCut) els.inputSilenceCut.checked = state.settings.audioSilenceCut !== false;
+  if (els.inputChunkMaxSec) els.inputChunkMaxSec.value = state.settings.audioChunkMaxSec || 20;
   if (els.inputGeminiLiveDisplay) els.inputGeminiLiveDisplay.checked = state.settings.geminiLiveDisplay !== false;
   if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
   if (els.inputWsCommitSec) {
@@ -4787,6 +4988,14 @@ function saveSettingsFromForm() {
   state.settings.inputMode = els.modeGemini.checked ? 'gemini-audio' : 'web-speech';
   state.settings.audioDeviceId = els.inputAudioDevice ? els.inputAudioDevice.value : '';
   state.settings.audioChunkSec = Math.max(5, Math.min(60, Number(els.inputChunkSec.value) || 12));
+  if (els.inputSilenceCut) state.settings.audioSilenceCut = els.inputSilenceCut.checked;
+  if (els.inputChunkMaxSec) {
+    // 最長は最短より短くできない（短いと無音を探す余地が消える）
+    state.settings.audioChunkMaxSec = Math.max(
+      state.settings.audioChunkSec + 2,
+      Math.min(90, Number(els.inputChunkMaxSec.value) || 20),
+    );
+  }
   if (els.inputGeminiLiveDisplay) state.settings.geminiLiveDisplay = els.inputGeminiLiveDisplay.checked;
   if (els.inputMinChunkBytes) state.settings.audioMinChunkBytes = Math.max(100, Math.min(5000, Number(els.inputMinChunkBytes.value) || 400));
   if (els.inputWsCommitSec) {

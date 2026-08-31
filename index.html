@@ -416,7 +416,7 @@
                 </small>
               </div>
               <label class="field">
-                <span class="field-label">Geminiチャンク間隔（秒）</span>
+                <span class="field-label">最短何秒で区切るか（秒）</span>
                 <div class="number-stepper">
                   <input id="input-chunk-sec" type="number" min="5" max="60" step="1" />
                   <div class="number-stepper-btns">
@@ -424,7 +424,29 @@
                     <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
                   </div>
                 </div>
-                <small class="field-hint">この秒数ごとに音声を Gemini へ送信。長いほど精度アップ・遅延増、短いほど反応速い。既定 12 秒。</small>
+                <small class="field-hint">この秒数<strong>より前では切りません</strong>。長いほど精度アップ・遅延増、短いほど反応速い。既定 12 秒。</small>
+              </label>
+              <label class="field field-row">
+                <input id="input-silence-cut" type="checkbox" />
+                <span>無音の切れ目で区切る</span>
+              </label>
+              <div class="field">
+                <small class="field-hint">
+                  最短秒数を過ぎたあと、話が途切れたところを狙って区切ります。
+                  文の途中で切れなくなるので、言っていない言葉が足される不具合が起きにくくなります。
+                  オフにすると、従来どおり最短秒数ちょうどで区切ります。
+                </small>
+              </div>
+              <label class="field">
+                <span class="field-label">最長何秒まで待つか（秒）</span>
+                <div class="number-stepper">
+                  <input id="input-chunk-max-sec" type="number" min="7" max="90" step="1" />
+                  <div class="number-stepper-btns">
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-max-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-max-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">ずっと喋り続けて無音が来ない場合、この秒数で諦めて区切ります。既定 20 秒。</small>
               </label>
               <label class="field">
                 <span class="field-label">音声送信しきい値（バイト）</span>
