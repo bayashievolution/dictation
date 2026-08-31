@@ -672,6 +672,23 @@
           </div>
         </div>
 
+        <div class="field">
+          <div class="diag-log-head">
+            <span class="field-label">自動で拾った内容</span>
+            <div class="diag-log-actions">
+              <button type="button" id="btn-context-adopt-auto" class="pane-btn" title="拾った語を上の欄に移して自分で直せるようにする">
+                <span data-icon="check"></span><span>上の欄に取り込む</span>
+              </button>
+            </div>
+          </div>
+          <div id="auto-context-box" class="auto-context-box"></div>
+          <small class="field-hint">
+            録音中に記録から自動で拾っています。誤変換をそのまま覚えないよう、
+            単純な頻度ではなく AI に「正しい表記」を判断させています。
+            おかしければ取り込んで直してください（<strong>上の欄が最終権限</strong>です）
+          </small>
+        </div>
+
         <label class="field field-row">
           <input id="input-context-default" type="checkbox" />
           <span>この内容を新しいタブの初期値にする</span>
@@ -756,9 +773,9 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.16.0"></script>
-  <script src="gemini.js?v=0.16.0"></script>
-  <script src="notion.js?v=0.16.0"></script>
-  <script src="app.js?v=0.16.0"></script>
+  <script src="icons.js?v=0.16.1"></script>
+  <script src="gemini.js?v=0.16.1"></script>
+  <script src="notion.js?v=0.16.1"></script>
+  <script src="app.js?v=0.16.1"></script>
 </body>
 </html>

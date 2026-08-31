@@ -398,6 +398,8 @@ const els = {
   btnContextFromMemo: document.getElementById('btn-context-from-memo'),
   contextMemoResult: document.getElementById('context-memo-result'),
   btnContextSave: document.getElementById('btn-context-save'),
+  autoContextBox: document.getElementById('auto-context-box'),
+  btnContextAdoptAuto: document.getElementById('btn-context-adopt-auto'),
   notionSettingsGroup: document.getElementById('notion-settings-group'),
   inputNotionToken: document.getElementById('input-notion-token'),
   btnNotionTest: document.getElementById('btn-notion-test'),
@@ -1423,6 +1425,19 @@ function showMicDeniedGuide(detail) {
   ].join('\n'));
 }
 
+/** 録音中、一定間隔で文脈を拾い直すタイマー (v0.16.1) */
+function startContextExtractTimer() {
+  stopContextExtractTimer();
+  // 起動直後は記録が短くて意味がないので、最初の実行も間隔ぶん待つ
+  state.contextExtractTimer = setInterval(() => { refreshAutoContext(); }, 30 * 1000);
+}
+function stopContextExtractTimer() {
+  if (state.contextExtractTimer) {
+    clearInterval(state.contextExtractTimer);
+    state.contextExtractTimer = null;
+  }
+}
+
 async function startRecording() {
   if (state.settings.inputMode === 'gemini-audio') {
     return startGeminiAudioRecording();
@@ -1453,6 +1468,7 @@ async function startRecording() {
   try {
     state.recognition.start();
     setRecordingUI(true);
+    startContextExtractTimer();   // v0.16.1
     resetLongSilenceTimer();
     // v0.13.14: Web Speech 強制 commit タイマーを起動（commitSec=0 なら何もしない）
     restartWebSpeechCommitTimer();
@@ -1491,6 +1507,10 @@ function stopRecording() {
   }
   setStatus('idle', '停止');
   setRecordingUI(false);
+  // v0.16.1: 文脈の自動抽出を止め、最後の内容で1回だけ更新しておく
+  // （次にこのタブで録音を再開したとき、いきなり文脈が効く）
+  stopContextExtractTimer();
+  refreshAutoContext({ force: true });
   clearAllTimers();
   flushPendingToGemini().finally(async () => {
     // 録音停止時に、残っている short-refined パラグラフを強制的に
@@ -1609,6 +1629,7 @@ async function startGeminiAudioRecording() {
   state.recordingSessionId = state.activeId; // BG録音用に固定
   diagLog.info(`録音開始 (Gemini) session=${state.recordingSessionId?.slice(-6)} chunkSec=${state.settings.audioChunkSec || 12}`);
   setRecordingUI(true);
+  startContextExtractTimer();   // v0.16.1
   setStatus('listening', '録音中 (Gemini)');
   resetLongSilenceTimer();
 
@@ -4241,14 +4262,134 @@ function enableDragSort(list, { itemSelector, idAttr = 'pane-id', onReorder }) {
  * Web Speech モードでも整形の段で誤変換を直せることがあるため。
  */
 
-/** Gemini に渡す文脈。中身が空なら undefined を返し、プロンプトに何も足さない */
+/** 「改行/カンマ/読点」区切りの文字列 → 語の配列 */
+function splitTerms(text) {
+  return String(text || '').split(/[\n,、]/).map(t => t.trim()).filter(Boolean);
+}
+
+/**
+ * Gemini に渡す文脈。手入力と自動抽出をまとめる。
+ * 中身が空なら undefined を返し、プロンプトに何も足さない（従来と同じ挙動になる）。
+ *
+ * 手入力を先に並べる。やっさんが書いた語が最終権限で、
+ * 自動抽出はその補いという位置づけ（v0.16.1）。
+ */
 function getSessionContextForAi() {
   const s = getActiveSession();
   const c = s?.context;
   if (!c) return undefined;
-  const has = (c.field || '').trim() || (c.speakers || '').trim() || (c.terms || '').trim();
-  if (!has) return undefined;
-  return { field: c.field, speakers: c.speakers, terms: c.terms };
+
+  const manual = splitTerms(c.terms);
+  const auto = (s.autoContext?.terms || []).filter(t => !manual.includes(t));
+  const terms = manual.concat(auto);
+
+  const ctx = {
+    field: (c.field || '').trim(),
+    speakers: (c.speakers || '').trim(),
+    terms: terms.join('、'),
+    topicPath: s.autoContext?.topicPath || [],
+    flow: s.autoContext?.flow || '',
+  };
+  const has = ctx.field || ctx.speakers || ctx.terms || ctx.topicPath.length || ctx.flow;
+  return has ? ctx : undefined;
+}
+
+/* ───────── 文脈の自動抽出 (v0.16.1) ─────────
+ *
+ * メモが空でも文脈を効かせるため、記録が溜まってきたら語彙と議題を拾い直す。
+ * 録音中に一定間隔で走らせ、停止時にも1回走らせる。
+ */
+
+const CONTEXT_EXTRACT_INTERVAL_MS = 120 * 1000;   // 2分ごと
+let contextExtractInFlight = false;
+
+/** メモの見出し・箇条書きだけを取り出す（抽出の手がかりとして最優先で渡す） */
+function getMemoOutlineText() {
+  const lines = [];
+  els.memo.querySelectorAll('h1, h2, h3, li, .task-item').forEach(el => {
+    const t = (el.innerText || '').trim();
+    if (t && t.length <= 60) lines.push(t);
+  });
+  return lines.slice(0, 40).join('\n');
+}
+
+/**
+ * 記録から語彙と議題を拾って session.autoContext を更新する。
+ * @param {object} [opts]
+ * @param {boolean} [opts.force] - 間隔を無視して実行（録音停止時など）
+ */
+async function refreshAutoContext(opts = {}) {
+  if (contextExtractInFlight) return;
+  if (!state.settings.aiEnabled || !state.settings.apiKey) return;
+
+  const session = getActiveSession();
+  if (!session) return;
+  const auto = session.autoContext || (session.autoContext = { terms: [], topicPath: [], flow: '', updatedAt: 0 });
+  if (!opts.force && Date.now() - (auto.updatedAt || 0) < CONTEXT_EXTRACT_INTERVAL_MS) return;
+
+  // 末尾側だけ渡す。全文を毎回送ると長くなるうえ、いま何の話かは直近で決まる
+  const full = getConfirmedText();
+  if (!full || full.length < 200) return;
+  const tail = full.slice(-4000);
+
+  contextExtractInFlight = true;
+  try {
+    const out = await extractContextWithGemini({
+      apiKey: state.settings.apiKey,
+      transcript: tail,
+      memoOutline: getMemoOutlineText(),
+      knownTerms: splitTerms(session.context?.terms),
+    });
+    // 非同期の間にセッションが閉じられている可能性がある
+    const still = state.sessions.find(x => x.id === session.id);
+    if (!still) return;
+    still.autoContext = {
+      terms: out.terms,
+      topicPath: out.topicPath,
+      flow: out.flow,
+      updatedAt: Date.now(),
+    };
+    persistSessions();
+    diagLog.info(`文脈を更新: 語${out.terms.length}件 / 議題「${out.topicPath.join(' > ') || '—'}」`);
+    // 文脈モーダルを開いていたら表示も更新する
+    if (els.contextModal && !els.contextModal.classList.contains('hidden')) renderAutoContext(still);
+  } catch (e) {
+    console.warn('[context] 自動抽出に失敗:', e.message);
+  } finally {
+    contextExtractInFlight = false;
+  }
+}
+
+/** 文脈モーダルの「自動で拾った内容」欄を描く */
+function renderAutoContext(session) {
+  if (!els.autoContextBox) return;
+  const a = session?.autoContext;
+  const hasAny = a && (a.terms?.length || a.topicPath?.length || a.flow);
+  if (!hasAny) {
+    els.autoContextBox.textContent = '（まだありません。録音が2〜3分進むと自動で埋まります）';
+    els.btnContextAdoptAuto.disabled = true;
+    return;
+  }
+  const lines = [];
+  if (a.topicPath?.length) lines.push(`いまの議題: ${a.topicPath.join(' > ')}`);
+  if (a.flow) lines.push(`流れ: ${a.flow}`);
+  if (a.terms?.length) lines.push(`拾った語: ${a.terms.join('、')}`);
+  els.autoContextBox.textContent = lines.join('\n');
+  els.btnContextAdoptAuto.disabled = !a.terms?.length;
+}
+
+/** 自動で拾った語を、手入力の欄に移す（以後そちらが最終権限になる） */
+function adoptAutoTerms() {
+  const s = getActiveSession();
+  const auto = s?.autoContext?.terms || [];
+  if (!auto.length) return;
+  const existing = splitTerms(els.inputContextTerms.value);
+  const added = auto.filter(t => !existing.includes(t));
+  els.inputContextTerms.value = existing.concat(added).join('\n');
+  els.contextMemoResult.textContent = added.length
+    ? `自動で拾った語から ${added.length}件を追加しました。ここで直せます`
+    : 'すでにすべて登録済みでした';
+  els.contextMemoResult.className = 'field-hint notion-test-result ' + (added.length ? 'is-ok' : 'is-note');
 }
 
 function openContextModal() {
@@ -4260,6 +4401,8 @@ function openContextModal() {
   els.inputContextTerms.value = s.context.terms || '';
   els.inputContextDefault.checked = false;
   els.contextMemoResult.textContent = '';
+  els.contextMemoResult.className = 'field-hint';
+  renderAutoContext(s);
   els.contextModal.classList.remove('hidden');
   els.inputContextField.focus();
 }
@@ -4584,6 +4727,9 @@ function initSessions() {
     if (!Array.isArray(s.chat)) s.chat = [];
     // v0.16.0: 文脈が無い古いセッションに空の器を足す
     if (!s.context || typeof s.context !== 'object') s.context = { field: '', speakers: '', terms: '' };
+    if (!s.autoContext || typeof s.autoContext !== 'object') {
+      s.autoContext = { terms: [], topicPath: [], flow: '', updatedAt: 0 };
+    }
   }
   state.activeId = localStorage.getItem(ACTIVE_TAB_KEY);
   if (!Array.isArray(state.sessions) || state.sessions.length === 0) {
@@ -4627,6 +4773,8 @@ function createSession({ activate = true, title = null, skipSave = false } = {})
       speakers: state.settings.defaultContextSpeakers || '',
       terms: state.settings.defaultContextTerms || '',
     },
+    // v0.16.1: 記録から自動で拾った語彙と議題。手入力とは別に持ち、手入力を優先する
+    autoContext: { terms: [], topicPath: [], flow: '', updatedAt: 0 },
   };
   state.sessions.push(session);
   if (activate) state.activeId = id;
@@ -5332,6 +5480,7 @@ if (els.btnContext) {
   els.btnContext.addEventListener('click', openContextModal);
   els.btnContextSave.addEventListener('click', saveContextModal);
   els.btnContextFromMemo.addEventListener('click', importContextFromMemo);
+  els.btnContextAdoptAuto.addEventListener('click', adoptAutoTerms);
   els.contextModal.querySelectorAll('[data-dismiss]').forEach(b => {
     b.addEventListener('click', closeContextModal);
   });

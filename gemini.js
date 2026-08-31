@@ -174,7 +174,7 @@ function _stripThinkingArtifacts(text) {
   return t;
 }
 
-async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800 } = {}) {
+async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800, skipSanitize = false } = {}) {
   // 思考モードの出力混入を防ぐため、明示的に無効化。
   // thinkingBudget:0 だけだとまれに漏れるので includeThoughts:false も併用。
   if (!body.generationConfig) body.generationConfig = {};
@@ -222,7 +222,11 @@ async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800 } =
         }
         throw err;
       }
-      // 思考モードの漏れを保険サニタイズ
+      // 思考モードの漏れを保険サニタイズ。
+      // v0.16.1: JSON を期待する呼び出しでは通さない。このサニタイザは散文向けで、
+      // 「同じ短句が15回以上続いたら省略マーカーに置換」する処理を含むため、
+      // 構造が決まっている JSON に当てると壊れて parse できなくなる。
+      if (skipSanitize) return text;
       const cleaned = _stripThinkingArtifacts(text);
       if (cleaned !== text && window.diagLog) {
         window.diagLog.info(`Gemini 思考トークンを後処理で除去 (${text.length}→${cleaned.length}字)`);
@@ -679,6 +683,96 @@ async function refineMemoSelectionWithGemini({ apiKey, text }) {
   return (out || '').trim();
 }
 
+/**
+ * 文字起こしの途中経過から「語彙」と「いまの議題」を拾う (v0.16.1)
+ *
+ * メモが空でも文脈を効かせるための自動抽出。ただし素朴にやると危ない。
+ *
+ * ■ 自己強化ループという罠
+ * 文字起こし自体に誤変換が含まれる。頻度で語を拾うと、序盤の誤り（例「不登校」→
+ * 「不当校」）をそのまま語彙として送り返し、**以降ずっとその誤りを書き続ける**。
+ * 誤りが自分を強化する。
+ * → 頻度カウントではなく、モデルに「この分野の用語として正しい表記」を
+ *   判断させる。明らかな誤変換は直した形で返させる。
+ *
+ * ■ 出力は JSON
+ * terms は語だけ（文を入れない）。topicPath は 親>子>孫 の最大3階層。
+ *
+ * @param {object} args
+ * @param {string} args.apiKey
+ * @param {string} args.transcript - これまでの文字起こし（末尾側を渡す想定）
+ * @param {string} [args.memoOutline] - メモの見出し・箇条書き（あれば最優先の手がかり）
+ * @param {string[]} [args.knownTerms] - すでに確定している語（やっさんが書いたもの）
+ * @returns {Promise<{terms:string[], topicPath:string[], flow:string}>}
+ */
+async function extractContextWithGemini({ apiKey, transcript, memoOutline, knownTerms }) {
+  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  const body_text = (transcript || '').trim();
+  if (body_text.length < 200) return { terms: [], topicPath: [], flow: '' };
+
+  const instruction = [
+    'あなたは会議・講義の記録から「用語」と「議題の位置」を抜き出す担当です。',
+    '出力は JSON のみ。前置き・説明・コードフェンスは付けない。',
+    '',
+    '形式:',
+    '{"terms": ["語1","語2"], "topicPath": ["大項目","中項目","小項目"], "flow": "一文"}',
+    '',
+    'terms のルール:',
+    '- この分野の専門用語・固有名詞・人名・製品名だけ。最大20語',
+    '- 文や説明を入れない。語だけ（各20字以内）',
+    '- **音声認識の誤変換と思われるものは、正しい表記に直して入れる**',
+    '  （例「不当校」と書かれていても、文脈から「不登校」が正しいならそう入れる）',
+    '- 一般語（会議、今日、先生、みなさん等）は入れない',
+    '',
+    'topicPath のルール:',
+    '- いま話している議題の位置を、大→中→小の最大3階層で。分かる範囲でよく、1〜2階層でもよい',
+    '- 記録に無い議題を創作しない',
+    '',
+    'flow のルール:',
+    '- 話がどう移ってきたかを一文で。例「制度の説明から具体的な事例の話に移った」',
+    '',
+    '判断材料が足りなければ、その項目は空配列・空文字列にする。憶測で埋めない。',
+  ].join('\n');
+
+  const parts = [];
+  if (memoOutline && memoOutline.trim()) {
+    parts.push('【事前に人が書いた見出し（最も信頼できる手がかり）】', memoOutline.trim(), '');
+  }
+  if (knownTerms && knownTerms.length) {
+    parts.push('【すでに登録済みの語（重複して返さなくてよい）】', knownTerms.join('、'), '');
+  }
+  parts.push('【これまでの記録】', body_text);
+
+  const body = {
+    system_instruction: { parts: [{ text: instruction }] },
+    contents: [{ role: 'user', parts: [{ text: parts.join('\n') }] }],
+    generationConfig: {
+      temperature: 0.1,          // 抽出なので揺れは要らない
+      maxOutputTokens: 1024,
+      responseMimeType: 'application/json',
+    },
+  };
+
+  const raw = await _callGemini(body, apiKey, { maxRetries: 1, skipSanitize: true });
+  let out;
+  try {
+    out = JSON.parse((raw || '').trim());
+  } catch (e) {
+    console.warn('[context] JSON として読めませんでした:', (raw || '').slice(0, 200));
+    return { terms: [], topicPath: [], flow: '' };
+  }
+
+  // モデルの出力はそのまま信じない。形と長さをこちらで詰める
+  const terms = Array.isArray(out.terms) ? out.terms : [];
+  const topicPath = Array.isArray(out.topicPath) ? out.topicPath : [];
+  return {
+    terms: terms.map(t => String(t || '').trim()).filter(t => t && t.length <= 20).slice(0, 20),
+    topicPath: topicPath.map(t => String(t || '').trim()).filter(Boolean).slice(0, 3),
+    flow: String(out.flow || '').trim().slice(0, 120),
+  };
+}
+
+window.extractContextWithGemini = extractContextWithGemini;
 window.refineWithGemini = refineWithGemini;
 window.summarizeWithGemini = summarizeWithGemini;
 window.generateTitleWithGemini = generateTitleWithGemini;

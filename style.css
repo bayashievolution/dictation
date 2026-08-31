@@ -2903,3 +2903,17 @@ body.chat-active #zoom-bar {
   color: var(--accent);
   opacity: 0.85;
 }
+
+/* 文脈モーダル: 自動で拾った内容 v0.16.1 */
+.auto-context-box {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.8;
+  white-space: pre-line;
+  color: var(--text-muted);
+  max-height: 140px;
+  overflow-y: auto;
+}
