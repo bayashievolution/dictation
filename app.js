@@ -138,6 +138,8 @@ const DEFAULT_SETTINGS = {
    * 同意の場面は普通にあるので、こちらを既定にする。
    * この設定が制御するのは「端末に残すか」だけで、Gemini モードは live の
    * 時点ですでに音声を Google に送っている（設定 UI にもそう書く）。 */
+  // v0.20.0: 自作の語彙辞書 [{id, name, terms[]}]。プリセットは term-dicts.js 側
+  termDicts: [],
   audioKeepRecording: false,
   audioRetention: 'repass',   // repass / close / 1d / 7d / manual
   // 音声認識用途では 128kbps は過剰。64kbps なら 90分で約43MB
@@ -464,6 +466,14 @@ const els = {
   inputWsSliceChars: document.getElementById('input-webspeech-slice-chars'),
   inputWsSilenceStopSec: document.getElementById('input-webspeech-silence-stop-sec'),
   zoomBar: document.getElementById('zoom-bar'),
+  dictBar: document.getElementById('dict-bar'),
+  dictToggle: document.getElementById('dict-toggle'),
+  dictLabel: document.getElementById('dict-label'),
+  dictMenu: document.getElementById('dict-menu'),
+  dictMenuList: document.getElementById('dict-menu-list'),
+  dictMenuAuto: document.getElementById('dict-menu-auto'),
+  dictMenuClose: document.getElementById('dict-menu-close'),
+  dictMenuDetail: document.getElementById('dict-menu-detail'),
   zoomRange: document.getElementById('zoom-range'),
   zoomPercent: document.getElementById('zoom-percent'),
   zoomMinus: document.getElementById('zoom-minus'),
@@ -5216,14 +5226,194 @@ function splitTerms(text) {
  * 手入力を先に並べる。やっさんが書いた語が最終権限で、
  * 自動抽出はその補いという位置づけ（v0.16.1）。
  */
+/* ───────── 語彙辞書のフッター (v0.20.0) ─────────
+ *
+ * 「いま何の語彙が効いているか」が常に見えていないと、間違ったまま録り続けてしまう。
+ * 右下の拡大ルーラーと対になる左下のピルに出す。
+ *
+ * 辞書を選んでも**自動辞書は消さない**。20分喋ったあとの自動辞書は
+ * 実際に話された語からできているので価値が高く、捨てるのは損。
+ * 「いまの自動辞書 ＋ 選んだ辞書」で合成する（mergeTermSources）。
+ */
+
+/** いま適用中の辞書 id（プリセット・自作の混在） */
+function getActiveDictIds() {
+  return getActiveSession()?.context?.dictIds || [];
+}
+
+/** フッターのピルを描き直す */
+function renderDictBar() {
+  if (!els.dictLabel) return;
+  const s = getActiveSession();
+  const ids = getActiveDictIds();
+  const names = ids
+    .map(id => findTermDict(id, state.settings.termDicts))
+    .filter(Boolean)
+    .map(d => d.name);
+  const manualCount = splitTerms(s?.context?.terms).length;
+  const autoCount = (s?.autoContext?.terms || []).length;
+
+  els.dictLabel.textContent = describeTermState({ dictNames: names, manualCount, autoCount });
+  if (els.dictBar) {
+    els.dictBar.classList.toggle('has-dict', names.length > 0 || manualCount > 0);
+  }
+}
+
+/** メニューの中身を描き直す */
+function renderDictMenu() {
+  if (!els.dictMenuList) return;
+  const ids = getActiveDictIds();
+  const user = state.settings.termDicts || [];
+  els.dictMenuList.innerHTML = '';
+
+  const add = (d, isUser) => {
+    const on = ids.includes(d.id);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dict-item' + (on ? ' on' : '');
+    btn.innerHTML = `<span class="dict-check">${on ? '✓' : ''}</span>`
+      + `<span class="dict-item-body">`
+      + `<span class="dict-item-name"></span>`
+      + `<span class="dict-item-sub"></span></span>`;
+    btn.querySelector('.dict-item-name').textContent = d.name;
+    btn.querySelector('.dict-item-sub').textContent =
+      `${(d.terms || []).length}語${d.hint ? ' ・ ' + d.hint : ''}${isUser ? ' ・ 自作' : ''}`;
+    btn.addEventListener('click', () => toggleDict(d.id));
+    els.dictMenuList.appendChild(btn);
+  };
+
+  for (const d of TERM_PRESETS) add(d, false);
+  for (const d of user) add(d, true);
+
+  const autoCount = (getActiveSession()?.autoContext?.terms || []).length;
+  if (els.dictMenuAuto) {
+    els.dictMenuAuto.textContent = autoCount
+      ? `自動辞書: ${autoCount}語（録音中に育ちます）`
+      : '自動辞書: まだありません';
+  }
+}
+
+/** 辞書のオン/オフ。録音中でも即座に効く */
+function toggleDict(id) {
+  const s = getActiveSession();
+  if (!s) return;
+  if (!s.context) s.context = {};
+  const ids = (s.context.dictIds || []).slice();
+  const i = ids.indexOf(id);
+  if (i >= 0) ids.splice(i, 1); else ids.push(id);
+  s.context.dictIds = ids;
+  persistSessions();
+  renderDictBar();
+  renderDictMenu();
+  const d = findTermDict(id, state.settings.termDicts);
+  diagLog.info(`辞書を${i >= 0 ? '外した' : '適用した'}: ${d ? d.name : id}`);
+}
+
+function openDictMenu() {
+  if (!els.dictMenu) return;
+  renderDictMenu();
+  els.dictMenu.hidden = false;
+}
+function closeDictMenu() {
+  if (els.dictMenu) els.dictMenu.hidden = true;
+}
+
+/**
+ * いまの自動辞書を、名前を付けて自作辞書として保存する (v0.20.0)
+ *
+ * 自動で育った語をその場限りで捨てず、次の録音でも使えるようにする。
+ * 手入力の語も一緒に入れる（どちらも「この分野で出る語」なので）。
+ */
+function saveAutoAsDict() {
+  const s = getActiveSession();
+  if (!s) return;
+  const terms = mergeTermSources({
+    manual: splitTerms(s.context?.terms),
+    auto: s.autoContext?.terms || [],
+  }).terms;
+  if (!terms.length) {
+    alert('保存できる語がまだありません。\n録音するか「よく出る語」に書き足してください。');
+    return;
+  }
+  const suggested = (s.autoContext?.topicPath || [])[0] || s.context?.field || s.title || '新しい辞書';
+  const name = prompt(`辞書の名前（${terms.length}語を保存します）`, String(suggested).slice(0, 20));
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+
+  const dicts = state.settings.termDicts || (state.settings.termDicts = []);
+  const existing = dicts.find(d => d.name === trimmed);
+  if (existing) {
+    if (!confirm(`「${trimmed}」は既にあります。語を足しますか？\n（既存の語は消えません）`)) return;
+    // 既存に足す。重複は mergeTermSources が落とす
+    existing.terms = mergeTermSources({ manual: existing.terms, dict: terms }).terms;
+  } else {
+    dicts.push({ id: 'user:' + Date.now().toString(36), name: trimmed, terms });
+  }
+  saveSettings();
+  // 保存した辞書をこのタブに適用しておく（保存したのに効かない、を避ける）
+  const saved = dicts.find(d => d.name === trimmed);
+  if (saved && !(s.context.dictIds || []).includes(saved.id)) {
+    s.context.dictIds = (s.context.dictIds || []).concat(saved.id);
+    persistSessions();
+  }
+  renderDictBar();
+  renderDictMenu();
+  renderContextDicts();
+  diagLog.info(`辞書「${trimmed}」を保存しました（${terms.length}語）`);
+}
+
+/** 文脈モーダル内の辞書一覧（管理用） */
+function renderContextDicts() {
+  const box = document.getElementById('context-dict-list');
+  if (!box) return;
+  const ids = getActiveDictIds();
+  const user = state.settings.termDicts || [];
+  box.innerHTML = '';
+  const rows = TERM_PRESETS.map(d => [d, false]).concat(user.map(d => [d, true]));
+  for (const [d, isUser] of rows) {
+    const row = document.createElement('div');
+    row.className = 'context-dict-row';
+    const on = ids.includes(d.id);
+    row.innerHTML = `<label class="context-dict-name"><input type="checkbox" ${on ? 'checked' : ''}> `
+      + `<span></span></label>`
+      + `<span class="field-hint context-dict-count"></span>`;
+    row.querySelector('span:not(.field-hint)').textContent = d.name + (isUser ? '（自作）' : '');
+    row.querySelector('.context-dict-count').textContent = `${(d.terms || []).length}語`;
+    row.querySelector('input').addEventListener('change', () => {
+      toggleDict(d.id);
+      renderContextDicts();
+    });
+    if (isUser) {
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'pane-btn';
+      del.textContent = '削除';
+      del.addEventListener('click', () => {
+        if (!confirm(`自作辞書「${d.name}」を削除します。よろしいですか？`)) return;
+        state.settings.termDicts = user.filter(x => x.id !== d.id);
+        saveSettings();
+        renderContextDicts();
+        renderDictBar();
+      });
+      row.appendChild(del);
+    }
+    box.appendChild(row);
+  }
+}
+
 function getSessionContextForAi() {
   const s = getActiveSession();
   const c = s?.context;
   if (!c) return undefined;
 
-  const manual = splitTerms(c.terms);
-  const auto = (s.autoContext?.terms || []).filter(t => !manual.includes(t));
-  const terms = manual.concat(auto);
+  // v0.20.0: 手入力 → 辞書 → 自動 の順で合成する（優先順位は mergeTermSources 参照）
+  const merged = mergeTermSources({
+    manual: splitTerms(c.terms),
+    dict: collectDictTerms(c.dictIds, state.settings.termDicts),
+    auto: s.autoContext?.terms || [],
+  });
+  const terms = merged.terms;
 
   const ctx = {
     field: (c.field || '').trim(),
@@ -5293,6 +5483,7 @@ async function refreshAutoContext(opts = {}) {
     };
     persistSessions();
     diagLog.info(`文脈を更新: 語${out.terms.length}件 / 議題「${out.topicPath.join(' > ') || '—'}」`);
+    renderDictBar();   // v0.20.0: 自動辞書が育ったらフッターにも出す
     // 文脈モーダルを開いていたら表示も更新する
     if (els.contextModal && !els.contextModal.classList.contains('hidden')) renderAutoContext(still);
   } catch (e) {
@@ -5345,12 +5536,14 @@ function openContextModal() {
   els.contextMemoResult.textContent = '';
   els.contextMemoResult.className = 'field-hint';
   renderAutoContext(s);
+  renderContextDicts();          // v0.20.0
   els.contextModal.classList.remove('hidden');
   els.inputContextField.focus();
 }
 
 function closeContextModal() {
   els.contextModal.classList.add('hidden');
+  renderDictBar();   // v0.20.0: 手入力を直したらフッターの表示も追随させる
 }
 
 function saveContextModal() {
@@ -5630,13 +5823,13 @@ function switchInnerPane(paneId) {
   const wasChat = document.body.classList.contains('chat-active');
   const willBeChat = paneId === 'pane-chat';
   if (wasChat !== willBeChat) {
-    const zb = els.zoomBar;
-    if (zb) {
-      zb.classList.add('fading');
+    const bars = [els.zoomBar, els.dictBar].filter(Boolean);
+    if (bars.length) {
+      bars.forEach(b => b.classList.add('fading'));
       // 0.5s フェード: 480ms で透明、位置切替、480ms でフェードイン
       setTimeout(() => {
         document.body.classList.toggle('chat-active', willBeChat);
-        zb.classList.remove('fading');
+        bars.forEach(b => b.classList.remove('fading'));
       }, 480);
     } else {
       document.body.classList.toggle('chat-active', willBeChat);
@@ -5746,6 +5939,9 @@ function createSession({ activate = true, title = null, skipSave = false } = {})
       field: state.settings.defaultContextField || '',
       speakers: state.settings.defaultContextSpeakers || '',
       terms: state.settings.defaultContextTerms || '',
+      // v0.20.0: 適用中の辞書。直前のタブで使っていたものを引き継ぐ
+      // （同じ分野の録音が続くのが普通なので、毎回選び直させない）
+      dictIds: (getActiveSession()?.context?.dictIds || []).slice(),
     },
     // v0.16.1: 記録から自動で拾った語彙と議題。手入力とは別に持ち、手入力を優先する
     autoContext: { terms: [], topicPath: [], flow: '', updatedAt: 0 },
@@ -5806,6 +6002,7 @@ function migrateMemoTaskItems() {
 }
 
 function loadActiveSessionIntoDOM() {
+  renderDictBar();   // v0.20.0: タブごとに辞書が違うので、切り替えたら描き直す
   const s = getActiveSession();
   els.confirmed.innerHTML = s?.transcript || '';
   els.memo.innerHTML = s?.memo || '';
@@ -6456,6 +6653,26 @@ els.btnClearAll.addEventListener('click', clearAllPanes);
 els.btnSettings.addEventListener('click', openSettings);
 if (els.btnContext) {
   els.btnContext.addEventListener('click', openContextModal);
+
+  /* v0.20.0: フッターの辞書ピル */
+  if (els.dictToggle) {
+    els.dictToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (els.dictMenu && els.dictMenu.hidden) openDictMenu(); else closeDictMenu();
+    });
+  }
+  if (els.dictMenuClose) els.dictMenuClose.addEventListener('click', closeDictMenu);
+  if (els.dictMenuDetail) {
+    els.dictMenuDetail.addEventListener('click', () => { closeDictMenu(); openContextModal(); });
+  }
+  // メニューの外を押したら閉じる（メニュー内のクリックは止める）
+  if (els.dictMenu) els.dictMenu.addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', () => closeDictMenu());
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && els.dictMenu && !els.dictMenu.hidden) closeDictMenu();
+  });
+  const btnSaveAutoDict = document.getElementById('btn-save-auto-dict');
+  if (btnSaveAutoDict) btnSaveAutoDict.addEventListener('click', saveAutoAsDict);
   els.btnContextSave.addEventListener('click', saveContextModal);
   els.btnContextFromMemo.addEventListener('click', importContextFromMemo);
   els.btnContextAdoptAuto.addEventListener('click', adoptAutoTerms);
@@ -7430,6 +7647,7 @@ if (els.btnClearAudio) {
 }
 
 initSessions();
+renderDictBar();   // v0.20.0
 // v0.19.0: 期限切れの音声を掃除する。「タブを閉じたら消す」はクラッシュや
 // 強制リロードでは走らないので、消し忘れを防ぐ本体はこちら
 sweepStoredAudio();

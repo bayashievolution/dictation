@@ -262,6 +262,33 @@
 
   </div>
 
+  <!-- v0.20.0: フッター左＝辞書、右＝拡大ルーラー。
+       いま何の語彙が効いているかが常に見えていないと、間違ったまま録り続けてしまう -->
+  <div id="dict-bar" title="語彙辞書（クリックで切替）">
+    <button type="button" id="dict-toggle" class="dict-btn">
+      <span data-icon="tag"></span>
+      <span id="dict-label">辞書なし</span>
+    </button>
+  </div>
+
+  <div id="dict-menu" class="dict-menu" hidden>
+    <div class="dict-menu-head">
+      <span>語彙辞書</span>
+      <button type="button" class="modal-close" id="dict-menu-close"><span data-icon="x"></span></button>
+    </div>
+    <p class="field-hint dict-menu-hint">
+      選ぶと<strong>いまの自動辞書に足されます</strong>（置き換えではありません）。
+      録音中でも切り替えられます。
+    </p>
+    <div id="dict-menu-list" class="dict-menu-list"></div>
+    <div class="dict-menu-foot">
+      <span id="dict-menu-auto" class="field-hint"></span>
+      <button type="button" id="dict-menu-detail" class="pane-btn">
+        <span data-icon="pencil"></span><span>詳しく設定</span>
+      </button>
+    </div>
+  </div>
+
   <div id="zoom-bar" title="拡大率">
     <button class="zoom-btn" id="zoom-minus" title="縮小">−</button>
     <input type="range" id="zoom-range" min="75" max="200" step="5" value="100" />
@@ -750,6 +777,20 @@
         </label>
 
         <div class="field">
+          <span class="field-label">語彙辞書</span>
+          <small class="field-hint" style="margin-bottom:6px">
+            選んだ辞書の語が、上の「よく出る語」と自動で拾った語に<strong>足されます</strong>。
+            合計50語まで（手入力 → 辞書 → 自動 の順に残ります）。
+          </small>
+          <div id="context-dict-list" class="context-dict-list"></div>
+          <div class="diag-log-actions" style="margin-top:8px">
+            <button type="button" id="btn-save-auto-dict" class="pane-btn" title="いま育っている自動辞書と手入力の語に名前を付けて保存する">
+              <span data-icon="tag"></span><span>いまの語を辞書として保存</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="field">
           <div class="diag-log-actions">
             <button type="button" id="btn-context-from-memo" class="pane-btn" title="メモペインに書いた見出しや箇条書きから語を拾う">
               <span data-icon="pencil"></span><span>メモから取り込む</span>
@@ -861,10 +902,11 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.19.3"></script>
-  <script src="gemini.js?v=0.19.3"></script>
-  <script src="notion.js?v=0.19.3"></script>
-  <script src="audio-store.js?v=0.19.3"></script>
-  <script src="app.js?v=0.19.3"></script>
+  <script src="icons.js?v=0.20.0"></script>
+  <script src="gemini.js?v=0.20.0"></script>
+  <script src="notion.js?v=0.20.0"></script>
+  <script src="audio-store.js?v=0.20.0"></script>
+  <script src="term-dicts.js?v=0.20.0"></script>
+  <script src="app.js?v=0.20.0"></script>
 </body>
 </html>
