@@ -37,6 +37,14 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* v0.15.0: hidden 属性を効かせる。
+   ブラウザ既定の hidden は display:none だが、.btn(inline-flex) や
+   .modal-footer(flex) のように display を明示している要素では負けてしまい、
+   el.hidden = true にしても消えない。v0.14.2 の進捗ダイアログで
+   「保存中なのに『閉じる/残す』が見えていて、押すと表示だけ消えて
+   送信は続く」という事故が起きたのはこれが原因。 */
+[hidden] { display: none !important; }
+
 /* ───────── Scrollbar (dark theme) ───────── */
 /* Firefox */
 * {
@@ -2886,3 +2894,12 @@ body.chat-active #zoom-bar {
 .notion-progress-row:last-child { border-bottom: none; }
 .notion-progress-row.is-ok { color: var(--accent); }
 .notion-progress-row.is-ng { color: var(--danger); }
+
+/* タブのNotionアップ済み印 v0.15.0 */
+.tab-uploaded {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--accent);
+  opacity: 0.85;
+}

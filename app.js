@@ -158,6 +158,10 @@ const DEFAULT_SETTINGS = {
   notionToken: '',
   notionLastDataSourceId: '',
   notionLastDataSourceTitle: '',
+  // v0.15.0: 録音日時を入れる日付プロパティ名。'' なら使わない（タイトルに日時が残る）
+  notionLastDatePropName: '',
+  // v0.15.0: 保存できたタブを自動で閉じる。進捗ダイアログのチェックと連動して記憶する
+  notionAutoClose: false,
 };
 // v0.13.24: WEB_SPEECH_DEFAULTS（v0.13.9 「Web Speech 設定をデフォルトに戻す」
 // ボタン用のリセット値）は UI 撤去済み（v0.13.23）に伴い削除。
@@ -373,7 +377,11 @@ const els = {
   notionProgressTitle: document.getElementById('notion-progress-title'),
   notionProgressBody: document.getElementById('notion-progress-body'),
   notionProgressList: document.getElementById('notion-progress-list'),
+  notionPickerDate: document.getElementById('notion-picker-date'),
   notionProgressFooter: document.getElementById('notion-progress-footer'),
+  btnNotionCancel: document.getElementById('btn-notion-cancel'),
+  notionAutoClose: document.getElementById('notion-auto-close'),
+  notionAutoCloseRow: document.getElementById('notion-auto-close-row'),
   btnNotionCloseTabs: document.getElementById('btn-notion-close-tabs'),
   btnNotionKeepTabs: document.getElementById('btn-notion-keep-tabs'),
   notionSettingsGroup: document.getElementById('notion-settings-group'),
@@ -1899,6 +1907,8 @@ function sessionHasContentForNotion(session) {
 /* ───────── 保存先ピッカー ───────── */
 
 let notionPickerResolve = null;
+let notionPickerSchema = null;   // 選択中 DB の { titleProp, dateProps }
+let notionSchemaSeq = 0;         // 取得の世代番号。古い応答が後から勝つのを防ぐ
 
 function closeNotionPicker(result) {
   els.notionPicker.classList.add('hidden');
@@ -1907,9 +1917,57 @@ function closeNotionPicker(result) {
   if (fn) fn(result || null);
 }
 
+function setNotionPickerError(msg) {
+  els.notionPickerError.textContent = msg || '';
+  els.notionPickerError.classList.toggle('is-ng', !!msg);
+}
+
 /**
- * 保存先データベースを選ばせる。
- * @returns {Promise<{id:string,title:string}|null>} キャンセルなら null
+ * 選択中の DB の列構成を取り、日付プロパティのセレクトを埋める。
+ * 日付列が無い DB では「使わない」だけになる。
+ */
+async function loadNotionPickerSchema() {
+  const seq = ++notionSchemaSeq;
+  const dsId = els.notionPickerSelect.value;
+  notionPickerSchema = null;
+  els.notionPickerDate.innerHTML = '<option value="">読み込み中…</option>';
+  els.notionPickerDate.disabled = true;
+  els.btnNotionPickerOk.disabled = true;
+  if (!dsId) return;
+
+  let schema;
+  try {
+    schema = await notionGetSchema(state.settings.notionToken, dsId);
+  } catch (e) {
+    if (seq !== notionSchemaSeq) return;   // 既に別の保存先が選ばれている
+    els.notionPickerDate.innerHTML = '<option value="">（取得できませんでした）</option>';
+    setNotionPickerError(e.message);
+    console.warn('[notion] 列構成の取得に失敗:', e.message);
+    return;
+  }
+  if (seq !== notionSchemaSeq) return;     // 待っている間に選択が変わっていたら捨てる
+  notionPickerSchema = schema;
+
+  const opts = ['<option value="">使わない（タイトルに日時を残す）</option>']
+    .concat(notionPickerSchema.dateProps.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`));
+  els.notionPickerDate.innerHTML = opts.join('');
+
+  // 前回選んだ日付列があればそれを、無ければ日付列が1つだけならそれを既定にする
+  const last = state.settings.notionLastDatePropName;
+  if (last && notionPickerSchema.dateProps.includes(last)) {
+    els.notionPickerDate.value = last;
+  } else if (notionPickerSchema.dateProps.length === 1) {
+    els.notionPickerDate.value = notionPickerSchema.dateProps[0];
+  }
+
+  els.notionPickerDate.disabled = false;
+  els.btnNotionPickerOk.disabled = false;
+  setNotionPickerError('');
+}
+
+/**
+ * 保存先データベースと、録音日時を入れる日付プロパティを選ばせる。
+ * @returns {Promise<{id:string,title:string,titleProp:string,dateProp:string}|null>} キャンセルなら null
  */
 async function openNotionPicker(summaryText) {
   const token = state.settings.notionToken;
@@ -1919,10 +1977,11 @@ async function openNotionPicker(summaryText) {
   }
 
   els.notionPickerSummary.textContent = summaryText;
-  els.notionPickerError.textContent = '';
-  els.notionPickerError.classList.remove('is-ng');
+  setNotionPickerError('');
   els.notionPickerSelect.innerHTML = '<option>読み込み中…</option>';
   els.notionPickerSelect.disabled = true;
+  els.notionPickerDate.innerHTML = '';
+  els.notionPickerDate.disabled = true;
   els.btnNotionPickerOk.disabled = true;
   els.notionPicker.classList.remove('hidden');
 
@@ -1931,46 +1990,61 @@ async function openNotionPicker(summaryText) {
     list = await notionListDataSources(token);
   } catch (e) {
     els.notionPickerSelect.innerHTML = '';
-    els.notionPickerError.textContent = e.message;
-    els.notionPickerError.classList.add('is-ng');
+    setNotionPickerError(e.message);
     console.warn('[notion] 保存先の取得に失敗:', e.message);
     return new Promise(resolve => { notionPickerResolve = () => resolve(null); });
   }
 
   if (list.length === 0) {
     els.notionPickerSelect.innerHTML = '';
-    els.notionPickerError.textContent =
-      '保存先に使えるデータベースがありません。Notion でデータベースのページを開き「…」→「コネクト」から接続してください。';
-    els.notionPickerError.classList.add('is-ng');
+    setNotionPickerError('保存先に使えるデータベースがありません。Notion でデータベースのページを開き「…」→「コネクト」から接続してください。');
     return new Promise(resolve => { notionPickerResolve = () => resolve(null); });
   }
 
   els.notionPickerSelect.innerHTML = list
     .map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.title)}</option>`).join('');
   // 前回の保存先を初期選択に（無ければ先頭）
-  const last = state.settings.notionLastDataSourceId;
-  if (last && list.some(d => d.id === last)) els.notionPickerSelect.value = last;
+  const lastDs = state.settings.notionLastDataSourceId;
+  if (lastDs && list.some(d => d.id === lastDs)) els.notionPickerSelect.value = lastDs;
   els.notionPickerSelect.disabled = false;
-  els.btnNotionPickerOk.disabled = false;
+
+  await loadNotionPickerSchema();
   els.btnNotionPickerOk.focus();
 
   return new Promise(resolve => {
     notionPickerResolve = (picked) => {
-      if (!picked) return resolve(null);
+      if (!picked || !notionPickerSchema) return resolve(null);
       const id = els.notionPickerSelect.value;
-      const title = list.find(d => d.id === id)?.title || '';
-      resolve({ id, title });
+      return resolve({
+        id,
+        title: list.find(d => d.id === id)?.title || '',
+        titleProp: notionPickerSchema.titleProp,
+        dateProp: els.notionPickerDate.value || '',
+      });
     };
   });
 }
 
 /* ───────── 進捗ダイアログ ───────── */
 
-function notionProgressOpen(title) {
+// v0.15.0: 中止フラグ。ノートを1件送り終えた区切りで見て、次に進まず抜ける。
+// 送信中のノートを途中で切ると Notion 側に中身が欠けたノートが残るので、
+// 区切りまでは走り切らせる方針にしている。
+let notionCancelRequested = false;
+
+function notionProgressOpen(title, { cancellable = true } = {}) {
+  notionCancelRequested = false;
   els.notionProgressTitle.textContent = title;
   els.notionProgressBody.textContent = '';
   els.notionProgressList.innerHTML = '';
-  els.notionProgressFooter.hidden = true;
+  // 1件だけの保存は、区切りが来る前に終わるので中止できない。ボタンを出さない
+  els.btnNotionCancel.hidden = !cancellable;
+  els.notionAutoCloseRow.hidden = false;
+  els.notionAutoClose.checked = !!state.settings.notionAutoClose;
+  els.btnNotionCancel.disabled = false;
+  els.btnNotionCancel.textContent = '中止';
+  els.btnNotionCloseTabs.hidden = true;
+  els.btnNotionKeepTabs.hidden = true;
   els.notionProgress.classList.remove('hidden');
 }
 
@@ -1990,18 +2064,26 @@ function notionProgressClose() {
   els.notionProgress.classList.add('hidden');
 }
 
+/** 中止ボタン。押した瞬間は止まらない（今のノートは送り切る）のでその旨を出す */
+function requestNotionCancel() {
+  notionCancelRequested = true;
+  els.btnNotionCancel.disabled = true;
+  els.btnNotionCancel.textContent = '中止しています…';
+  notionProgressSet('中止します。いま送信中のノートだけ最後まで保存します…');
+}
+
 /* ───────── アップロード本体 ───────── */
 
 /**
  * セッション群を Notion に保存する。統合せずセッションごとに1ノート。
  * @param {Array} sessions
- * @returns {Promise<Array<{session:object, ok:boolean, error?:string}>>}
+ * @returns {Promise<{results:Array, cancelled:boolean}>}
  */
 async function uploadSessionsToNotion(sessions) {
   const targets = sessions.filter(sessionHasContentForNotion);
   if (targets.length === 0) {
     alert('Notion に保存する中身がありません。');
-    return [];
+    return { results: [], cancelled: false };
   }
 
   const summary = targets.length === 1
@@ -2009,37 +2091,37 @@ async function uploadSessionsToNotion(sessions) {
     : `${targets.length}個のタブを、1つずつ別のノートとして保存します。`;
 
   const dest = await openNotionPicker(summary);
-  if (!dest) return [];
+  if (!dest) return { results: [], cancelled: false };
 
-  // 選んだ保存先を次回の既定として覚える
+  // 選んだ保存先と日付列を次回の既定として覚える
   state.settings.notionLastDataSourceId = dest.id;
   state.settings.notionLastDataSourceTitle = dest.title;
+  state.settings.notionLastDatePropName = dest.dateProp || '';
   saveSettings();
 
-  notionProgressOpen(targets.length === 1 ? 'Notion に保存中…' : `Notion に保存中…（0/${targets.length}）`);
-
-  // 保存先は全件で共通なので、タイトル列の名前は1回だけ引いて使い回す
-  let titleProp = null;
-  try {
-    titleProp = await notionGetTitlePropName(state.settings.notionToken, dest.id);
-  } catch (e) {
-    notionProgressClose();
-    alert('保存先の情報を取得できませんでした: ' + e.message);
-    return [];
-  }
+  notionProgressOpen(
+    targets.length === 1 ? 'Notion に保存中…' : `Notion に保存中…（0/${targets.length}）`,
+    { cancellable: targets.length > 1 },
+  );
 
   const results = [];
   let done = 0;
+  let cancelled = false;
   for (const session of targets) {
+    if (notionCancelRequested) { cancelled = true; break; }
     notionProgressSet(`「${session.title}」を保存しています…`);
     try {
       await notionCreateNote({
         token: state.settings.notionToken,
         dataSourceId: dest.id,
-        titleProp,
-        title: session.title,
+        titleProp: dest.titleProp,
+        dateProp: dest.dateProp,
+        dateTs: session.createdAt,
+        title: notionNoteTitle(session, dest.dateProp),
         toggles: buildNotionToggles(session),
       });
+      // アップ済み印。閉じずに残したタブをタブバーで見分けられるようにする
+      session.notionUploadedAt = Date.now();
       results.push({ session, ok: true });
       notionProgressAddRow(session.title, 'ok');
     } catch (e) {
@@ -2050,21 +2132,45 @@ async function uploadSessionsToNotion(sessions) {
     done += 1;
     if (targets.length > 1) els.notionProgressTitle.textContent = `Notion に保存中…（${done}/${targets.length}）`;
   }
-  return results;
+  if (notionCancelRequested) cancelled = true;
+  if (results.some(r => r.ok)) { persistSessions(); renderTabs(); }
+  return { results, cancelled, remaining: targets.length - done };
+}
+
+/**
+ * ノートのタイトルを決める。
+ * 日付列に録音日時を入れるなら、タイトル側の "(08/30 14:30)" は要らないので
+ * AI が付けた純粋なタイトルだけにする。
+ * aiTitle が無いセッション（既定タイトル "08/30 14:30" や手動タイトル）は
+ * 外すと何も残らない/意図を壊すので、session.title をそのまま使う。
+ */
+function notionNoteTitle(session, dateProp) {
+  if (dateProp && session.aiTitle) return session.aiTitle;
+  return session.title;
 }
 
 /**
  * アップロード結果を出して「閉じますか？」を聞く。
  * 成功したタブだけを閉じる対象にする（やっさん指示: 失敗した分は残す）。
  */
-function notionFinish(results) {
+function notionFinish({ results, cancelled, remaining }) {
   const ok = results.filter(r => r.ok);
   const ng = results.filter(r => !r.ok);
 
+  // チェックの状態は次回のために覚える
+  const autoClose = !!els.notionAutoClose.checked;
+  if (autoClose !== state.settings.notionAutoClose) {
+    state.settings.notionAutoClose = autoClose;
+    saveSettings();
+  }
+
+  els.btnNotionCancel.hidden = true;
+  els.notionAutoCloseRow.hidden = true;
+  els.btnNotionKeepTabs.hidden = false;
+
   if (ok.length === 0) {
-    els.notionProgressTitle.textContent = 'Notion への保存に失敗しました';
+    els.notionProgressTitle.textContent = cancelled ? 'Notion への保存を中止しました' : 'Notion への保存に失敗しました';
     notionProgressSet('保存できたタブはありません。タブはそのまま残しています。');
-    els.notionProgressFooter.hidden = false;
     els.btnNotionCloseTabs.hidden = true;
     els.btnNotionKeepTabs.textContent = '閉じる';
     els.btnNotionKeepTabs.onclick = notionProgressClose;
@@ -2072,19 +2178,36 @@ function notionFinish(results) {
     return;
   }
 
-  els.btnNotionCloseTabs.hidden = false;
-  els.btnNotionKeepTabs.textContent = '残す';
-  els.notionProgressTitle.textContent = 'Notion への保存が完了しました';
+  els.notionProgressTitle.textContent = cancelled
+    ? 'Notion への保存を中止しました' : 'Notion への保存が完了しました';
 
   const label = ok.length === 1 ? `「${ok[0].session.title}」` : `${ok.length}個のタブ`;
-  const ngNote = ng.length ? `\n（${ng.length}個は失敗したので残します）` : '';
-  notionProgressSet(`${label}を保存しました。タブを閉じますか？（閉じるとアプリ内の内容は削除されます）${ngNote}`);
+  const notes = [];
+  if (ng.length) notes.push(`${ng.length}個は失敗したので残します`);
+  if (cancelled && remaining > 0) notes.push(`${remaining}個は中止したので送っていません`);
+  const note = notes.length ? `\n（${notes.join('／')}）` : '';
 
-  els.notionProgressFooter.hidden = false;
+  // Notion に上がっている前提なので、closeSession の削除確認は出さない（二重確認の回避）
+  const closeOkTabs = () => closeMultipleSessions(ok.map(r => r.session.id), { skipConfirm: true });
+
+  if (autoClose) {
+    // 「自動的に閉じる」がオンなら聞かずに閉じ、結果だけ見せる
+    closeOkTabs();
+    els.btnNotionCloseTabs.hidden = true;
+    els.btnNotionKeepTabs.textContent = '閉じる';
+    els.btnNotionKeepTabs.onclick = notionProgressClose;
+    notionProgressSet(`${label}を保存して閉じました。${note}`);
+    els.btnNotionKeepTabs.focus();
+    return;
+  }
+
+  els.btnNotionCloseTabs.hidden = false;
+  els.btnNotionKeepTabs.textContent = '残す';
+  notionProgressSet(`${label}を保存しました。タブを閉じますか？（閉じるとアプリ内の内容は削除されます）${note}`);
+
   els.btnNotionCloseTabs.onclick = () => {
     notionProgressClose();
-    // Notion に上がっている前提なので、closeSession の削除確認は出さない（二重確認の回避）
-    closeMultipleSessions(ok.map(r => r.session.id), { skipConfirm: true });
+    closeOkTabs();
   };
   els.btnNotionKeepTabs.onclick = notionProgressClose;
   els.btnNotionCloseTabs.focus();
@@ -2095,8 +2218,8 @@ async function uploadActiveSessionToNotion() {
   snapshotActiveToSession();
   const session = getActiveSession();
   if (!session) return;
-  const results = await uploadSessionsToNotion([session]);
-  if (results.length) notionFinish(results);
+  const outcome = await uploadSessionsToNotion([session]);
+  if (outcome.results.length || outcome.cancelled) notionFinish(outcome);
 }
 
 /** Shift+クリック / 長押し = 全タブを1つずつ */
@@ -2108,8 +2231,8 @@ async function uploadAllSessionsToNotion() {
     alert('録音中のタブしかないため、保存をスキップしました。');
     return;
   }
-  const results = await uploadSessionsToNotion(list);
-  if (results.length) notionFinish(results);
+  const outcome = await uploadSessionsToNotion(list);
+  if (outcome.results.length || outcome.cancelled) notionFinish(outcome);
 }
 
 function buildExportHtml(session) {
@@ -4087,7 +4210,8 @@ function syncNotionSettingsUi() {
 
   if (els.notionLastTarget) {
     const t = state.settings.notionLastDataSourceTitle;
-    els.notionLastTarget.textContent = t ? t : '（まだありません）';
+    const d = state.settings.notionLastDatePropName;
+    els.notionLastTarget.textContent = t ? (d ? `${t}（録音日時 → ${d}）` : t) : '（まだありません）';
   }
   if (els.btnNotionForget) {
     els.btnNotionForget.disabled = !state.settings.notionLastDataSourceId;
@@ -4129,6 +4253,7 @@ async function testNotionConnection() {
 function forgetNotionTarget() {
   state.settings.notionLastDataSourceId = '';
   state.settings.notionLastDataSourceTitle = '';
+  state.settings.notionLastDatePropName = '';
   saveSettings();
   syncNotionSettingsUi();
 }
@@ -4781,6 +4906,15 @@ function renderTabs() {
       else if (e.key === 'Escape') { title.textContent = session.title; title.blur(); }
     });
 
+    // v0.15.0: Notion に保存済みの印。閉じずに残したタブを見分けるため。
+    // Notion 側で消されたかどうかは追わない（やっさん指示）。
+    if (session.notionUploadedAt) {
+      const badge = document.createElement('span');
+      badge.className = 'tab-uploaded';
+      badge.innerHTML = '<span data-icon="cloud-upload" data-icon-size="11"></span>';
+      badge.title = 'Notion に保存済み';
+      tab.appendChild(badge);
+    }
     tab.appendChild(title);
     tab.appendChild(closeBtn);
     els.tabsList.appendChild(tab);
@@ -5034,6 +5168,9 @@ if (els.btnNotionUpload) {
     b.addEventListener('click', () => closeNotionPicker(null));
   });
   els.btnNotionPickerOk.addEventListener('click', () => closeNotionPicker(true));
+  // 保存先を変えたら、その DB の日付プロパティを取り直す
+  els.notionPickerSelect.addEventListener('change', loadNotionPickerSchema);
+  els.btnNotionCancel.addEventListener('click', requestNotionCancel);
 }
 els.btnLoadJson.addEventListener('click', () => els.fileLoad.click());
 els.fileLoad.addEventListener('change', (e) => {
