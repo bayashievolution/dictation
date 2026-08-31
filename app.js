@@ -289,7 +289,10 @@ const state = {
   chunkStartedAtSilence: true,// 今のチャンクの「頭」が無音の切れ目だったか（録音開始直後は真）
   pendingChunkEdges: null,    // onstop に渡す { startsAtSilence, endsAtSilence }
   finalChunkPending: false,   // 停止時、最後のチャンクがまだ送り出されていない (v0.18.6)
-  audioSeq: 0,                // 保管するチャンクの通し番号 (v0.19.0)
+  audioSeq: 0,                // 区間の中でのかけらの通し番号 (v0.19.0 / v0.21.0)
+  audioSeg: 0,                // 区間番号（約10分ごと） (v0.21.0)
+  archiveRecorder: null,      // やり直し用の録音機（live とは別） (v0.21.0)
+  archiveSegStartedAt: 0,     // いまの区間を始めた時刻 (v0.21.0)
 
   sessions: [],
   activeId: null,
@@ -1954,6 +1957,133 @@ function decideChunkCut({ elapsed, minMs, maxMs, useSilenceCut, silentMs }) {
   return ms >= needed ? 'silence' : null;
 }
 
+/* ───────── やり直し用の録音（保管側） (v0.21.0) ─────────
+ *
+ * live の文字起こしとは**別の MediaRecorder** を、同じストリームに掛けて回す。
+ * 理由は audio-store.js の冒頭に書いたとおりで、live 側の
+ * `stop() → start()` で出てくるチャンクは1本ずつ独立した webm なので、
+ * 繋いでも最初の1本しか読めないため。
+ *
+ * こちらは `start(timeslice)` で回す。出てくるかけらは1本の録音の続きなので、
+ * 順に繋げば正しい webm になる。
+ *
+ * ■ 二重にエンコードすることについて
+ *
+ * Opus のエンコーダが2つ回るぶん CPU は増えるが、64kbps の音声1本ぶんなので
+ * 実用上は問題にならない。**同じストリームを2つの MediaRecorder が読める**のは
+ * MediaRecorder の仕様どおりの使い方。
+ *
+ * ■ 保持がオフなら、そもそも作らない
+ *
+ * 「既定は残さない」を守るため、`audioKeepRecording` が false のときは
+ * この録音機を作らない。作らなければ、消し忘れも起きない。
+ */
+
+/** かけらを吐く間隔。短いほど落ちたときの取りこぼしが減り、レコードが増える */
+const ARCHIVE_SLICE_MS = 5000;
+/** 区間の目安。これを過ぎたら、次の無音で区間を切り替える */
+const ARCHIVE_SEG_TARGET_MS = 10 * 60 * 1000;
+/** 無音が来なくてもここで切り替える（喋りっぱなしのとき用） */
+const ARCHIVE_SEG_MAX_MS = 12 * 60 * 1000;
+/** 区間の切り替えに要求する無音の長さ。live の区切りより厳しくする */
+const ARCHIVE_SEG_SILENCE_MS = 1500;
+
+/**
+ * 区間を切り替えるべきか (v0.21.0)
+ *
+ * live の `decideChunkCut` と別にしてあるのは、目的が違うから。
+ * live は「早く出したい」ので 12〜20 秒で切るが、こちらは
+ * **切れ目を減らしたい**（切れ目ごとに話者の対応づけが切れる）。
+ * だから目安の10分までは何があっても切らず、そのあと最初の無音で切る。
+ *
+ * @returns {null|'silence'|'forced'}
+ */
+function shouldRollArchiveSegment({ elapsed, targetMs, maxMs, silentMs }) {
+  const target = Number.isFinite(targetMs) ? targetMs : ARCHIVE_SEG_TARGET_MS;
+  const max = Number.isFinite(maxMs) ? maxMs : ARCHIVE_SEG_MAX_MS;
+  if (elapsed >= max) return 'forced';
+  if (elapsed < target) return null;
+  return (silentMs || 0) >= ARCHIVE_SEG_SILENCE_MS ? 'silence' : null;
+}
+
+/**
+ * 保管用の録音機を作って回し始める。保持がオフなら null を返す
+ */
+function startArchiveRecorder(stream, recOpts) {
+  if (!state.settings.audioKeepRecording) return null;
+  const sessionId = state.recordingSessionId || state.activeId;
+  if (!sessionId) return null;
+
+  state.audioSeg = 0;
+  state.audioSeq = 0;
+  state.archiveSegStartedAt = Date.now();
+
+  const make = () => {
+    let rec;
+    try {
+      rec = new MediaRecorder(stream, recOpts);
+    } catch (e) {
+      diagLog.info('やり直し用の録音を作れませんでした（文字起こしは続きます）: ' + (e.message || e));
+      return null;
+    }
+    rec.ondataavailable = (e) => {
+      if (!e.data || !e.data.size) return;
+      audioStorePut(sessionId, e.data, state.audioSeq++, state.audioSeg).catch(err => {
+        // 容量不足などで失敗しうる。1回だけ知らせて、以後は黙って諦める。
+        // ここで録音本体を止める価値は無い
+        if (!state.audioStoreWarned) {
+          state.audioStoreWarned = true;
+          diagLog.info('音声の保管に失敗しました（録音と文字起こしは続きます）: ' + (err.message || err));
+        }
+      });
+    };
+    rec.onstop = () => {
+      // 区間の切り替えなら次を作る。録音そのものの停止なら state 側で null になっている
+      if (!state.isRecording || state.archiveRecorder !== rec) return;
+      state.audioSeg++;
+      state.audioSeq = 0;
+      state.archiveSegStartedAt = Date.now();
+      const next = make();
+      state.archiveRecorder = next;
+      if (next) {
+        try { next.start(ARCHIVE_SLICE_MS); }
+        catch (e) { diagLog.info('やり直し用の録音を再開できませんでした: ' + (e.message || e)); }
+      }
+    };
+    rec.onerror = () => { /* 保管が壊れても live は止めない */ };
+    return rec;
+  };
+
+  const rec = make();
+  if (!rec) return null;
+  try {
+    rec.start(ARCHIVE_SLICE_MS);
+  } catch (e) {
+    diagLog.info('やり直し用の録音を開始できませんでした: ' + (e.message || e));
+    return null;
+  }
+  state.archiveRecorder = rec;
+  return rec;
+}
+
+/** 区間を切り替える（onstop が次の区間を作る） */
+function rollArchiveSegment(why) {
+  const rec = state.archiveRecorder;
+  if (!rec || rec.state !== 'recording') return;
+  const mins = ((Date.now() - state.archiveSegStartedAt) / 60000).toFixed(1);
+  diagLog.info(`やり直し用の録音: 区間${state.audioSeg}を${mins}分で区切り（${why === 'silence' ? '無音' : '強制'}）`);
+  try { rec.stop(); } catch { /* 状態が変わっていたら諦める */ }
+}
+
+/** 録音停止。最後のかけらは stop() が吐くので、それを取りこぼさないよう先に外す */
+function stopArchiveRecorder() {
+  const rec = state.archiveRecorder;
+  state.archiveRecorder = null;   // onstop の「次を作る」を止める
+  if (rec && rec.state !== 'inactive') {
+    try { rec.stop(); } catch { /* 既に止まっていれば何もしない */ }
+  }
+}
+
 /**
  * 無音検出の状態を1行にまとめる（診断ログ用・v0.18.3）
  *
@@ -2100,26 +2230,6 @@ function confirmedTailText(excludeEl, maxChars = 400) {
   }
   const all = parts.join('\n');
   return all.length > maxChars ? all.slice(-maxChars) : all;
-}
-
-/**
- * 録音チャンクを一時保管する (v0.19.0)
- *
- * 設定がオフなら何もしない（**既定はオフ**）。
- * 保管に失敗しても録音と文字起こしは止めない。あくまで「やり直せたら嬉しい」
- * 付加機能であって、これのために本筋を落とす価値は無い。
- */
-function keepAudioChunk(blob) {
-  if (!state.settings.audioKeepRecording) return;
-  const sessionId = state.recordingSessionId || state.activeId;
-  if (!sessionId || !blob || !blob.size) return;
-  audioStorePut(sessionId, blob, state.audioSeq++).catch(e => {
-    // 容量不足などで失敗しうる。1回だけ知らせて、以後は黙って諦める
-    if (!state.audioStoreWarned) {
-      state.audioStoreWarned = true;
-      diagLog.info('音声の保管に失敗しました（録音と文字起こしは続きます）: ' + (e.message || e));
-    }
-  });
 }
 
 /**
@@ -2277,9 +2387,9 @@ async function startGeminiAudioRecording() {
       const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
       // 設定の minChunkBytes 未満は無音と見なしてスキップ（デフォ400: 従来1200より感度↑）
       const minBytes = Number.isFinite(state.settings.audioMinChunkBytes) ? state.settings.audioMinChunkBytes : 400;
-      // v0.19.0: 保管は「送るかどうか」とは独立に行う。
-      // 無音判定でスキップしたチャンクも、やり直しでは音声の連続性が要るので残す
-      keepAudioChunk(blob);
+      // v0.21.0: 保管はこの経路では行わない。ここに来るチャンクは1本ずつ
+      // 独立した webm で、繋いでも最初の1本しか読めないため
+      // （やり直し用は startArchiveRecorder が別に録っている）
       if (blob.size > minBytes) {
         // 発話あり（と推定） → 長無音タイマーをリセット
         resetLongSilenceTimer();
@@ -2359,7 +2469,10 @@ async function startGeminiAudioRecording() {
 
   state.chunkStartedAt = Date.now();
   state.chunkStartedAtSilence = true;   // 録音開始直後は必ず「頭から」
-  state.audioSeq = 0;                   // v0.19.0: 保管の通し番号
+
+  // v0.21.0: やり直し用の録音は live とは別の録音機で録る。
+  // 保持がオフなら作らない（作らなければ消し忘れも起きない）
+  startArchiveRecorder(state.audioStream, recOpts);
 
   const cutChunk = (endedAtSilence, source) => {
     if (!state.mediaRecorder || state.mediaRecorder.state !== 'recording') return;
@@ -2384,6 +2497,16 @@ async function startGeminiAudioRecording() {
       silentMs: sig.ms,
     });
     if (cut) cutChunk(cut === 'silence', sig.source);
+
+    // v0.21.0: やり直し用の録音を約10分ごとに区切る。live の区切りとは
+    // 独立して判断する（目的が違う。shouldRollArchiveSegment の解説を参照）
+    if (state.archiveRecorder) {
+      const roll = shouldRollArchiveSegment({
+        elapsed: Date.now() - state.archiveSegStartedAt,
+        silentMs: sig.ms,
+      });
+      if (roll) rollArchiveSegment(roll);
+    }
   }, SILENCE_POLL_MS);
 
   // 時間しきい値（60秒経過）だけでも発火できるよう、ウォッチドッグを常駐させる
@@ -2412,6 +2535,9 @@ function stopGeminiAudioRecording() {
     state.finalChunkPending = true;   // onstop で下ろす
     try { recorder.stop(); } catch { state.finalChunkPending = false; }
   }
+  // v0.21.0: 保管側も止める。**ストリームを閉じる前に**止めること
+  // （トラックが先に止まると、最後のかけらが出てこない）
+  stopArchiveRecorder();
   if (state.silenceDetector) {
     try { state.silenceDetector.close(); } catch {}
     state.silenceDetector = null;
