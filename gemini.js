@@ -246,7 +246,7 @@ async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800, sk
   throw lastErr || new Error('Gemini 呼び出し失敗（リトライ上限）');
 }
 
-async function refineWithGemini({ apiKey, context, newChunk, sessionContext, maxOutputTokens = 2048 }) {
+async function refineWithGemini({ apiKey, context, newChunk, sessionContext, joinFragments = false, maxOutputTokens = 2048 }) {
   if (!apiKey) throw new Error('Gemini API キーが設定されていません');
   if (!newChunk || !newChunk.trim()) return '';
 
@@ -259,8 +259,30 @@ async function refineWithGemini({ apiKey, context, newChunk, sessionContext, max
   // v0.16.0: 文脈（語彙）を渡す。Web Speech の誤認識（例「Gemini」→「ジムニー」）は
   // ここで直せることがあるので、音声モードだけでなく整形にも効かせる。
   const ctxBlock = buildContextBlock(sessionContext);
+
+  // v0.17.2: 短チャンクの統合で使う。入力が「同じ連続発話を機械的に切った断片の並び」
+  // であることを教え、文の途中で切れた断片どうしを繋ぎ直させる。
+  //
+  // v0.17.1 で音声側に「断片を完成させるな」と入れた結果、捏造は止まった代わりに
+  // 「になっていましたが、今回は…」のような頭の欠けた段落がそのまま残るようになった。
+  // ここで繋ぐのは、**両方の断片が実際に手元にある**再構成であって創作ではない。
+  // その区別をプロンプトで明示しないと、片側しか無いものまで補われてしまう。
+  const fragmentBlock = joinFragments ? [
+    '【入力の性質】',
+    '以下は、同じ連続した発話を一定時間で機械的に区切った断片の並びです。',
+    '空行で区切られた各断片は、文の途中で切れていることがあります。',
+    '- 文の途中で切れている断片どうしは、**つないで元の1文に戻す**こと',
+    '  （例:「…前回はカタカナ」＋「になっていましたが、今回は…」',
+    '   →「…前回はカタカナになっていましたが、今回は…」）',
+    '- つないでよいのは、**両方の断片が実際にここにある場合だけ**。',
+    '  片方しか無いものに言葉を足して文を完成させてはいけない',
+    '  （先頭が「になっていましたが」で始まり、その前の断片が無いなら、そのまま残す）',
+    '',
+  ] : [];
+
   const userPrompt = [
     ...(ctxBlock ? [ctxBlock, ''] : []),
+    ...fragmentBlock,
     '【直前の整形済み文脈】',
     context || '（なし：これが最初のチャンクです）',
     '',

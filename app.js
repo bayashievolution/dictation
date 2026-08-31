@@ -1164,6 +1164,9 @@ async function consolidateShortChunks(shortParas) {
       sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
+      // v0.17.2: ここに集まるのは同じ発話を機械的に切った断片の並び。
+      // 文の途中で切れているものを繋ぎ直させる
+      joinFragments: true,
     });
     firstPara.className = 'paragraph refined';
     setParagraphContent(firstPara, refined || rawText);
@@ -2244,12 +2247,61 @@ function requestNotionCancel() {
  * @param {Array} sessions
  * @returns {Promise<{results:Array, cancelled:boolean}>}
  */
+/**
+ * 未確定の文字起こしが残っていないか確かめる (v0.17.3)
+ *
+ * Notion 保存のあと「閉じる」を押すとタブは削除される。
+ * このとき Gemini の返事待ちのチャンクが残っていると、
+ * **保存されないまま消える＝永久に失われる**。
+ * やっさんの普段の使い方（保存して閉じる）だと現実に起きうるので、先に止める。
+ *
+ * @returns {Promise<boolean>} 続行してよければ true
+ */
+async function ensureTranscriptSettled() {
+  if (state.isRecording) {
+    return confirm(
+      '録音中です。\n'
+      + 'いま保存すると、これから確定する分は含まれません。\n\n'
+      + '録音を止めてから保存することをおすすめします。このまま続けますか？'
+    );
+  }
+
+  if (state.audioInFlightCount > 0) {
+    const n = state.audioInFlightCount;
+    const wait = confirm(
+      `まだ確定していない文字起こしが ${n} 件あります。\n`
+      + 'いま保存すると、その分は含まれません。\n\n'
+      + '「OK」= 確定を待ってから保存します（最大30秒）\n'
+      + '「キャンセル」= 保存をやめます'
+    );
+    if (!wait) return false;
+
+    const deadline = Date.now() + 30000;
+    while (state.audioInFlightCount > 0 && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+    if (state.audioInFlightCount > 0) {
+      return confirm(
+        `30秒待ちましたが、まだ ${state.audioInFlightCount} 件が確定していません。\n`
+        + 'このまま保存しますか？（その分は含まれません）'
+      );
+    }
+    // 待っている間に確定した分を取り込む
+    snapshotActiveToSession();
+    persistSessions();
+  }
+  return true;
+}
+
 async function uploadSessionsToNotion(sessions) {
   const targets = sessions.filter(sessionHasContentForNotion);
   if (targets.length === 0) {
     alert('Notion に保存する中身がありません。');
     return { results: [], cancelled: false };
   }
+
+  // 確定待ちを残したまま保存 → 閉じる、で内容が消えるのを防ぐ
+  if (!(await ensureTranscriptSettled())) return { results: [], cancelled: false };
 
   const summary = targets.length === 1
     ? `「${targets[0].title}」を1ノートとして保存します。`
