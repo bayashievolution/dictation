@@ -1592,8 +1592,8 @@ function stopRecording() {
  * -40dB のような固定値にすると、静かな部屋の小声が丸ごと「無音」に落ちて、
  * 発話の途中で切るという元の失敗に戻る。
  * そこで**その場の暗騒音（ノイズフロア）を推定し、そこから何dB上か**で判定する。
- * 推定の作り方は下の①②と silentMs() のコメントを参照（どれも合成音のテストで
- * 実際に失敗を出してから足した対策で、思いつきの安全策ではない）。
+ * 推定の作り方は SILENCE_WINDOW_MS のコメントを参照（v0.18.3 で一度作り直している。
+ * 最初の版は実機で「3秒黙っても無音が一度も検出されない」という形で失敗した）。
  */
 const SILENCE_MARGIN_DB = 6;     // ノイズフロアからこれだけ上までは「無音」とみなす
 /* 「どれだけ静かなら文の切れ目か」(v0.18.2)
@@ -1612,10 +1612,40 @@ const SILENCE_HOLD_MS = 700;         // 通常。文の切れ目とみなす長�
 const SILENCE_HOLD_LATE_MS = 350;    // 最長が近いときの妥協ライン
 const SILENCE_LATE_WINDOW_MS = 4000; // 最長のこれだけ手前から妥協を始める
 const SILENCE_POLL_MS = 50;      // 判定の刻み
-const SILENCE_CALIBRATE_MS = 1000; // 開始直後、暗騒音を実測する時間
-// フロアからこれだけ上の音を一度でも聞くまでは、無音判定を許さない。
-// 「静か」は相対的な概念なので、大きい側を知らないうちは判定できない。
-const SILENCE_SPEECH_MARGIN_DB = 10;
+
+/* ノイズフロアの推定方法 (v0.18.3 で作り直し)
+ *
+ * v0.18.2 までは「開始1秒を実測して初期値にし、以後は静かなときだけ EMA 追従」
+ * だった。実機ログで、3秒黙っても無音が一度も検出されないことが分かった。
+ * 原因はデッドロック:
+ *
+ *   録音開始直後は AudioContext にまだサンプルが流れておらず、解析結果は
+ *   ゼロ = -99dB。それが初期実測に入り、フロアが -99dB で確定する。
+ *   → quiet = db < -99+6 = -93dB は実際の音では絶対に成立しない
+ *   → フロアの学習は「静かなとき」限定なので、-99 から一生回復できない
+ *
+ * 「喋り続けるとフロアが持ち上がる」のを防ぐために学習を絞ったことが、
+ * 逆方向（フロアが低すぎる）から抜け出せない作りになっていた。
+ *
+ * なので片方向の追従をやめ、**直近の窓の最小値**をフロアにする。最小値なら
+ * 両方向に自己修正する。窓は SILENCE_WINDOW_MS のバケツ2本＝直近 4〜8 秒。
+ *
+ * ただし最小値だけだと、ずっと同じ音量で喋り続けたときにフロアが発話レベルに
+ * 張りついて発話が無音に見える。そこで**同じ窓の最大値**も持ち、最大と最小の
+ * 開きが SILENCE_DYNAMIC_RANGE_DB 未満なら「大きい側と小さい側の区別がついて
+ * いない」と見なして判定を放棄する（＝最長秒数で切る）。
+ * 「静か」は相対的な概念なので、開きが無いうちは判定できない。
+ *
+ * 既知の限界（意図した挙動）: 沈黙が窓を埋め尽くすと大きい側が窓から消え、
+ * 判定不能に戻る。判断材料が無いのに「きれいに切れた」と主張するより、
+ * 強制区切りに落ちるほうが正しい。実害も小さい（そんなチャンクは中身が沈黙なので
+ * 送信閾値で捨てられる）。喋り直せば復帰する。
+ */
+const SILENCE_WINDOW_MS = 4000;       // 最小/最大を集めるバケツの長さ（窓は最大この2倍）
+const SILENCE_DYNAMIC_RANGE_DB = 10;  // 窓内の最大-最小がこれ未満なら判定しない
+// 完全なゼロ（-95dB 未満）は「静かな部屋」ではなく「まだ音が流れていない」。
+// これをフロアの材料にすると上記のデッドロックが起きるので、材料から外す。
+const DIGITAL_SILENCE_DB = -95;
 
 function createSilenceDetector(stream) {
   const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -1630,7 +1660,14 @@ function createSilenceDetector(stream) {
     // 自動再生ポリシーで suspended のまま作られることがある。
     // そのままだと解析値が常にゼロになり、無音判定が一切効かなくなる
     // （＝最長秒数での強制区切りに落ちるだけなので致命的ではないが、機能しない）
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if (ctx.state === 'suspended') {
+      // resume は非同期。戻るまでの数フレームはゼロが返るが、ゼロは
+      // フロアの材料から外してあるので推定は汚れない
+      ctx.resume().then(
+        () => diagLog.info('無音検出: AudioContext を resume しました'),
+        () => diagLog.info('無音検出: AudioContext の resume に失敗（強制区切りに落ちます）'),
+      );
+    }
   } catch (e) {
     console.warn('[silence] AudioContext を作れませんでした:', e);
     try { ctx && ctx.close(); } catch {}
@@ -1638,12 +1675,23 @@ function createSilenceDetector(stream) {
   }
 
   const buf = new Float32Array(analyser.fftSize);
-  let noiseFloorDb = null;  // 開始直後の実測で決める（固定値から始めない）
   let silentSinceMs = 0;    // 無音が始まった時刻（0 = いま無音ではない）
   let lastDb = -99;
-  let heardSpeech = false;  // フロアより明確に大きい音を聞いたことがあるか（録音全体）
-  let speechInChunk = false; // 同上（いまのチャンクの中だけ。区切りごとにリセット）
-  const startedAt = Date.now();
+  let speechInChunk = false;   // いまのチャンクの中で発話らしい音量を見たか
+  let longestSilentInChunk = 0; // 同上・いちばん長かった無音（診断用）
+
+  // 直近の窓の最小/最大。バケツ2本を回して「直近 4〜8 秒」を見る
+  let curMin = Infinity, curMax = -Infinity;
+  let prevMin = Infinity, prevMax = -Infinity;
+  let bucketStartedAt = Date.now();
+
+  const floorDb = () => Math.min(curMin, prevMin);
+  const peakDb = () => Math.max(curMax, prevMax);
+  /** 大きい側と小さい側の区別がついているか（ついていなければ判定を放棄する） */
+  const canJudge = () => {
+    const f = floorDb(), p = peakDb();
+    return Number.isFinite(f) && Number.isFinite(p) && p - f >= SILENCE_DYNAMIC_RANGE_DB;
+  };
 
   const timer = setInterval(() => {
     analyser.getFloatTimeDomainData(buf);
@@ -1652,25 +1700,29 @@ function createSilenceDetector(stream) {
     const rms = Math.sqrt(sum / buf.length);
     const db = rms > 0 ? 20 * Math.log10(rms) : -99;
     lastDb = db;
+    const now = Date.now();
 
-    // ① 開始直後: その場の暗騒音を実測する。固定値(-60dB)から始めると、
-    //    うるさい部屋では暗騒音がずっと「発話」に見えて無音が一生見つからない。
-    if (noiseFloorDb === null || Date.now() - startedAt < SILENCE_CALIBRATE_MS) {
-      noiseFloorDb = noiseFloorDb === null ? db : Math.min(noiseFloorDb, db);
-      return;
+    // 完全なゼロは「まだ音が流れていない」。フロアの材料にしないし、
+    // 無音とも見なさない（材料にすると v0.18.2 のデッドロックが再発する）
+    if (db > DIGITAL_SILENCE_DB) {
+      if (db < curMin) curMin = db;
+      if (db > curMax) curMax = db;
+      if (now - bucketStartedAt >= SILENCE_WINDOW_MS) {
+        prevMin = curMin; prevMax = curMax;
+        curMin = Infinity; curMax = -Infinity;
+        bucketStartedAt = now;
+      }
     }
 
-    const quiet = db < noiseFloorDb + SILENCE_MARGIN_DB;
-    if (db >= noiseFloorDb + SILENCE_SPEECH_MARGIN_DB) heardSpeech = speechInChunk = true;
+    const quiet = db > DIGITAL_SILENCE_DB && canJudge() && db < floorDb() + SILENCE_MARGIN_DB;
+    if (db > DIGITAL_SILENCE_DB && canJudge() && db >= floorDb() + SILENCE_DYNAMIC_RANGE_DB) {
+      speechInChunk = true;
+    }
 
-    // ② フロアの学習は「静かだと判定できているとき」だけ行う。
-    //    常時追従させると、喋り続けたときにフロアが発話レベルまで持ち上がり、
-    //    発話そのものが無音に見えてしまう（＝発話の途中で切るという元の失敗に戻る）。
-    //    実測: 常時追従だと -25dB で1分喋り続けただけでフロアが -28dB まで上がった。
     if (quiet) {
-      // 下がるときは速く（すぐ静かさに追従）、上がるときは遅く（空調などをゆっくり学習）
-      noiseFloorDb += (db - noiseFloorDb) * (db < noiseFloorDb ? 0.25 : 0.05);
-      if (!silentSinceMs) silentSinceMs = Date.now();
+      if (!silentSinceMs) silentSinceMs = now;
+      const held = now - silentSinceMs;
+      if (held > longestSilentInChunk) longestSilentInChunk = held;
     } else {
       silentSinceMs = 0;
     }
@@ -1678,23 +1730,26 @@ function createSilenceDetector(stream) {
 
   return {
     /**
-     * いま何 ms 静かが続いているか（0 = 静かではない）。
+     * いま何 ms 静かが続いているか（0 = 静かではない／判定できない）。
      * どれだけ続いたら切るかの判断は decideChunkCut 側に置く。
      */
     silentMs() {
-      // 喋っている最中に録音を開始すると、初期実測が発話レベルをフロアだと
-      // 思い込み、発話中ずっと「無音」に見える。そのまま切ると Gemini に
-      // 「きれいに切れた」と嘘を伝えることになるので、大きい側を一度も
-      // 聞いていないうちは判定しない（＝従来どおり最長秒数で切る）。
-      if (!heardSpeech || !silentSinceMs) return 0;
+      if (!silentSinceMs) return 0;
       return Date.now() - silentSinceMs;
     },
     db() { return lastDb; },
-    floorDb() { return noiseFloorDb === null ? -99 : noiseFloorDb; },
+    floorDb() { const f = floorDb(); return Number.isFinite(f) ? f : -99; },
+    peakDb() { const p = peakDb(); return Number.isFinite(p) ? p : -99; },
+    /** 大きい側と小さい側の区別がついているか（診断用） */
+    canJudge,
+    /** AudioContext の状態（suspended のままだと解析値が全部ゼロになる） */
+    ctxState() { return ctx.state; },
     /** いまのチャンクの中で、一度でも発話らしい音量があったか */
     sawSpeechInChunk() { return speechInChunk; },
+    /** いまのチャンクの中でいちばん長かった無音（ms・診断用） */
+    longestSilentMsInChunk() { return longestSilentInChunk; },
     /** チャンクを切ったときに呼ぶ */
-    resetChunkSpeech() { speechInChunk = false; },
+    resetChunkSpeech() { speechInChunk = false; longestSilentInChunk = 0; },
     close() {
       clearInterval(timer);
       try { src.disconnect(); } catch {}
@@ -1740,6 +1795,23 @@ function decideChunkCut({ elapsed, minMs, maxMs, useSilenceCut, silentMs }) {
  *   - 検出器がこのチャンク中に発話音量を一度も見ていない
  * 検出器が無い場合 hadSpeech は undefined なので、消さずに残す。
  */
+/**
+ * 無音検出の状態を1行にまとめる（診断ログ用・v0.18.3）
+ *
+ * v0.18.2 は「3秒黙ったのに無音が一度も検出されない」という形で壊れていたが、
+ * ログには「尻=強制」としか出ず、検出器の中で何が起きているか分からなかった。
+ * **そのチャンク中でいちばん長かった無音**を出せば、次からは一目で切り分けられる:
+ *   最長無音 3000ms なのに強制で切れている → 区切りの判断がおかしい
+ *   最長無音 0ms なのに黙っていた          → 検出器がおかしい
+ */
+function silenceDiag() {
+  const d = state.silenceDetector;
+  if (!d) return '';
+  return `[床${d.floorDb().toFixed(0)} 天${d.peakDb().toFixed(0)} `
+    + `${d.canJudge() ? '判定可' : '判定不能'} 最長無音${d.longestSilentMsInChunk()}ms `
+    + `ctx=${d.ctxState()}]`;
+}
+
 function shouldDropEmptyChunk(provisionalText, edges) {
   if (provisionalText) return false;
   return !!edges && edges.hadSpeech === false;
@@ -1816,7 +1888,8 @@ async function startGeminiAudioRecording() {
         // 長さも出す。強制区切りばかりになっていないかを実機ログで見分けるため
         diagLog.info(`音声チャンク送信 ${blob.size}B (>${minBytes}) `
           + `長さ${((edges.durationMs || 0) / 1000).toFixed(1)}秒 `
-          + `切り口 頭=${edges.startsAtSilence ? '無音' : '強制'} 尻=${edges.endsAtSilence ? '無音' : '強制'}`);
+          + `切り口 頭=${edges.startsAtSilence ? '無音' : '強制'} 尻=${edges.endsAtSilence ? '無音' : '強制'} `
+          + (edges.diag || ''));
         // 未確定分はここで確定（次のチャンクに持ち越さない）。
         // 送らなかったチャンクでは取り出さず、次まで溜め続ける
         sendAudioChunkToGemini(blob, takeLiveFinals(), edges);
@@ -1886,6 +1959,7 @@ async function startGeminiAudioRecording() {
       // 検出器が無いときは undefined のまま（＝判断材料なし）にしておく
       hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
       durationMs: Date.now() - state.chunkStartedAt,
+      diag: silenceDiag(),
     };
     if (state.silenceDetector) state.silenceDetector.resetChunkSpeech();
     state.mediaRecorder.stop(); // onstop で送信＋再スタート
@@ -1921,6 +1995,7 @@ function stopGeminiAudioRecording() {
       && state.silenceDetector.silentMs() >= SILENCE_HOLD_LATE_MS),
     hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
     durationMs: state.chunkStartedAt ? Date.now() - state.chunkStartedAt : 0,
+    diag: silenceDiag(),
   };
   if (recorder && recorder.state !== 'inactive') {
     try { recorder.stop(); } catch {}
