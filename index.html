@@ -47,6 +47,9 @@
       <button id="btn-search" class="btn btn-ghost btn-square" title="検索＆置換（Ctrl+F）">
         <span class="btn-icon" data-icon="search"></span>
       </button>
+      <button id="btn-context" class="btn btn-ghost btn-square" title="この録音の文脈（分野・話者・用語）を設定して文字起こしの精度を上げる">
+        <span class="btn-icon" data-icon="tag"></span>
+      </button>
       <button id="btn-settings" class="btn btn-ghost btn-square" title="設定">
         <span class="btn-icon" data-icon="settings"></span>
       </button>
@@ -627,6 +630,60 @@
   </div>
 
   <!-- 無音停止確認ダイアログ -->
+  <!-- v0.16.0: 録音の文脈。ここに書いた語彙が文字起こしのプロンプトに載る。
+       同音異義語と固有名詞の誤りは音だけでは直せないので、先に語を教えておく。 -->
+  <div id="context-modal" class="modal hidden">
+    <div class="modal-backdrop" data-dismiss></div>
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <h2>この録音の文脈</h2>
+        <button class="modal-close" data-dismiss><span data-icon="x"></span></button>
+      </div>
+      <div class="modal-body">
+        <p class="field-hint" style="margin-bottom:14px">
+          ここに書いた内容は<strong>語彙のヒント</strong>として文字起こしに渡されます。
+          同音異義語（家庭／課程／過程）や固有名詞は音だけでは決められないので、
+          先に教えておくと精度が上がります。<strong>台本としては使われません</strong>（書いた内容が勝手に本文に入ることはありません）。
+        </p>
+
+        <label class="field">
+          <span class="field-label">分野・場面</span>
+          <input id="input-context-field" type="text" placeholder="例: 教育心理学の講義 / 教育実習の指導面談" />
+        </label>
+
+        <label class="field">
+          <span class="field-label">話者</span>
+          <input id="input-context-speakers" type="text" placeholder="例: 三宅院生、指導教員" />
+          <small class="field-hint">話者判別を入れたときに名前で出せるようになります</small>
+        </label>
+
+        <label class="field">
+          <span class="field-label">よく出る語・固有名詞</span>
+          <textarea id="input-context-terms" rows="5" placeholder="不登校&#10;予防的心理教育&#10;中心課題&#10;Gemini&#10;Notion"></textarea>
+          <small class="field-hint">改行かカンマ区切り。人名・専門用語・製品名など、誤変換されやすいものを</small>
+        </label>
+
+        <div class="field">
+          <div class="diag-log-actions">
+            <button type="button" id="btn-context-from-memo" class="pane-btn" title="メモペインに書いた見出しや箇条書きから語を拾う">
+              <span data-icon="pencil"></span><span>メモから取り込む</span>
+            </button>
+            <span id="context-memo-result" class="field-hint"></span>
+          </div>
+        </div>
+
+        <label class="field field-row">
+          <input id="input-context-default" type="checkbox" />
+          <span>この内容を新しいタブの初期値にする</span>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-context-save" class="btn btn-primary">保存</button>
+        <button class="btn btn-ghost" data-dismiss>キャンセル</button>
+      </div>
+    </div>
+  </div>
+
   <!-- v0.14.2: Notion 保存先ピッカー。
        毎回聞くが、前回の保存先が最初から選ばれた状態で開く（そのまま保存を押せば済む）。 -->
   <div id="notion-picker" class="modal hidden">
@@ -699,9 +756,9 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.15.2"></script>
-  <script src="gemini.js?v=0.15.2"></script>
-  <script src="notion.js?v=0.15.2"></script>
-  <script src="app.js?v=0.15.2"></script>
+  <script src="icons.js?v=0.16.0"></script>
+  <script src="gemini.js?v=0.16.0"></script>
+  <script src="notion.js?v=0.16.0"></script>
+  <script src="app.js?v=0.16.0"></script>
 </body>
 </html>

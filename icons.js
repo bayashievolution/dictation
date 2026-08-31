@@ -40,6 +40,8 @@ const ICON_DEFS = {
   'redo': '<path d="M15 14l5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13"/>',
   // Notion アップロード（雲＋上矢印）。Lucide の cloud-upload に合わせた 24x24 / stroke 2
   'cloud-upload': '<path d="M12 13v8"/><path d="M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.2"/><path d="M8 17l4-4 4 4"/>',
+  // 録音の文脈（語彙ヒント）。Lucide の tag に合わせた 24x24 / stroke 2
+  'tag': '<path d="M12.6 2.7l8.7 8.7a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0l-8.7-8.7A2 2 0 0 1 3 10.2V4a1 1 0 0 1 1-1h6.2a2 2 0 0 1 1.4.6z"/><circle cx="7.5" cy="7.5" r="1.2"/>',
   // 置換（⇄ / swap）
   'replace': '<path d="M4 7h13M4 7l4-4M4 7l4 4"/><path d="M20 17H7M20 17l-4-4M20 17l-4 4"/>',
 };

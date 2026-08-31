@@ -162,6 +162,11 @@ const DEFAULT_SETTINGS = {
   notionLastDatePropName: '',
   // v0.15.0: 保存できたタブを自動で閉じる。進捗ダイアログのチェックと連動して記憶する
   notionAutoClose: false,
+  // v0.16.0: 文字起こしに渡す文脈の既定値。新しいタブはこれを引き継いで始まる
+  // （同じ講義を何度も録るので、毎回入力し直さずに済ませるため）
+  defaultContextField: '',
+  defaultContextSpeakers: '',
+  defaultContextTerms: '',
 };
 // v0.13.24: WEB_SPEECH_DEFAULTS（v0.13.9 「Web Speech 設定をデフォルトに戻す」
 // ボタン用のリセット値）は UI 撤去済み（v0.13.23）に伴い削除。
@@ -384,6 +389,15 @@ const els = {
   notionAutoCloseRow: document.getElementById('notion-auto-close-row'),
   btnNotionCloseTabs: document.getElementById('btn-notion-close-tabs'),
   btnNotionKeepTabs: document.getElementById('btn-notion-keep-tabs'),
+  btnContext: document.getElementById('btn-context'),
+  contextModal: document.getElementById('context-modal'),
+  inputContextField: document.getElementById('input-context-field'),
+  inputContextSpeakers: document.getElementById('input-context-speakers'),
+  inputContextTerms: document.getElementById('input-context-terms'),
+  inputContextDefault: document.getElementById('input-context-default'),
+  btnContextFromMemo: document.getElementById('btn-context-from-memo'),
+  contextMemoResult: document.getElementById('context-memo-result'),
+  btnContextSave: document.getElementById('btn-context-save'),
   notionSettingsGroup: document.getElementById('notion-settings-group'),
   inputNotionToken: document.getElementById('input-notion-token'),
   btnNotionTest: document.getElementById('btn-notion-test'),
@@ -805,6 +819,7 @@ async function flushPendingToGemini() {
   try {
     const refined = await refineWithGemini({
       apiKey: state.settings.apiKey,
+      sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
     });
@@ -866,6 +881,7 @@ async function refineUnstructuredInTranscript({ force = false, showFeedback = tr
   try {
     const refined = await refineWithGemini({
       apiKey: state.settings.apiKey,
+      sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
     });
@@ -902,6 +918,7 @@ async function retryPendingRefinements({ showFeedback = true } = {}) {
     try {
       const refined = await refineWithGemini({
         apiKey: state.settings.apiKey,
+        sessionContext: getSessionContextForAi(),
         context: getContextForGemini(),
         newChunk: rawText,
       });
@@ -1018,6 +1035,7 @@ async function refineWholeTranscript({ showFeedback = true } = {}) {
     } else {
       refined = await refineWithGemini({
         apiKey: state.settings.apiKey,
+        sessionContext: getSessionContextForAi(),
         context: '',
         newChunk: allText,
         maxOutputTokens: 8192,
@@ -1073,6 +1091,7 @@ async function refineByChunks(fullText, progressTargetEl) {
     try {
       const out = await refineWithGemini({
         apiKey: state.settings.apiKey,
+        sessionContext: getSessionContextForAi(),
         context: prevTail.slice(-500),  // 直前チャンクの末尾500字だけ文脈として
         newChunk: blocks[i],
         maxOutputTokens: 4096,           // チャンク単位なので 4k で十分
@@ -1137,6 +1156,7 @@ async function consolidateShortChunks(shortParas) {
   try {
     const refined = await refineWithGemini({
       apiKey: state.settings.apiKey,
+      sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
     });
@@ -1640,6 +1660,7 @@ async function sendAudioChunkToGemini(blob) {
   try {
     const text = await transcribeAudioWithGemini({
       apiKey: state.settings.apiKey,
+      sessionContext: getSessionContextForAi(),
       audioBlob: blob,
       contextHint: getContextForGemini(),
     });
@@ -4210,6 +4231,98 @@ function enableDragSort(list, { itemSelector, idAttr = 'pane-id', onReorder }) {
   });
 }
 
+/* ───────── 録音の文脈（語彙ヒント） v0.16.0 ─────────
+ *
+ * 講義や会議は分野の語彙がほぼ決まっている。同音異義語と固有名詞は音だけでは
+ * 決められないので、先に語を渡して選ばせる。
+ * 実測例: Web Speech が「Gemini」を「ジムニー」と書いた。これは語彙で防げる誤り。
+ *
+ * 渡す先は音声文字起こし（transcribeAudioWithGemini）と整形（refineWithGemini）の両方。
+ * Web Speech モードでも整形の段で誤変換を直せることがあるため。
+ */
+
+/** Gemini に渡す文脈。中身が空なら undefined を返し、プロンプトに何も足さない */
+function getSessionContextForAi() {
+  const s = getActiveSession();
+  const c = s?.context;
+  if (!c) return undefined;
+  const has = (c.field || '').trim() || (c.speakers || '').trim() || (c.terms || '').trim();
+  if (!has) return undefined;
+  return { field: c.field, speakers: c.speakers, terms: c.terms };
+}
+
+function openContextModal() {
+  const s = getActiveSession();
+  if (!s) return;
+  if (!s.context) s.context = { field: '', speakers: '', terms: '' };
+  els.inputContextField.value = s.context.field || '';
+  els.inputContextSpeakers.value = s.context.speakers || '';
+  els.inputContextTerms.value = s.context.terms || '';
+  els.inputContextDefault.checked = false;
+  els.contextMemoResult.textContent = '';
+  els.contextModal.classList.remove('hidden');
+  els.inputContextField.focus();
+}
+
+function closeContextModal() {
+  els.contextModal.classList.add('hidden');
+}
+
+function saveContextModal() {
+  const s = getActiveSession();
+  if (!s) return closeContextModal();
+  s.context = {
+    field: els.inputContextField.value.trim(),
+    speakers: els.inputContextSpeakers.value.trim(),
+    terms: els.inputContextTerms.value.trim(),
+  };
+  if (els.inputContextDefault.checked) {
+    state.settings.defaultContextField = s.context.field;
+    state.settings.defaultContextSpeakers = s.context.speakers;
+    state.settings.defaultContextTerms = s.context.terms;
+    saveSettings();
+  }
+  persistSessions();
+  closeContextModal();
+}
+
+/**
+ * メモペインから語彙を拾う。
+ * 見出し・箇条書き・チェック項目の「行」を候補にして、既存の語と重複しないものを足す。
+ * 文章まるごとではなく短い語だけを拾う（長文を語彙として渡しても効かないうえ、
+ * 台本として読まれる危険が増すため）。
+ */
+function importContextFromMemo() {
+  const lines = [];
+  els.memo.querySelectorAll('h1, h2, h3, li, .task-item').forEach(el => {
+    const t = (el.innerText || '').trim();
+    if (t) lines.push(t);
+  });
+
+  // 1行が長いものは語彙ではなく文なので除く。記号だけの行も捨てる
+  const picked = [];
+  for (const raw of lines) {
+    const t = raw.replace(/\s+/g, ' ').trim();
+    if (!t || t.length > 30) continue;
+    if (!/[\u3040-\u30ff\u4e00-\u9fff a-zA-Z0-9]/.test(t)) continue;
+    if (!picked.includes(t)) picked.push(t);
+  }
+
+  if (picked.length === 0) {
+    els.contextMemoResult.textContent = 'メモに拾える見出し・箇条書きがありませんでした';
+    els.contextMemoResult.className = 'field-hint notion-test-result is-ng';
+    return;
+  }
+
+  const existing = els.inputContextTerms.value.split(/[\n,、]/).map(x => x.trim()).filter(Boolean);
+  const added = picked.filter(t => !existing.includes(t));
+  els.inputContextTerms.value = existing.concat(added).join('\n');
+  els.contextMemoResult.textContent = added.length
+    ? `${added.length}件を追加しました（重複は除いています）`
+    : 'メモの内容はすべて登録済みでした';
+  els.contextMemoResult.className = 'field-hint notion-test-result ' + (added.length ? 'is-ok' : 'is-note');
+}
+
 /* ───────── Notion 連携の設定 UI (v0.14.1) ───────── */
 
 /** 接続テスト欄の色を design-system の変数で塗り分ける（style.css の .notion-test-result） */
@@ -4469,6 +4582,8 @@ function initSessions() {
     if (s.summary === undefined) s.summary = '';
     if (s.transcript === undefined) s.transcript = '';
     if (!Array.isArray(s.chat)) s.chat = [];
+    // v0.16.0: 文脈が無い古いセッションに空の器を足す
+    if (!s.context || typeof s.context !== 'object') s.context = { field: '', speakers: '', terms: '' };
   }
   state.activeId = localStorage.getItem(ACTIVE_TAB_KEY);
   if (!Array.isArray(state.sessions) || state.sessions.length === 0) {
@@ -4506,6 +4621,12 @@ function createSession({ activate = true, title = null, skipSave = false } = {})
     memo: '',
     summary: '',
     chat: [],
+    // v0.16.0: 文字起こしの語彙ヒント。既定値を引き継いで開始する
+    context: {
+      field: state.settings.defaultContextField || '',
+      speakers: state.settings.defaultContextSpeakers || '',
+      terms: state.settings.defaultContextTerms || '',
+    },
   };
   state.sessions.push(session);
   if (activate) state.activeId = id;
@@ -5207,6 +5328,14 @@ els.fileLoad.addEventListener('change', (e) => {
 });
 els.btnClearAll.addEventListener('click', clearAllPanes);
 els.btnSettings.addEventListener('click', openSettings);
+if (els.btnContext) {
+  els.btnContext.addEventListener('click', openContextModal);
+  els.btnContextSave.addEventListener('click', saveContextModal);
+  els.btnContextFromMemo.addEventListener('click', importContextFromMemo);
+  els.contextModal.querySelectorAll('[data-dismiss]').forEach(b => {
+    b.addEventListener('click', closeContextModal);
+  });
+}
 if (els.btnNotionTest) els.btnNotionTest.addEventListener('click', testNotionConnection);
 if (els.btnNotionForget) els.btnNotionForget.addEventListener('click', forgetNotionTarget);
 
@@ -5905,6 +6034,7 @@ document.addEventListener('keydown', (e) => {
     if (!els.settingsModal.classList.contains('hidden')) closeSettings();
     // v0.14.2: 保存先ピッカーは Promise で待っているので、Escape でも必ず解決させる
     if (els.notionPicker && !els.notionPicker.classList.contains('hidden')) closeNotionPicker(null);
+    if (els.contextModal && !els.contextModal.classList.contains('hidden')) closeContextModal();
     if (!els.silenceDialog.classList.contains('hidden')) {
       hideSilenceDialog();
       resetLongSilenceTimer();

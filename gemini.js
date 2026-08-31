@@ -17,6 +17,55 @@ const SYSTEM_PROMPT = `あなたは講義・会議の音声認識結果を読み
 - 明らかな誤認識は文脈から自然に補正してよい（話者名・専門用語など）
 - 出力は整形後のテキストのみ。前置きや説明は絶対に付けない`;
 
+/* ───────── 録音の文脈（語彙ヒント） v0.16.0 ─────────
+ *
+ * 講義や会議は分野の語彙がほぼ決まっている。日本語の音声認識でいちばん誤るのは
+ * 同音異義語（家庭/課程/過程、期間/機関/器官）と固有名詞で、これは音だけでは
+ * 原理的に決められない。「いま何の話をしているか」を先に渡せば正しく選べる。
+ * 実例: Web Speech は「Gemini」を「ジムニー」と書いた。語彙を渡せば防げる類の誤り。
+ *
+ * ただし渡しすぎると、モデルは「聞こえた内容」ではなく「文脈から予想される内容」を
+ * 書き始める。音声が不明瞭なときに、言っていないことを自然な文で埋めてしまうのが
+ * いちばん危ない壊れ方なので、
+ *   - 文脈は「語彙」として渡し、「筋書き」としては渡さない
+ *   - 補完禁止をプロンプト側で必ず明示する（buildNoInventionRule）
+ * の2点をセットで守る。
+ */
+
+/**
+ * セッションの文脈を、プロンプトに載せるブロックにする。
+ * 中身が何も無ければ空文字列を返す（不要な前置きを増やさない）。
+ * @param {object} [ctx] - { field, speakers, terms, topicPath, flow }
+ */
+function buildContextBlock(ctx) {
+  if (!ctx) return '';
+  const lines = [];
+  const push = (label, v) => {
+    const t = (v || '').toString().trim();
+    if (t) lines.push(`${label}: ${t.replace(/\s*\n\s*/g, ' / ')}`);
+  };
+  push('分野・場面', ctx.field);
+  push('話者', ctx.speakers);
+  push('この場でよく出る語', ctx.terms);
+  push('いまの議題', Array.isArray(ctx.topicPath) ? ctx.topicPath.filter(Boolean).join(' > ') : ctx.topicPath);
+  push('直前の流れ', ctx.flow);
+  if (!lines.length) return '';
+  return [
+    '【この録音について（表記や語の判断に使う参考情報）】',
+    ...lines,
+    '※ これは語彙のヒントであって台本ではない。ここに書かれていることを',
+    '　 音声より優先したり、書かれている内容を補ったりしないこと。',
+  ].join('\n');
+}
+
+/** 「聞こえていないことを書かない」を毎回はっきり伝える */
+function buildNoInventionRule() {
+  return [
+    '- 音声に無い内容は絶対に足さない。文脈や参考情報から推測して補完しない',
+    '- 聞き取れない箇所は [不明瞭] と書く。それらしい言葉で埋めない',
+  ].join('\n');
+}
+
 /**
  * 生チャンクを Gemini で整形する
  * @param {object} args
@@ -193,7 +242,7 @@ async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800 } =
   throw lastErr || new Error('Gemini 呼び出し失敗（リトライ上限）');
 }
 
-async function refineWithGemini({ apiKey, context, newChunk, maxOutputTokens = 2048 }) {
+async function refineWithGemini({ apiKey, context, newChunk, sessionContext, maxOutputTokens = 2048 }) {
   if (!apiKey) throw new Error('Gemini API キーが設定されていません');
   if (!newChunk || !newChunk.trim()) return '';
 
@@ -203,7 +252,11 @@ async function refineWithGemini({ apiKey, context, newChunk, maxOutputTokens = 2
     return newChunk.trim();
   }
 
+  // v0.16.0: 文脈（語彙）を渡す。Web Speech の誤認識（例「Gemini」→「ジムニー」）は
+  // ここで直せることがあるので、音声モードだけでなく整形にも効かせる。
+  const ctxBlock = buildContextBlock(sessionContext);
   const userPrompt = [
+    ...(ctxBlock ? [ctxBlock, ''] : []),
     '【直前の整形済み文脈】',
     context || '（なし：これが最初のチャンクです）',
     '',
@@ -453,7 +506,7 @@ async function chatWithGemini({ apiKey, contextSources, history, question }) {
  * @param {string} [args.contextHint]
  * @returns {Promise<string>}
  */
-async function transcribeAudioWithGemini({ apiKey, audioBlob, contextHint }) {
+async function transcribeAudioWithGemini({ apiKey, audioBlob, contextHint, sessionContext }) {
   if (!apiKey) throw new Error('Gemini API キーが設定されていません');
   if (!audioBlob || audioBlob.size === 0) return '';
 
@@ -465,18 +518,22 @@ async function transcribeAudioWithGemini({ apiKey, audioBlob, contextHint }) {
     '- 句読点と改行を適切に補完',
     '- フィラー（えー、あー、まぁ、んー）を削除',
     '- 言い直しは自然な文に整える',
-    '- 明らかに不明瞭で推定困難な部分は [不明瞭] と表記',
     '- 話題の切れ目では段落を分ける',
     '- 出力は整形済みテキストのみ、前置き・説明は不要',
     '- 音声が無音・ノイズのみ・意味ある発話ゼロなら、空文字列のみ返す',
+    buildNoInventionRule(),
   ].join('\n');
 
   const userParts = [];
+  const ctxBlock = buildContextBlock(sessionContext);
+  const head = [];
+  if (ctxBlock) head.push(ctxBlock, '');
   if (contextHint) {
-    userParts.push({ text: `【直前の文脈（参考）】\n${contextHint}\n\n【次の音声を文字起こしして】` });
+    head.push('【直前の文脈（参考）】', contextHint, '', '【次の音声を文字起こしして】');
   } else {
-    userParts.push({ text: '以下の音声を日本語で文字起こしし、整形してください。' });
+    head.push('以下の音声を日本語で文字起こしし、整形してください。');
   }
+  userParts.push({ text: head.join('\n') });
   userParts.push({ inline_data: { mime_type: audioBlob.type || 'audio/webm', data: base64 } });
 
   const body = {
