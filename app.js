@@ -1875,6 +1875,18 @@ async function copyAllMultiformat() {
  * 保存先は毎回聞くが、前回の保存先が選択済みの状態で出るので Enter/保存だけで済む。
  */
 
+/**
+ * Notion アップ済み印を外す (v0.15.1)。
+ * 上げたあとに中身が変わったら「最新が上がっている」とは言えないので印を消す。
+ * Notion 側でノートが消されたかどうかは見ない（やっさん指示）。
+ */
+function clearNotionUploadedMark(session) {
+  if (!session || !session.notionUploadedAt) return;
+  session.notionUploadedAt = null;
+  // タブバーの印を即座に消す。persist は呼び出し元の保存に任せる
+  renderTabs();
+}
+
 /** セッション1件 → ノート内のトグル配列。空のペインは省略する */
 function buildNotionToggles(session) {
   const toggles = [];
@@ -3579,6 +3591,7 @@ async function sendChatMessageFrom(inputEl, sendBtn) {
   if (!Array.isArray(session.chat)) session.chat = [];
 
   const history = session.chat.slice();
+  clearNotionUploadedMark(session);
   session.chat.push({ role: 'user', content: text, ts: Date.now() });
   inputEl.value = '';
   inputEl.style.height = '';
@@ -4510,9 +4523,18 @@ function getActiveSession() {
 function snapshotActiveToSession(opts = {}) {
   const s = getActiveSession();
   if (!s) return;
-  s.transcript = els.confirmed.innerHTML;
-  s.memo = els.memo.innerHTML;
-  s.summary = els.summary.innerHTML;
+  const nextTranscript = els.confirmed.innerHTML;
+  const nextMemo       = els.memo.innerHTML;
+  const nextSummary    = els.summary.innerHTML;
+  // v0.15.1: Notion に上げたあとで中身が変わったら、アップ済み印を外す。
+  // 「印は付いているが最新版は上がっていない」状態を作らないため。
+  if (s.notionUploadedAt &&
+      (s.transcript !== nextTranscript || s.memo !== nextMemo || s.summary !== nextSummary)) {
+    clearNotionUploadedMark(s);
+  }
+  s.transcript = nextTranscript;
+  s.memo = nextMemo;
+  s.summary = nextSummary;
   s.updatedAt = Date.now();
   // タイピングUndoの baseline も同期（autosave 由来の場合はスキップ：
   // ユーザーが入力中の可能性があり、baseline を上書きすると履歴が流れるため）
@@ -5723,17 +5745,46 @@ els.memo.addEventListener('keydown', (e) => {
       return;
     }
 
-    // 空の li: リストを抜ける
+    // 空の li で Enter
+    //
+    // v0.15.1: 以前はどこで押しても「新しい空行をリスト全体の後ろに置く」という実装で、
+    // リストの途中で押すと空行が末尾に飛び、以降の行も下がらなかった（やっさん報告
+    // 「メモペインで空行が入れられない」）。入れ子リストでは親の <li> の中に潜り込む
+    // 事故も起きていた。
+    //
+    // 直した挙動:
+    //   末尾で押した  → 従来どおりリストを抜けて、その下に空行
+    //   途中で押した  → その位置でリストを分割し、間に空行を挟む（以降の行が下がる）
     const li = memoFindAncestor('LI');
     if (li && li.textContent.trim() === '') {
       e.preventDefault();
       const list = li.parentNode;
+      const listTag = list.tagName.toLowerCase();
+
+      // 空の li より後ろにある項目（これが「以降の行」）
+      const after = [];
+      for (let n = li.nextElementSibling; n; n = n.nextElementSibling) after.push(n);
+
       const newBlock = document.createElement('div');
       newBlock.innerHTML = '<br>';
-      list.parentNode.insertBefore(newBlock, list.nextSibling);
       li.remove();
+
+      list.parentNode.insertBefore(newBlock, list.nextSibling);
+
+      if (after.length) {
+        const rest = document.createElement(listTag);
+        for (const el of after) rest.appendChild(el);
+        // 番号付きリストは分割で 1 に戻らないよう、続きの番号から始める。
+        // 移し終えたあとの list.children.length = 上に残った項目数。
+        if (listTag === 'ol') {
+          rest.start = (parseInt(list.getAttribute('start'), 10) || 1) + list.children.length;
+        }
+        newBlock.parentNode.insertBefore(rest, newBlock.nextSibling);
+      }
+
       if (list.children.length === 0) list.remove();
       memoPlaceCaretAtStart(newBlock);
+      return;
     }
   }
 
