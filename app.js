@@ -2270,8 +2270,12 @@ async function sweepStoredAudio() {
     if (r.deletedSessions > 0) {
       diagLog.info(`保管していた音声を掃除: ${r.deletedSessions}件 / ${formatBytes(r.deletedBytes)}`);
     }
+    // v0.21.1: 呼び出し側が「実際に消えたか」を言えるように結果を返す。
+    // 推測で「消しました」と書くと、消えていなかったときに嘘になる
+    return r;
   } catch (e) {
     console.warn('[audio] 掃除に失敗:', e.message || e);
+    return { deletedSessions: 0, deletedBytes: 0 };
   }
 }
 
@@ -2342,13 +2346,11 @@ async function repassWithSpeakers() {
     return;
   }
   if (!segments.length) {
-    // 「なぜ無いのか」を言わないと、設定を直しようがない
-    alert(state.settings.audioKeepRecording
-      ? 'このセッションには保管された録音がありません。\n\n'
-        + '保持の設定を入れる前に録音したもの、または保持期間が過ぎて消えたものは'
-        + 'やり直せません。'
-      : '録音の保持がオフなので、やり直せる音声がありません。\n\n'
-        + '設定 →「録音の一時保管」をオンにすると、次の録音からやり直せるようになります。');
+    alert(explainNoAudioForRepass({
+      keepRecording: !!state.settings.audioKeepRecording,
+      retention: state.settings.audioRetention,
+      repassDoneAt: session.audioRepassDoneAt,
+    }));
     return;
   }
 
@@ -2489,7 +2491,10 @@ async function repassWithSpeakers() {
   // 完了した分だけ、保持設定の「やり直しが終わったら消す」を効かせる
   session.audioRepassDoneAt = Date.now();
   persistSessions();
-  sweepStoredAudio();
+  // v0.21.1: 待つ。ここで消えるかどうかを、この場で利用者に言うため
+  // （黙って消すと、次に押したときに「録音がありません」だけが出て理由が分からない）
+  const swept = await sweepStoredAudio();
+  refreshAudioUsage();
 
   setStatus('idle', `やり直し完了（話者${roster.length}人）`);
   diagLog.info(`話者付きやり直し完了: ${wrote}発言 / 話者${roster.length}人`);
@@ -2498,7 +2503,48 @@ async function repassWithSpeakers() {
     + `　話者: ${roster.length}人（${roster.map(s => s.label).join('、')}）\n\n`
     + `※ 区間の変わり目で話者の対応がずれることがあります。\n`
     + `　 区間ごとに別々に送っているので、モデルは前の区間の声を覚えていません。\n`
-    + `　 名前が分かっているなら、タグアイコンの「話者」に書いておくと安定します。`);
+    + `　 名前が分かっているなら、タグアイコンの「話者」に書いておくと安定します。\n\n`
+    + (swept && swept.deletedSessions > 0
+        ? `※ 設定にしたがって、保管していた録音（${formatBytes(swept.deletedBytes)}）を消しました。\n`
+          + `　 この録音はもうやり直せません。何度か試したいときは、次の録音の前に\n`
+          + `　 設定 →「いつ消すか」を変えておいてください。`
+        : `※ 保管した録音は設定にしたがって残してあります。もう一度やり直せます。`));
+}
+
+/**
+ * 「やり直せる音声が無い」理由を説明する (v0.21.1)
+ *
+ * v0.21.0 は「保持の設定を入れる前の録音か、期限切れ」としか言わなかった。
+ * ところが実機でいちばん多いのは**そのどちらでもない**:
+ * 「やり直しが終わったら消す」設定で1回やり直したあと、もう一度押した場合。
+ *
+ * 設計としては正しく消えているのだが、**心当たりの無い理由を挙げられると
+ * 利用者は設定を直しようがない**。実際に起きたことを言う。
+ *
+ * 純関数にしてあるのは、この文言こそが機能の本体だから
+ * （消えたこと自体は仕様であって、直せるのは説明のほうだけ）。
+ */
+function explainNoAudioForRepass({ keepRecording, retention, repassDoneAt }) {
+  if (!keepRecording) {
+    return '録音の保持がオフなので、やり直せる音声がありません。\n\n'
+      + '設定 →「録音の保持」をオンにすると、次の録音からやり直せるようになります。';
+  }
+  if (repassDoneAt) {
+    // ここがいちばん多い。理由と、次はどうすればよいかをセットで言う
+    const when = new Date(repassDoneAt).toLocaleString('ja-JP');
+    const base = `この録音は ${when} にやり直しが済んでいて、音声はもう消えています。\n\n`;
+    return retention === 'repass'
+      ? base
+        + '設定「いつ消すか」が『やり直しが終わったら消す』なので、'
+        + '1回やり直した時点で消しています。\n\n'
+        + 'もう一度やり直せるようにしたいときは、次の録音の前に'
+        + '『タブを閉じたら消す』などに変えてください。\n'
+        + '（いまの文字起こしは Ctrl+Z で戻せます）'
+      : base + '文字起こしそのものは Ctrl+Z で戻せます。';
+  }
+  return 'このセッションには保管された録音がありません。\n\n'
+    + '保持の設定を入れる前に録音したもの、保持期間が過ぎたもの、'
+    + 'v0.21.0 より前に保管したものはやり直せません。';
 }
 
 /**
