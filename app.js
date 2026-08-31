@@ -536,12 +536,23 @@ function getConfirmedText() {
   if (paragraphs.length === 0) return plain;
 
   // 録音+Gemini整形された .paragraph 構造を ## 見出し 付きで抽出
+  //
+  // v0.17.4: 以前は querySelector('h2') / querySelector('.p-body') で
+  // **最初の1つずつ**しか見ていなかった。ところが setParagraphContent() は
+  // 空行区切りごとに .p-body を作るので、1つの .paragraph の中に
+  // h2 + .p-body + .p-body … と並ぶことがある。
+  // その結果「見出しのある段落の2つ目以降の本文」が、画面には出ているのに
+  // コピー・Notion 送信・要約の入力から**黙って消えていた**（やっさん発見）。
+  // 子要素を順番に全部見る形に直す。
   const structured = Array.from(paragraphs)
     .map(p => {
-      const h2 = p.querySelector('h2');
-      const body = p.querySelector('.p-body');
-      if (h2 && body) return `## ${h2.textContent.trim()}\n\n${body.innerText.trim()}`;
-      return p.innerText.trim();
+      const parts = [];
+      for (const child of p.children) {
+        const t = (child.innerText || '').trim();
+        if (!t) continue;                                  // 段落間のすき間 div 等
+        parts.push(child.tagName === 'H2' ? `## ${t}` : t);
+      }
+      return parts.length ? parts.join('\n\n') : p.innerText.trim();
     })
     .filter(Boolean)
     .join('\n\n');
