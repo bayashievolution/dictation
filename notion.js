@@ -40,12 +40,20 @@ function notionSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function notionRequest(path, opts = {}) {
   // Notion は毎秒3リクエスト程度でレート制限をかけてくる。全タブ一括保存だと
   // 簡単に踏むので、429 と 5xx は指数バックオフで数回だけ自動リトライする。
+  //
+  // v0.15.2: 404 も条件つきでリトライ対象にした（retryNotFound）。
+  // 自分で作ったばかりのページ／トグルに追記するとき、Notion 側の反映が
+  // 追いつかず一瞬 404 を返すことがある。ここを再試行しないと、
+  // 「ノートはできているのに後半の追記だけ落ちて失敗扱い」になり、
+  // しかも中身が途中で切れたまま気づけない。
   const maxRetry = 3;
   for (let attempt = 0; ; attempt++) {
     try {
       return await notionRequestOnce(path, opts);
     } catch (e) {
-      const retriable = e.status === 429 || (e.status >= 500 && e.status < 600);
+      const retriable = e.status === 429
+        || (e.status >= 500 && e.status < 600)
+        || (e.status === 404 && opts.retryNotFound);
       if (!retriable || attempt >= maxRetry) throw e;
       const wait = e.retryAfterMs || (800 * Math.pow(2, attempt));
       console.warn(`[notion] ${e.status} のため ${wait}ms 待って再試行 (${attempt + 1}/${maxRetry})`);
@@ -55,6 +63,7 @@ async function notionRequest(path, opts = {}) {
 }
 
 async function notionRequestOnce(path, { token, method = 'GET', body } = {}) {
+  // 404 の意味は呼び先で違う。/blocks/... への追記なら「保存先未接続」ではない
   if (!token) throw new Error('Notion のアクセストークンが設定されていません（設定 → Notion 連携）');
 
   let res;
@@ -81,7 +90,7 @@ async function notionRequestOnce(path, { token, method = 'GET', body } = {}) {
   try { data = text ? JSON.parse(text) : null; } catch { /* JSON でない応答はそのまま握る */ }
 
   if (!res.ok) {
-    const err = new Error(notionErrorMessage(res.status, data));
+    const err = new Error(notionErrorMessage(res.status, data, path));
     err.status = res.status;
     err.code = data?.code || null;
     const ra = Number(res.headers.get('Retry-After'));
@@ -91,11 +100,18 @@ async function notionRequestOnce(path, { token, method = 'GET', body } = {}) {
   return data;
 }
 
-function notionErrorMessage(status, data) {
+function notionErrorMessage(status, data, path = '') {
   const raw = data?.message || `HTTP ${status}`;
   if (status === 401) return 'Notion トークンが無効です。設定のトークンを確認してください';
   if (status === 403) return 'Notion がこの操作を許可しませんでした（コネクトの権限に「コンテンツを挿入」があるか確認してください）';
-  if (status === 404) return '保存先が見つかりません。Notion 側でデータベースのページを「…」→「コネクト」から接続してください';
+  if (status === 404) {
+    // /blocks/{id}/children への 404 は、直前に自分で作ったページ／トグルが
+    // まだ見えていないケース。「コネクトしてください」は的外れなので分ける。
+    if (path.startsWith('/blocks/')) {
+      return 'ノートは作られましたが、中身の書き込みに失敗しました（Notion 側でノートが見つからないと返されました）。ノートの中身が途中で切れていないか確認してください';
+    }
+    return '保存先が見つかりません。Notion 側でデータベースのページを「…」→「コネクト」から接続してください';
+  }
   if (status === 429) return 'Notion のレート制限にかかりました。少し待ってからやり直してください';
   if (status >= 500) return `Notion 側で一時的なエラーが発生しました（${status}）`;
   return raw;
@@ -432,13 +448,14 @@ async function notionCreateNote({
     const res = await notionRequest(`/blocks/${pageId}/children`, {
       token,
       method: 'PATCH',
+      retryNotFound: true,   // 作ったばかりのページ。404 は反映待ちの可能性が高い
       body: { children: [notionBlock.toggle(notionRichText(t.label), first)] },
     });
     const toggleId = res?.results?.[0]?.id;
     if (toggleId) {
       for (const chunk of chunks) {
         await notionRequest(`/blocks/${toggleId}/children`, {
-          token, method: 'PATCH', body: { children: chunk },
+          token, method: 'PATCH', retryNotFound: true, body: { children: chunk },
         });
       }
     }
