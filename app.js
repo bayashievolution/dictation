@@ -1176,6 +1176,13 @@ async function waitForAudioSettled(timeoutMs = 30000) {
 function maybeConsolidateShortChunks() {
   if (state.isConsolidatingShortChunks) return; // 多重実行防止
   if (!state.settings.aiEnabled || !state.settings.apiKey) return;
+  // v0.18.9: 停止処理中は、最後のチャンクまで揃えてから一度にまとめたい。
+  // ここで先に発火すると、最後の1つが取り残されて別立てで整形される:
+  //   19:00:07 ミドル整形開始 3段落・224字   ← 3つ溜まって発火
+  //   19:00:09 ミドル整形開始 1段落・5字     ← 最後の1つだけ
+  // 分かれると、境界をまたいだ文を繋ぎ直せないうえ、呼び出しも1回余計になる。
+  // 停止処理の最後で consolidateShortChunks が全部まとめて呼ばれる
+  if (!state.isRecording && (state.finalChunkPending || state.audioInFlightCount > 0)) return;
   const container = getWriteContainer();
   if (!container) return;
   const shortParas = Array.from(container.querySelectorAll('.paragraph.short-refined'));
@@ -1655,6 +1662,28 @@ const SILENCE_MARGIN_DB = 6;     // ノイズフロアからこれだけ上ま�
 const SILENCE_HOLD_MS = 1000;        // 通常。文の切れ目とみなす長さ
 const SILENCE_HOLD_LATE_MS = 500;    // 最長が近いときの妥協ライン
 const SILENCE_LATE_WINDOW_MS = 4000; // 最長のこれだけ手前から妥協を始める
+
+/* 最短より前に来た「明らかな切れ目」を捨てない (v0.18.9)
+ *
+ * 実機 2026-08-31 19:00 のログ:
+ *   長さ20.0秒 尻=強制 [判定可 最長無音3800ms 採用=level]
+ *
+ * **3.8秒の沈黙を検出していたのに、そこで切らず20秒で強制区切りした。**
+ * その沈黙は「3秒今から黙ってみます」の直後、チャンク開始から約6秒の時点。
+ * 最短12秒より前だったので使えないことになっていた。
+ *
+ * 3.8秒の沈黙は誰がどう見ても文の切れ目で、20秒での強制区切りより明らかに
+ * 良い区切り位置。実際その回は末尾が「…コピーして送り」で切れ、続きが失われた。
+ *
+ * 最短を設けたのは「短すぎるチャンクは文脈が無くて精度が落ちる」ため。だが
+ * 直前の文脈は contextHint で渡しているし、短チャンクはミドル整形でまとまる。
+ * **明らかな切れ目で終わった短いチャンクは、文の途中で切れた長いチャンクより良い。**
+ *
+ *   0 ─── 3秒 ────────── 最短 ─────── (最長-4秒) ─── 最長
+ *     切らない │ 2秒以上の無音なら切る │ 1秒 │ 0.5秒 │ 強制
+ */
+const SILENCE_ABS_MIN_MS = 3000;   // これより短いチャンクは作らない
+const SILENCE_HOLD_LONG_MS = 2000; // 最短前でも、これだけ空いたら明らかな切れ目
 const SILENCE_POLL_MS = 50;      // 判定の刻み
 
 /* ノイズフロアの推定方法 (v0.18.3 で作り直し)
@@ -1870,12 +1899,19 @@ function createSilenceDetector(stream) {
 function decideChunkCut({ elapsed, minMs, maxMs, useSilenceCut, silentMs }) {
   if (elapsed >= maxMs) return 'forced';
   if (!useSilenceCut) return null;          // 従来動作では minMs === maxMs なので上で切れる
-  if (elapsed < minMs) return null;
+  const ms = silentMs || 0;
+
+  // 最短より前でも、明らかな切れ目（長い無音）なら使う。
+  // 捨てると、そのあと切る場所が見つからず強制区切りに落ちることがある
+  if (elapsed < minMs) {
+    return (elapsed >= SILENCE_ABS_MIN_MS && ms >= SILENCE_HOLD_LONG_MS) ? 'silence' : null;
+  }
+
   // 最長が近づいたら、短い間でも妥協する（強制で切るよりはマシ）
   const needed = elapsed >= maxMs - SILENCE_LATE_WINDOW_MS
     ? SILENCE_HOLD_LATE_MS
     : SILENCE_HOLD_MS;
-  return (silentMs || 0) >= needed ? 'silence' : null;
+  return ms >= needed ? 'silence' : null;
 }
 
 /**
