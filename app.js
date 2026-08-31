@@ -167,6 +167,8 @@ const DEFAULT_SETTINGS = {
   defaultContextField: '',
   defaultContextSpeakers: '',
   defaultContextTerms: '',
+  // v0.17.0: Gemini モードでも Web Speech を並走させ、確定までの間を未確定表示で埋める
+  geminiLiveDisplay: true,
 };
 // v0.13.24: WEB_SPEECH_DEFAULTS（v0.13.9 「Web Speech 設定をデフォルトに戻す」
 // ボタン用のリセット値）は UI 撤去済み（v0.13.23）に伴い削除。
@@ -424,6 +426,7 @@ const els = {
   modeGemini: document.getElementById('mode-gemini'),
   inputAudioDevice: document.getElementById('input-audio-device'),
   inputChunkSec: document.getElementById('input-chunk-sec'),
+  inputGeminiLiveDisplay: document.getElementById('input-gemini-live-display'),
   inputMinChunkBytes: document.getElementById('input-min-chunk-bytes'),
   // v0.13.24: 旧 v0.13.9 interim 設定 UI（input-webspeech-interim-debounce /
   // input-webspeech-interim-opacity / btn-webspeech-defaults）への els 参照は削除。
@@ -1491,6 +1494,7 @@ function stopRecording() {
   state.shouldAutoRestart = false;
   if (state.midChunkWatchdog) { clearInterval(state.midChunkWatchdog); state.midChunkWatchdog = null; }
   if (state.settings.inputMode === 'gemini-audio') {
+    stopLiveDisplay();          // v0.17.0
     stopGeminiAudioRecording();
   } else {
     // v0.13.14: 強制 commit タイマーを止めてから recognition を止める
@@ -1597,7 +1601,9 @@ async function startGeminiAudioRecording() {
         // 発話あり（と推定） → 長無音タイマーをリセット
         resetLongSilenceTimer();
         diagLog.info(`音声チャンク送信 ${blob.size}B (>${minBytes})`);
-        sendAudioChunkToGemini(blob);
+        // 未確定分はここで確定（次のチャンクに持ち越さない）。
+        // 送らなかったチャンクでは取り出さず、次まで溜め続ける
+        sendAudioChunkToGemini(blob, takeLiveFinals());
       } else {
         diagLog.info(`音声チャンクスキップ ${blob.size}B (<=${minBytes}, 無音判定)`);
       }
@@ -1630,6 +1636,7 @@ async function startGeminiAudioRecording() {
   diagLog.info(`録音開始 (Gemini) session=${state.recordingSessionId?.slice(-6)} chunkSec=${state.settings.audioChunkSec || 12}`);
   setRecordingUI(true);
   startContextExtractTimer();   // v0.16.1
+  startLiveDisplay();           // v0.17.0
   setStatus('listening', '録音中 (Gemini)');
   resetLongSilenceTimer();
 
@@ -1662,12 +1669,109 @@ function stopGeminiAudioRecording() {
   }
 }
 
-async function sendAudioChunkToGemini(blob) {
+/* ───────── Gemini モードのリアルタイム表示 (v0.17.0) ─────────
+ *
+ * Gemini モードは 12 秒ごとに一気に文字が出るので、喋っている間は画面が動かない。
+ * そこで Web Speech を「表示専用」で並走させ、確定までの間を埋める。
+ * （マイクを同時に使えることは mic-test.html で実機確認済み）
+ *
+ *   喋る → Web Speech の文字が「未確定」として出る
+ *        → チャンクの区切りでその文が段落に固定される（まだ未確定の見た目）
+ *        → Gemini の結果が返ったらその段落が置き換わる（確定）
+ *
+ * ここで作る recognition は **transcript に一切書かない**。
+ * buildRecognition() は appendRawChunk や字幕バッファと密結合しているので流用しない。
+ *
+ * チャンクの区切りで受け渡すので、Web Speech と Gemini の時間軸を突き合わせる必要がない。
+ * 「区切りまでに Web Speech が確定した分」がそのままそのチャンクの未確定表示になる。
+ */
+
+/** 表示専用の Web Speech を作る。文字起こしペインには書かない */
+function buildLiveDisplayRecognition() {
+  if (!SpeechRecognition) return null;
+  const rec = new SpeechRecognition();
+  rec.lang = 'ja-JP';
+  rec.continuous = true;
+  rec.interimResults = true;
+
+  rec.onresult = (event) => {
+    let interim = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const r = event.results[i];
+      if (r.isFinal) state.liveFinals = (state.liveFinals || '') + r[0].transcript;
+      else interim += r[0].transcript;
+    }
+    // BG録音中は共有の #interim に書かない（表示中の別タブに漏れるため）
+    if (isBgRecording()) els.interim.textContent = '';
+    else els.interim.textContent = (state.liveFinals || '') + interim;
+  };
+
+  rec.onerror = (e) => {
+    // 表示専用なので、失敗しても録音は続ける。Gemini 側が本体
+    if (e.error !== 'no-speech' && e.error !== 'aborted') {
+      console.warn('[live] Web Speech エラー（表示のみ・録音は継続）:', e.error);
+    }
+  };
+
+  rec.onend = () => {
+    // continuous でも切れることがあるので、録音中なら黙って再開する
+    if (state.isRecording && state.liveRecognition === rec) {
+      try { rec.start(); } catch (_) {}
+    }
+  };
+  return rec;
+}
+
+function startLiveDisplay() {
+  if (state.settings.geminiLiveDisplay === false) return;
+  stopLiveDisplay();
+  state.liveFinals = '';
+  const rec = buildLiveDisplayRecognition();
+  if (!rec) {
+    diagLog.info('リアルタイム表示: この環境は Web Speech 非対応のためスキップ');
+    return;
+  }
+  state.liveRecognition = rec;
+  try {
+    rec.start();
+    diagLog.info('リアルタイム表示 (Web Speech 並走) を開始');
+  } catch (e) {
+    console.warn('[live] 開始できませんでした（表示のみ・録音は継続）:', e.message);
+    state.liveRecognition = null;
+  }
+}
+
+function stopLiveDisplay() {
+  const rec = state.liveRecognition;
+  state.liveRecognition = null;
+  if (rec) {
+    rec.onend = null;
+    try { rec.stop(); } catch (_) {}
+  }
+  els.interim.textContent = '';
+  // state.liveFinals はここでは消さない。
+  // 停止時に MediaRecorder が最後のチャンクを吐くので、その未確定表示に使う。
+  // 次の録音開始時に startLiveDisplay() が '' に戻すので溜まりっぱなしにはならない。
+}
+
+/** チャンクの区切りで、そこまでに確定した文を取り出して次に持ち越さない */
+function takeLiveFinals() {
+  const t = (state.liveFinals || '').trim();
+  state.liveFinals = '';
+  els.interim.textContent = '';
+  return t;
+}
+
+async function sendAudioChunkToGemini(blob, provisionalText = '') {
   state.audioInFlightCount++;
   const container = getWriteContainer();
   const inBg = container !== els.confirmed;
   if (!inBg) hideEmptyHint();
-  const targetEl = createParagraphEl('（文字起こし中…）', 'paragraph refining');
+  // v0.17.0: Web Speech が聞き取った分があれば、それを未確定として置いておく。
+  // 無ければ従来どおり「（文字起こし中…）」
+  const targetEl = provisionalText
+    ? createParagraphEl(provisionalText, 'paragraph refining provisional')
+    : createParagraphEl('（文字起こし中…）', 'paragraph refining');
   container.appendChild(targetEl);
   if (inBg) syncBgToSession();
   else autoScroll();
@@ -1697,17 +1801,24 @@ async function sendAudioChunkToGemini(blob) {
       // 遅延ミドル整形をチェック
       maybeConsolidateShortChunks();
     } else {
-      // 空テキストも「需再試行」として残す（消さない）
-      // 「音声不明瞭の可能性。後で整形ボタンから再試行できます」
+      // 空テキストも「要再試行」として残す（消さない）
+      // v0.17.0: Web Speech が聞き取っていたなら、その文字は捨てない。
+      // Gemini が空でも「聞こえていた内容」は残っているほうが役に立つ
       targetEl.className = 'paragraph needs-retry';
-      setParagraphContent(targetEl, '（音声不明瞭・再試行可）');
+      setParagraphContent(targetEl, provisionalText
+        ? provisionalText + '　[Gemini は聞き取れず・Web Speech の結果です]'
+        : '（音声不明瞭・再試行可）');
       persist();
     }
   } catch (e) {
     // 通信エラー等も黙って needs-retry に落とす（赤バナーは出さない）
     console.warn('[audio transcribe] skipped (marked for retry):', e.message || e);
+    // v0.17.0: 失敗しても Web Speech の結果は残す。ここで捨てると、
+    // 聞き取れていたのに何も残らないという最悪の結果になる
     targetEl.className = 'paragraph needs-retry';
-    setParagraphContent(targetEl, '[文字起こし失敗: ' + (e.message || '').slice(0, 60) + ']');
+    setParagraphContent(targetEl, provisionalText
+      ? provisionalText + '　[Gemini 失敗・Web Speech の結果です: ' + (e.message || '').slice(0, 40) + ']'
+      : '[文字起こし失敗: ' + (e.message || '').slice(0, 60) + ']');
     persist();
   } finally {
     state.audioInFlightCount--;
@@ -4551,6 +4662,7 @@ function openSettings() {
     els.modeWebSpeech.checked = true;
   }
   els.inputChunkSec.value = state.settings.audioChunkSec || 12;
+  if (els.inputGeminiLiveDisplay) els.inputGeminiLiveDisplay.checked = state.settings.geminiLiveDisplay !== false;
   if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
   if (els.inputWsCommitSec) {
     // v0.13.29: localStorage に古い値（3/4/5 等、v0.13.26 で削除した選択肢）が
@@ -4612,6 +4724,7 @@ function saveSettingsFromForm() {
   state.settings.inputMode = els.modeGemini.checked ? 'gemini-audio' : 'web-speech';
   state.settings.audioDeviceId = els.inputAudioDevice ? els.inputAudioDevice.value : '';
   state.settings.audioChunkSec = Math.max(5, Math.min(60, Number(els.inputChunkSec.value) || 12));
+  if (els.inputGeminiLiveDisplay) state.settings.geminiLiveDisplay = els.inputGeminiLiveDisplay.checked;
   if (els.inputMinChunkBytes) state.settings.audioMinChunkBytes = Math.max(100, Math.min(5000, Number(els.inputMinChunkBytes.value) || 400));
   if (els.inputWsCommitSec) {
     const newSec = Math.max(0, Math.min(20, Number(els.inputWsCommitSec.value) || 0));

@@ -2935,3 +2935,21 @@ body.chat-active #zoom-bar {
   max-height: 140px;
   overflow-y: auto;
 }
+
+/* Gemini モードのリアルタイム表示: 未確定の段落 v0.17.0 */
+.paragraph.provisional .p-body {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.paragraph.provisional .p-body::after {
+  content: '未確定';
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
+  font-style: normal;
+  color: var(--text-faint);
+  vertical-align: middle;
+}

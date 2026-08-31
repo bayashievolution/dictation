@@ -405,6 +405,16 @@
                 <span class="field-label">音声入力デバイス</span>
                 <select id="input-audio-device"></select>
               </label>
+              <label class="field field-row">
+                <input id="input-gemini-live-display" type="checkbox" />
+                <span>リアルタイム表示を使う（Web Speech を並走）</span>
+              </label>
+              <div class="field">
+                <small class="field-hint">
+                  Gemini の結果が返るまでの間、Web Speech が聞き取った文字を「未確定」として表示します。
+                  確定するとその場が Gemini の文字起こしに置き換わります。マイクは同時に使えることを実機で確認済みです。
+                </small>
+              </div>
               <label class="field">
                 <span class="field-label">Geminiチャンク間隔（秒）</span>
                 <div class="number-stepper">
@@ -774,9 +784,9 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.16.3"></script>
-  <script src="gemini.js?v=0.16.3"></script>
-  <script src="notion.js?v=0.16.3"></script>
-  <script src="app.js?v=0.16.3"></script>
+  <script src="icons.js?v=0.17.0"></script>
+  <script src="gemini.js?v=0.17.0"></script>
+  <script src="notion.js?v=0.17.0"></script>
+  <script src="app.js?v=0.17.0"></script>
 </body>
 </html>
