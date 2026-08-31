@@ -906,7 +906,7 @@ window.transcribeAudioWithGemini = transcribeAudioWithGemini;
 window.formatForOSDWithGemini = formatForOSDWithGemini;
 window.refineMemoSelectionWithGemini = refineMemoSelectionWithGemini;
 
-/* ───────── 話者判別つきの全文やり直し (v0.21.0) ─────────
+/* ───────── 話者判別 (v0.21.0) ─────────
  *
  * live の文字起こしは12〜20秒のチャンクを1本ずつ投げるので、
  * **話者の区別ができない**。同じ声かどうかは、前後を並べて聞かないと分からない。

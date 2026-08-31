@@ -1,7 +1,7 @@
 /**
  * gemini-files.js — Files API へのアップロード (v0.21.0)
  *
- * 「録音後に全文をもう一度 Gemini に通して、話者判別つきで作り直す」ために、
+ * 「保管した録音をまとめて Gemini に通し、話者付きで書き起こす」ために、
  * 保管しておいた音声を Google に上げる。
  *
  * ■ なぜ Files API か（インライン送信ではなく）
@@ -57,7 +57,7 @@ const FILE_POLL_MAX_MS = 5 * 60 * 1000;
  * @param {Blob}   args.blob
  * @param {string} [args.displayName]
  * @param {(ratio:number)=>void} [args.onProgress]  0〜1
- * @param {{aborted:boolean}} [args.cancel]  やり直しの中止用（呼び出し側が立てる）
+ * @param {{aborted:boolean}} [args.cancel]  話者判別の中止用（呼び出し側が立てる）
  * @returns {Promise<{name:string, uri:string, mimeType:string, state:string}>}
  */
 function geminiFileUpload({ apiKey, blob, displayName, onProgress, cancel }) {

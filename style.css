@@ -3134,7 +3134,7 @@ body.chat-active .dict-menu { bottom: 114px; }
 
 /* 走っている間は、押すと中止になることが分かるように点滅させる。
    同じボタンが「実行」と「中止」を兼ねるので、状態が見えないと押せない */
-#btn-repass.firing {
+#btn-diarize.firing {
   color: var(--accent);
   animation: repass-pulse 1.4s ease-in-out infinite;
 }
@@ -3143,5 +3143,5 @@ body.chat-active .dict-menu { bottom: 114px; }
   50%      { opacity: .45; }
 }
 @media (prefers-reduced-motion: reduce) {
-  #btn-repass.firing { animation: none; opacity: .7; }
+  #btn-diarize.firing { animation: none; opacity: .7; }
 }

@@ -1,9 +1,9 @@
 /**
  * audio-store.js — 録音音声の一時保管 (v0.19.0 / v0.21.0)
  *
- * 「録音後に全文をもう一度 Gemini に通して、話者判別つきで作り直す」ための
+ * 「保管した録音をまとめて Gemini に通し、話者付きで書き起こす」ための
  * 音声を置いておく場所。live の文字起こしは従来どおりチャンクごとに進むので、
- * ここは**やり直しを選んだときだけ**使う。
+ * ここは**話者判別をかけたときだけ**使う。
  *
  * ■ なぜ IndexedDB か
  *
@@ -13,7 +13,7 @@
  *   ローカルフォルダ指定 … File System Access API は Android Chrome に無い。
  *                          スマホ対応の道を最初に塞ぐ
  *   Google ドライブ     … OAuth が要る・毎回数十MBをアップロード・ネット必須。
- *                          やり直しは端末から送るだけなので、外に出す必要がない
+ *                          話者判別は端末から送るだけなので、外に出す必要がない
  *
  * IndexedDB は Blob をそのまま入れられて、許可ダイアログも設定も要らず、
  * 拡張でも Android Chrome でも iOS Safari でも同じコードで動く。
@@ -31,7 +31,7 @@
  * ■ 正直に書いておくこと
  *
  * この保管は「端末に残すか」だけを制御する。Gemini モードは live の時点で
- * すでに音声を Google に送っている。やり直しを実行すればさらに全体を
+ * すでに音声を Google に送っている。話者判別を実行すればさらに全体を
  * アップロードする（Google 側で48時間後に自動削除される）。
  * IndexedDB からの削除はレコードを消すもので、ディスク上の領域が
  * 上書きされることまでは保証しない。
@@ -39,7 +39,7 @@
  * ■ v0.21.0: 保管の単位を作り直した（v0.19.0 は再生できない形で貯めていた）
  *
  * v0.19.0 は live 送信用のチャンク（`stop()` で切った完結した webm）を
- * そのまま貯めて、やり直すときに `new Blob([...])` で繋ぐつもりでいた。
+ * そのまま貯めて、話者判別のときに `new Blob([...])` で繋ぐつもりでいた。
  * **これは繋がらない。**
  *
  * MediaRecorder を `stop()` して `start()` し直すと、次の録音は
@@ -62,14 +62,14 @@
  *
  * そこで保管の時点で**約10分ごとの区間**に分ける（`seg`）。区間の切れ目は
  * live 側と同じ無音検出を使うので、`stop → start` の 40ms の空白は無音に落ちる。
- * やり直しは区間ごとに投げ、前の区間の話者一覧と末尾を渡して繋ぐ。
+ * 話者判別は区間ごとに投げ、前の区間の話者一覧と末尾を渡して繋ぐ。
  */
 
 const AUDIO_DB_NAME = 'dictation-audio';
 const AUDIO_DB_VERSION = 2;
 const AUDIO_STORE = 'chunks';
 
-/** 「やり直しが終わったら消す」を選んでも、やり直さなかった場合の歯止め */
+/** 「話者判別が終わったら消す」を選んでも、かけなかった場合の歯止め */
 const AUDIO_REPASS_BACKSTOP_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -83,7 +83,9 @@ const AUDIO_REPASS_BACKSTOP_MS = 24 * 60 * 60 * 1000;
  * @param {number} args.savedAt          保存した時刻
  * @param {number} args.now              いまの時刻
  * @param {boolean} args.sessionExists   その音声のセッション（タブ）がまだあるか
- * @param {number} [args.repassDoneAt]   やり直しが完了した時刻（未実施なら falsy）
+ * @param {number} [args.repassDoneAt]   話者判別が完了した時刻（未実施なら falsy）
+ *   ※ 名前が repass のままなのは、すでに保存されているセッションと設定値を
+ *      読めなくしないため。画面の表記は「話者判別」に統一してある
  * @returns {boolean} true = 消す
  */
 function audioRetentionExpired({ retention, savedAt, now, sessionExists, repassDoneAt }) {
@@ -97,7 +99,7 @@ function audioRetentionExpired({ retention, savedAt, now, sessionExists, repassD
       // 保持設定そのものがオフ。設定を切った時点で残っている分も消えてほしい
       return true;
     case 'repass':
-      // やり直しが済んだら用済み。走らせないまま放置された場合の歯止めも置く
+      // 話者判別が済んだら用済み。かけないまま放置された場合の歯止めも置く
       return !!repassDoneAt || age >= AUDIO_REPASS_BACKSTOP_MS;
     case 'close':
       return false;                    // セッションが消えたときだけ（上で処理済み）
@@ -209,7 +211,7 @@ async function audioStoreSummary() {
 }
 
 /**
- * そのセッションの音声を、区間ごとに1本の Blob へ繋いで返す（やり直し用） (v0.21.0)
+ * そのセッションの音声を、区間ごとに1本の Blob へ繋いで返す（話者判別用） (v0.21.0)
  *
  * 区間の中では `seq` 順に繋ぐ。**区間をまたいで繋いではいけない**
  * （区間ごとに独立した webm なので、繋ぐと最初の区間しか読めなくなる）。
@@ -281,7 +283,7 @@ async function audioStoreClearAll() {
  * @param {object} args
  * @param {string} args.retention              設定値
  * @param {Set<string>|Array<string>} args.liveSessionIds  いま存在するセッションID
- * @param {Map<string, number>} [args.repassDoneAt]        セッションID → やり直し完了時刻
+ * @param {Map<string, number>} [args.repassDoneAt]        セッションID → 話者判別の完了時刻
  * @returns {Promise<{deletedSessions: number, deletedBytes: number}>}
  */
 async function audioStoreSweep({ retention, liveSessionIds, repassDoneAt }) {

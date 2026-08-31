@@ -132,7 +132,7 @@ const DEFAULT_SETTINGS = {
   // 最短を過ぎたら次の無音の切れ目で切り、最長に達したら無音でなくても切る。
   audioSilenceCut: true,
   audioChunkMaxSec: 20,
-  /* v0.19.0: 録音音声の一時保管（全文やり直し用）
+  /* v0.19.0: 録音音声の一時保管（話者判別用）
    *
    * **既定は保持しない。** 「文字起こしはよいが録音の保存はダメ」という
    * 同意の場面は普通にあるので、こちらを既定にする。
@@ -141,7 +141,11 @@ const DEFAULT_SETTINGS = {
   // v0.20.0: 自作の語彙辞書 [{id, name, terms[]}]。プリセットは term-dicts.js 側
   termDicts: [],
   audioKeepRecording: false,
-  audioRetention: 'repass',   // repass / close / 1d / 7d / manual
+  // v0.21.3: 既定を close にした。repass（話者判別が終わったら消す）はいちばん早く
+  // 消えるが、**同じ録音に2回目をかけられない**。どちらもタブを閉じれば必ず消えるので、
+  // 「できるだけ早く消す」という方針は close でも満たせる。
+  // 値 'repass' はすでに保存されている設定を読めなくしないため据え置き
+  audioRetention: 'close',   // close / repass / 1d / 7d / manual
   // 音声認識用途では 128kbps は過剰。64kbps なら 90分で約43MB
   audioBitrate: 64000,
   // v0.13.24: 旧 webspeechInterimDebounceMs / webspeechInterimOpacity (v0.13.9) は撤去。
@@ -291,7 +295,7 @@ const state = {
   finalChunkPending: false,   // 停止時、最後のチャンクがまだ送り出されていない (v0.18.6)
   audioSeq: 0,                // 区間の中でのかけらの通し番号 (v0.19.0 / v0.21.0)
   audioSeg: 0,                // 区間番号（約10分ごと） (v0.21.0)
-  archiveRecorder: null,      // やり直し用の録音機（live とは別） (v0.21.0)
+  archiveRecorder: null,      // 話者判別用の録音機（live とは別） (v0.21.0)
   archiveSegStartedAt: 0,     // いまの区間を始めた時刻 (v0.21.0)
 
   sessions: [],
@@ -399,7 +403,7 @@ const els = {
   summaryDetailSelect: document.getElementById('summary-detail-select'),
   btnSummaryCombo: document.getElementById('btn-summary-combo'),
   btnRefineTranscript: document.getElementById('btn-refine-transcript'),
-  btnRepass: document.getElementById('btn-repass'),   // v0.21.0
+  btnDiarize: document.getElementById('btn-diarize'),   // v0.21.0
   emptyHint: document.getElementById('empty-hint'),
   settingsModal: document.getElementById('settings-modal'),
   btnNotionUpload: document.getElementById('btn-notion-upload'),
@@ -1958,7 +1962,7 @@ function decideChunkCut({ elapsed, minMs, maxMs, useSilenceCut, silentMs }) {
   return ms >= needed ? 'silence' : null;
 }
 
-/* ───────── やり直し用の録音（保管側） (v0.21.0) ─────────
+/* ───────── 話者判別用の録音（保管側） (v0.21.0) ─────────
  *
  * live の文字起こしとは**別の MediaRecorder** を、同じストリームに掛けて回す。
  * 理由は audio-store.js の冒頭に書いたとおりで、live 側の
@@ -2024,7 +2028,7 @@ function startArchiveRecorder(stream, recOpts) {
     try {
       rec = new MediaRecorder(stream, recOpts);
     } catch (e) {
-      diagLog.info('やり直し用の録音を作れませんでした（文字起こしは続きます）: ' + (e.message || e));
+      diagLog.info('話者判別用の録音を作れませんでした（文字起こしは続きます）: ' + (e.message || e));
       return null;
     }
     rec.ondataavailable = (e) => {
@@ -2048,7 +2052,7 @@ function startArchiveRecorder(stream, recOpts) {
       state.archiveRecorder = next;
       if (next) {
         try { next.start(ARCHIVE_SLICE_MS); }
-        catch (e) { diagLog.info('やり直し用の録音を再開できませんでした: ' + (e.message || e)); }
+        catch (e) { diagLog.info('話者判別用の録音を再開できませんでした: ' + (e.message || e)); }
       }
     };
     rec.onerror = () => { /* 保管が壊れても live は止めない */ };
@@ -2060,7 +2064,7 @@ function startArchiveRecorder(stream, recOpts) {
   try {
     rec.start(ARCHIVE_SLICE_MS);
   } catch (e) {
-    diagLog.info('やり直し用の録音を開始できませんでした: ' + (e.message || e));
+    diagLog.info('話者判別用の録音を開始できませんでした: ' + (e.message || e));
     return null;
   }
   state.archiveRecorder = rec;
@@ -2072,7 +2076,7 @@ function rollArchiveSegment(why) {
   const rec = state.archiveRecorder;
   if (!rec || rec.state !== 'recording') return;
   const mins = ((Date.now() - state.archiveSegStartedAt) / 60000).toFixed(1);
-  diagLog.info(`やり直し用の録音: 区間${state.audioSeg}を${mins}分で区切り（${why === 'silence' ? '無音' : '強制'}）`);
+  diagLog.info(`話者判別用の録音: 区間${state.audioSeg}を${mins}分で区切り（${why === 'silence' ? '無音' : '強制'}）`);
   try { rec.stop(); } catch { /* 状態が変わっていたら諦める */ }
 }
 
@@ -2279,7 +2283,7 @@ async function sweepStoredAudio() {
   }
 }
 
-/* ───────── 話者付きの全文やり直し (v0.21.0) ─────────
+/* ───────── 話者判別 (v0.21.0) ─────────
  *
  * live の文字起こしは12〜20秒のチャンクを1本ずつ投げるので、**話者を区別できない**。
  * 同じ声かどうかは前後を並べて聞かないと分からないし、そもそも1チャンクに
@@ -2297,48 +2301,48 @@ async function sweepStoredAudio() {
  * のすべてが発生する。3つ目が一番重い。必ず確認してから走らせる。
  */
 
-/** やり直しの進行状態。二重起動を防ぎ、中止を受け取る */
-function repassState() {
-  if (!state.repass) state.repass = { running: false, cancel: null };
-  return state.repass;
+/** 話者判別の進行状態。二重起動を防ぎ、中止を受け取る */
+function diarizationState() {
+  if (!state.diarizing) state.diarizing = { running: false, cancel: null };
+  return state.diarizing;
 }
 
 /** ボタンの見た目を状態に合わせる */
-function updateRepassButton() {
-  if (!els.btnRepass) return;
-  const r = repassState();
-  els.btnRepass.classList.toggle('firing', r.running);
+function updateDiarizeButton() {
+  if (!els.btnDiarize) return;
+  const r = diarizationState();
+  els.btnDiarize.classList.toggle('firing', r.running);
   // v0.21.2: 結果が残っていれば、音声が消えていても貼り直せる。
   // ボタンの説明もそれに合わせる（押す前に何が起きるか分かるように）
   const s = getActiveSession();
   const hasSaved = !!(s && s.repass && s.repass.turns && s.repass.turns.length);
-  els.btnRepass.title = r.running
-    ? 'やり直しを中止する'
+  els.btnDiarize.title = r.running
+    ? '話者判別を中止する'
     : hasSaved
-      ? '話者付きの結果を貼り直す／録音が残っていれば作り直す'
-      : '保管した録音をまとめて投げ直し、話者付きで作り直す（録音の保持がオンのときだけ）';
+      ? '話者付きの結果を貼り直す／録音が残っていれば話者判別をかけ直す'
+      : '保管した録音をまとめて Gemini に通し、話者付きで書き起こす（録音の保持がオンのときだけ）';
 }
 
 /**
- * 話者付きでやり直す (v0.21.0)
+ * 話者判別をかける (v0.21.0)
  *
  * 区間ごとに「上げる → 待つ → 文字起こし → 消す」を順に回す。
  * **1区間ずつ消す**のは、途中で止めたときに上げっぱなしのファイルを
  * 残さないため（48時間で自動削除されるとはいえ、置いておく理由が無い）。
  */
-async function repassWithSpeakers() {
-  const r = repassState();
+async function runDiarization() {
+  const r = diarizationState();
   if (r.running) {
-    if (confirm('やり直しを中止しますか？\n\nここまでに書き出した分はそのまま残ります。')) {
+    if (confirm('話者判別を中止しますか？\n\nここまでに書き出した分はそのまま残ります。')) {
       r.cancel.aborted = true;
-      setStatus('idle', 'やり直しを中止しています…');
+      setStatus('idle', '話者判別を中止しています…');
     }
     return;
   }
 
   if (!state.settings.apiKey) { alert('Gemini API キーが未設定です'); openSettings(); return; }
   if (state.isRecording && state.recordingSessionId === state.activeId) {
-    alert('録音中はやり直せません。先に録音を止めてください。');
+    alert('録音中は話者判別できません。先に録音を止めてください。');
     return;
   }
   const session = getActiveSession();
@@ -2355,10 +2359,10 @@ async function repassWithSpeakers() {
     // v0.21.2: 音声が消えていても、結果が残っていれば貼り直せる。
     // 「もう2度とできない」を先に否定する
     if (session.repass && session.repass.turns && session.repass.turns.length) {
-      restoreRepassResult(session);
+      restoreDiarizationResult(session);
       return;
     }
-    alert(explainNoAudioForRepass({
+    alert(explainNoAudioForDiarization({
       keepRecording: !!state.settings.audioKeepRecording,
       retention: state.settings.audioRetention,
       repassDoneAt: session.audioRepassDoneAt,
@@ -2386,13 +2390,14 @@ async function repassWithSpeakers() {
       + `［OK］保存された結果を貼り直す\n`
       + `［キャンセル］録音からもう一度作り直す（前の結果は上書きされます）`
     )) {
-      restoreRepassResult(session, { ask: false });
+      restoreDiarizationResult(session, { ask: false });
       return;
     }
   }
 
   if (!confirm(
-    `この録音を話者付きで作り直します。\n\n`
+    `この録音に話者判別をかけます。\n\n`
+    + `保管した録音をまとめて Gemini に通し、話者付きで書き起こし直します。\n\n`
     + `　音声: 約${mins}分 / ${formatBytes(totalBytes)} / ${segments.length}区間\n`
     + `　入力トークン: 約${approxTokens.toLocaleString()}（音声は1秒=32トークン）\n\n`
     + `⚠️ 録音全体をもう一度 Google にアップロードします。\n`
@@ -2404,8 +2409,8 @@ async function repassWithSpeakers() {
 
   r.running = true;
   r.cancel = { aborted: false };
-  updateRepassButton();
-  pushUndo('話者付きでやり直し', 'pane-transcript');
+  updateDiarizeButton();
+  pushUndo('話者判別', 'pane-transcript');
 
   const container = getWriteContainer();
   const inBg = container !== els.confirmed;
@@ -2416,14 +2421,14 @@ async function repassWithSpeakers() {
 
   // 画面をいったん空にして、進行状況だけを置く
   Array.from(container.childNodes).forEach(n => n.remove());
-  const progressEl = createParagraphEl('（やり直しの準備中…）', 'paragraph refining');
+  const progressEl = createParagraphEl('（話者判別の準備中…）', 'paragraph refining');
   container.appendChild(progressEl);
   const say = (msg) => {
     const body = progressEl.querySelector('.p-body');
     if (body) body.textContent = `（${msg}）`;
   };
 
-  diagLog.info(`話者付きやり直し開始: ${segments.length}区間 / ${formatBytes(totalBytes)} / 約${mins}分`);
+  diagLog.info(`話者判別開始: ${segments.length}区間 / ${formatBytes(totalBytes)} / 約${mins}分`);
 
   const rosters = [];
   const allTurns = [];   // v0.21.2: セッションに残して、あとから貼り直せるようにする
@@ -2440,7 +2445,7 @@ async function repassWithSpeakers() {
 
       try {
         say(`区間 ${label} を送信中… 0%`);
-        setStatus('processing', `やり直し ${label}`);
+        setStatus('processing', `話者判別 ${label}`);
         uploaded = await geminiFileUpload({
           apiKey: state.settings.apiKey,
           blob: seg.blob,
@@ -2474,25 +2479,25 @@ async function repassWithSpeakers() {
           wrote++;
         }
         if (out.turns.length) prevTail = out.turns[out.turns.length - 1].text;
-        diagLog.info(`やり直し ${label}: ${out.turns.length}発言 / 話者${out.speakers.length}人`
+        diagLog.info(`話者判別 ${label}: ${out.turns.length}発言 / 話者${out.speakers.length}人`
           + (out.speakers.length ? ` (${out.speakers.map(s => s.label).join('、')})` : ''));
         persist();
       } finally {
         // 上げたものは、成功でも失敗でも中止でも消す
         if (uploaded && uploaded.name) {
           const ok = await geminiFileDelete({ apiKey: state.settings.apiKey, name: uploaded.name });
-          if (!ok) diagLog.info(`やり直し ${label}: 上げたファイルを消せませんでした（48時間で自動削除されます）`);
+          if (!ok) diagLog.info(`話者判別 ${label}: 上げたファイルを消せませんでした（48時間で自動削除されます）`);
         }
       }
     }
   } catch (e) {
     stoppedBy = e.message || String(e);
-    console.warn('[repass] failed:', e);
-    diagLog.info('やり直し中断: ' + stoppedBy);
+    console.warn('[diarize] failed:', e);
+    diagLog.info('話者判別を中断: ' + stoppedBy);
   } finally {
     r.running = false;
     r.cancel = null;
-    updateRepassButton();
+    updateDiarizeButton();
   }
 
   progressEl.remove();
@@ -2500,11 +2505,11 @@ async function repassWithSpeakers() {
   if (wrote === 0) {
     // 1行も書けなかったときに空の画面を残すのは最悪なので、元に戻せることを言う
     const el = createParagraphEl(
-      `（やり直しできませんでした: ${stoppedBy || '結果が空でした'}／Ctrl+Z で元の文字起こしに戻せます）`,
+      `（話者判別できませんでした: ${stoppedBy || '結果が空でした'}／Ctrl+Z で元の文字起こしに戻せます）`,
       'paragraph needs-retry');
     container.appendChild(el);
     persist();
-    setStatus('error', 'やり直し失敗');
+    setStatus('error', '話者判別に失敗');
     return;
   }
 
@@ -2513,17 +2518,17 @@ async function repassWithSpeakers() {
 
   const roster = mergeSpeakerRosters(rosters);
   // v0.21.2: 中断でも、書き出せた分は残す。ここまでの結果も作り直せない
-  saveRepassResult(session, { speakers: mergeSpeakerRosters(rosters), turns: allTurns });
+  saveDiarizationResult(session, { speakers: mergeSpeakerRosters(rosters), turns: allTurns });
 
   if (stoppedBy) {
-    setStatus('error', `やり直し中断（${wrote}発言まで）`);
+    setStatus('error', `話者判別を中断（${wrote}発言まで）`);
     alert(`途中で止まりました: ${stoppedBy}\n\n`
       + `ここまでの ${wrote}発言は書き出してあります。\n`
       + `元の文字起こしに戻すには Ctrl+Z を押してください。`);
     return;
   }
 
-  // 完了した分だけ、保持設定の「やり直しが終わったら消す」を効かせる
+  // 完了した分だけ、保持設定の「話者判別が終わったら消す」を効かせる
   session.audioRepassDoneAt = Date.now();
   persistSessions();
   // v0.21.1: 待つ。ここで消えるかどうかを、この場で利用者に言うため
@@ -2531,9 +2536,9 @@ async function repassWithSpeakers() {
   const swept = await sweepStoredAudio();
   refreshAudioUsage();
 
-  setStatus('idle', `やり直し完了（話者${roster.length}人）`);
-  diagLog.info(`話者付きやり直し完了: ${wrote}発言 / 話者${roster.length}人`);
-  alert(`話者付きで作り直しました。\n\n`
+  setStatus('idle', `話者判別が完了（話者${roster.length}人）`);
+  diagLog.info(`話者判別完了: ${wrote}発言 / 話者${roster.length}人`);
+  alert(`話者付きで書き起こしました。\n\n`
     + `　発言: ${wrote}件\n`
     + `　話者: ${roster.length}人（${roster.map(s => s.label).join('、')}）\n\n`
     + `※ 区間の変わり目で話者の対応がずれることがあります。\n`
@@ -2541,13 +2546,13 @@ async function repassWithSpeakers() {
     + `　 名前が分かっているなら、タグアイコンの「話者」に書いておくと安定します。\n\n`
     + (swept && swept.deletedSessions > 0
         ? `※ 設定にしたがって、保管していた録音（${formatBytes(swept.deletedBytes)}）を消しました。\n`
-          + `　 録音からの作り直しはもうできませんが、**この結果はタブに保存してあります**。\n`
+          + `　 録音からの書き起こし直しはもうできませんが、**この結果はタブに保存してあります**。\n`
           + `　 間違って消しても、同じボタンから貼り直せます。\n`
           + `　 別の設定で試し直したいときは、次の録音の前に「いつ消すか」を変えてください。`
-        : `※ 保管した録音は設定にしたがって残してあります。もう一度やり直せます。`));
+        : `※ 保管した録音は設定にしたがって残してあります。もう一度かけ直せます。`));
 }
 
-/* ───────── やり直しの結果を残す (v0.21.2) ─────────
+/* ───────── 話者判別の結果を残す (v0.21.2) ─────────
  *
  * v0.21.1 までは、話者付きの結果を**取り消し履歴にしか置いていなかった**。
  * 「間違えて元に戻すボタンを押したら、もう2度と話者判別はできないのでは」
@@ -2561,14 +2566,14 @@ async function repassWithSpeakers() {
  *
  * ■ 保存するのは結果だけ
  *
- * やり直し**前**の文字起こしは保存しない。取り消し履歴で戻せるうえ、
+ * 話者判別**前**の文字起こしは保存しない。取り消し履歴で戻せるうえ、
  * 戻したあとは画面にあるものがそれになる（貼り直しは pushUndo してから
  * 行うので、そこからまた戻せる）。両方を貯めると localStorage を
  * 二重に食うだけで、行き来はできている。
  */
 
 /** 結果をセッションに残す。turns が空なら何もしない（空で上書きしない） */
-function saveRepassResult(session, { speakers, turns }) {
+function saveDiarizationResult(session, { speakers, turns }) {
   if (!session || !turns || !turns.length) return;
   session.repass = {
     doneAt: Date.now(),
@@ -2578,16 +2583,16 @@ function saveRepassResult(session, { speakers, turns }) {
     turns: turns.map(t => ({ speaker: t.speaker, text: t.text })),
   };
   persistSessions();
-  updateRepassButton();
+  updateDiarizeButton();
 }
 
 /**
  * 残してある結果を画面に貼り直す (v0.21.2)
  *
- * やり直し本体と同じ形（1発言＝1段落）で組み直す。
+ * 話者判別本体と同じ形（1発言＝1段落）で組み直す。
  * **先に pushUndo する**ので、貼り直しも取り消せる。
  */
-function restoreRepassResult(session, { ask = true } = {}) {
+function restoreDiarizationResult(session, { ask = true } = {}) {
   const saved = session && session.repass;
   if (!saved || !saved.turns || !saved.turns.length) return false;
 
@@ -2620,11 +2625,11 @@ function restoreRepassResult(session, { ask = true } = {}) {
 }
 
 /**
- * 「やり直せる音声が無い」理由を説明する (v0.21.1)
+ * 「話者判別をかけられる音声が無い」理由を説明する (v0.21.1)
  *
  * v0.21.0 は「保持の設定を入れる前の録音か、期限切れ」としか言わなかった。
  * ところが実機でいちばん多いのは**そのどちらでもない**:
- * 「やり直しが終わったら消す」設定で1回やり直したあと、もう一度押した場合。
+ * 「話者判別が終わったら消す」設定で1回かけたあと、もう一度押した場合。
  *
  * 設計としては正しく消えているのだが、**心当たりの無い理由を挙げられると
  * 利用者は設定を直しようがない**。実際に起きたことを言う。
@@ -2632,27 +2637,27 @@ function restoreRepassResult(session, { ask = true } = {}) {
  * 純関数にしてあるのは、この文言こそが機能の本体だから
  * （消えたこと自体は仕様であって、直せるのは説明のほうだけ）。
  */
-function explainNoAudioForRepass({ keepRecording, retention, repassDoneAt }) {
+function explainNoAudioForDiarization({ keepRecording, retention, repassDoneAt }) {
   if (!keepRecording) {
-    return '録音の保持がオフなので、やり直せる音声がありません。\n\n'
-      + '設定 →「録音の保持」をオンにすると、次の録音からやり直せるようになります。';
+    return '録音の保持がオフなので、話者判別をかけられる音声がありません。\n\n'
+      + '設定 →「録音の保持」をオンにすると、次の録音から話者判別をかけられるようになります。';
   }
   if (repassDoneAt) {
     // ここがいちばん多い。理由と、次はどうすればよいかをセットで言う
     const when = new Date(repassDoneAt).toLocaleString('ja-JP');
-    const base = `この録音は ${when} にやり直しが済んでいて、音声はもう消えています。\n\n`;
+    const base = `この録音は ${when} に話者判別が済んでいて、音声はもう消えています。\n\n`;
     return retention === 'repass'
       ? base
-        + '設定「いつ消すか」が『やり直しが終わったら消す』なので、'
-        + '1回やり直した時点で消しています。\n\n'
-        + 'もう一度やり直せるようにしたいときは、次の録音の前に'
+        + '設定「いつ消すか」が『話者判別が終わったら消す』なので、'
+        + '1回かけた時点で消しています。\n\n'
+        + 'もう一度かけられるようにしたいときは、次の録音の前に'
         + '『タブを閉じたら消す』などに変えてください。\n'
         + '（いまの文字起こしは Ctrl+Z で戻せます）'
       : base + '文字起こしそのものは Ctrl+Z で戻せます。';
   }
   return 'このセッションには保管された録音がありません。\n\n'
     + '保持の設定を入れる前に録音したもの、保持期間が過ぎたもの、'
-    + 'v0.21.0 より前に保管したものはやり直せません。';
+    + 'v0.21.0 より前に保管したものには、話者判別をかけられません。';
 }
 
 /**
@@ -2783,7 +2788,7 @@ async function startGeminiAudioRecording() {
       const minBytes = Number.isFinite(state.settings.audioMinChunkBytes) ? state.settings.audioMinChunkBytes : 400;
       // v0.21.0: 保管はこの経路では行わない。ここに来るチャンクは1本ずつ
       // 独立した webm で、繋いでも最初の1本しか読めないため
-      // （やり直し用は startArchiveRecorder が別に録っている）
+      // （話者判別用は startArchiveRecorder が別に録っている）
       if (blob.size > minBytes) {
         // 発話あり（と推定） → 長無音タイマーをリセット
         resetLongSilenceTimer();
@@ -2838,7 +2843,7 @@ async function startGeminiAudioRecording() {
   // 動作確認をログから判断できない（実機テストで実際に困った）
   diagLog.info(state.settings.audioKeepRecording
     ? `録音の保持: オン（${{
-        repass: 'やり直しが終わったら消す', close: 'タブを閉じたら消す',
+        repass: '話者判別が終わったら消す', close: 'タブを閉じたら消す',
         '1d': '1日', '7d': '7日', manual: '手動で消すまで',
       }[state.settings.audioRetention] || state.settings.audioRetention}）`
     : '録音の保持: オフ（端末に残しません）');
@@ -2864,7 +2869,7 @@ async function startGeminiAudioRecording() {
   state.chunkStartedAt = Date.now();
   state.chunkStartedAtSilence = true;   // 録音開始直後は必ず「頭から」
 
-  // v0.21.0: やり直し用の録音は live とは別の録音機で録る。
+  // v0.21.0: 話者判別用の録音は live とは別の録音機で録る。
   // 保持がオフなら作らない（作らなければ消し忘れも起きない）
   startArchiveRecorder(state.audioStream, recOpts);
 
@@ -2892,7 +2897,7 @@ async function startGeminiAudioRecording() {
     });
     if (cut) cutChunk(cut === 'silence', sig.source);
 
-    // v0.21.0: やり直し用の録音を約10分ごとに区切る。live の区切りとは
+    // v0.21.0: 話者判別用の録音を約10分ごとに区切る。live の区切りとは
     // 独立して判断する（目的が違う。shouldRollArchiveSegment の解説を参照）
     if (state.archiveRecorder) {
       const roll = shouldRollArchiveSegment({
@@ -6210,7 +6215,7 @@ function openSettings() {
   if (els.inputChunkMaxSec) els.inputChunkMaxSec.value = state.settings.audioChunkMaxSec || 20;
   if (els.inputAudioBitrate) els.inputAudioBitrate.value = String(state.settings.audioBitrate || 64000);
   if (els.inputKeepRecording) els.inputKeepRecording.checked = !!state.settings.audioKeepRecording;
-  if (els.inputAudioRetention) els.inputAudioRetention.value = state.settings.audioRetention || 'repass';
+  if (els.inputAudioRetention) els.inputAudioRetention.value = state.settings.audioRetention || 'close';
   refreshAudioUsage();
   if (els.inputGeminiLiveDisplay) els.inputGeminiLiveDisplay.checked = state.settings.geminiLiveDisplay !== false;
   if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
@@ -6290,7 +6295,7 @@ function saveSettingsFromForm() {
         .finally(refreshAudioUsage);
     }
   }
-  if (els.inputAudioRetention) state.settings.audioRetention = els.inputAudioRetention.value || 'repass';
+  if (els.inputAudioRetention) state.settings.audioRetention = els.inputAudioRetention.value || 'close';
   if (els.inputChunkMaxSec) {
     // 最長は最短より短くできない（短いと無音を探す余地が消える）
     state.settings.audioChunkMaxSec = Math.max(
@@ -6434,7 +6439,7 @@ function initSessions() {
  * v0.21.2: 失敗を黙らなくした。ここは全セッションを1つのキーに入れているので、
  * 容量超過で落ちると**その回の変更が丸ごと消える**。console にしか出していないと、
  * 利用者は保存できていないことに気づかないまま書き続けることになる。
- * （やり直しの結果を残すようにして保存量が増えたので、なおさら黙っていられない）
+ * （話者判別の結果を残すようにして保存量が増えたので、なおさら黙っていられない）
  */
 let _persistFailedAt = 0;
 function persistSessions() {
@@ -6544,7 +6549,7 @@ function migrateMemoTaskItems() {
 
 function loadActiveSessionIntoDOM() {
   renderDictBar();   // v0.20.0: タブごとに辞書が違うので、切り替えたら描き直す
-  updateRepassButton();   // v0.21.2: 保存済みの結果もタブごとに違う
+  updateDiarizeButton();   // v0.21.2: 保存済みの結果もタブごとに違う
   const s = getActiveSession();
   els.confirmed.innerHTML = s?.transcript || '';
   els.memo.innerHTML = s?.memo || '';
@@ -7904,10 +7909,10 @@ if (els.btnRefineTranscript) {
   });
 }
 
-/* v0.21.0: 話者付きのやり直し。走っている間は同じボタンが「中止」になる */
-if (els.btnRepass) {
-  els.btnRepass.addEventListener('click', () => { repassWithSpeakers(); });
-  updateRepassButton();
+/* v0.21.0: 話者判別。走っている間は同じボタンが「中止」になる */
+if (els.btnDiarize) {
+  els.btnDiarize.addEventListener('click', () => { runDiarization(); });
+  updateDiarizeButton();
 }
 
 els.paneTranscriptBody.addEventListener('scroll', () => {
