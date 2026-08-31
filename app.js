@@ -1627,7 +1627,8 @@ function createSilenceDetector(stream) {
   let noiseFloorDb = null;  // 開始直後の実測で決める（固定値から始めない）
   let silentSinceMs = 0;    // 無音が始まった時刻（0 = いま無音ではない）
   let lastDb = -99;
-  let heardSpeech = false;  // フロアより明確に大きい音を聞いたことがあるか
+  let heardSpeech = false;  // フロアより明確に大きい音を聞いたことがあるか（録音全体）
+  let speechInChunk = false; // 同上（いまのチャンクの中だけ。区切りごとにリセット）
   const startedAt = Date.now();
 
   const timer = setInterval(() => {
@@ -1646,7 +1647,7 @@ function createSilenceDetector(stream) {
     }
 
     const quiet = db < noiseFloorDb + SILENCE_MARGIN_DB;
-    if (db >= noiseFloorDb + SILENCE_SPEECH_MARGIN_DB) heardSpeech = true;
+    if (db >= noiseFloorDb + SILENCE_SPEECH_MARGIN_DB) heardSpeech = speechInChunk = true;
 
     // ② フロアの学習は「静かだと判定できているとき」だけ行う。
     //    常時追従させると、喋り続けたときにフロアが発話レベルまで持ち上がり、
@@ -1673,6 +1674,10 @@ function createSilenceDetector(stream) {
     },
     db() { return lastDb; },
     floorDb() { return noiseFloorDb === null ? -99 : noiseFloorDb; },
+    /** いまのチャンクの中で、一度でも発話らしい音量があったか */
+    sawSpeechInChunk() { return speechInChunk; },
+    /** チャンクを切ったときに呼ぶ */
+    resetChunkSpeech() { speechInChunk = false; },
     close() {
       clearInterval(timer);
       try { src.disconnect(); } catch {}
@@ -1698,6 +1703,25 @@ function decideChunkCut({ elapsed, minMs, maxMs, useSilenceCut, isSilent }) {
   if (!useSilenceCut) return null;          // 従来動作では minMs === maxMs なので上で切れる
   if (elapsed < minMs) return null;
   return isSilent ? 'silence' : null;
+}
+
+/**
+ * Gemini が空を返したチャンクを、画面から消してよいか (v0.18.1)
+ *
+ * 無音位置で区切るようになった結果、最後の区切りのあとに「中身が沈黙だけ」の
+ * チャンクが必ず1本できるようになった。それを送ると Gemini は正しく空を返すが、
+ * 従来のコードはそれを「（音声不明瞭・再試行可）」として画面に残していた。
+ *
+ * ただし**間違えると小声を黙って捨てることになる**ので、条件は厳しくする。
+ * 3つ揃って初めて消す:
+ *   - Gemini が空（呼び出し側で確認済み）
+ *   - Web Speech も何も拾っていない（別エンジンでも聞こえていない）
+ *   - 検出器がこのチャンク中に発話音量を一度も見ていない
+ * 検出器が無い場合 hadSpeech は undefined なので、消さずに残す。
+ */
+function shouldDropEmptyChunk(provisionalText, edges) {
+  if (provisionalText) return false;
+  return !!edges && edges.hadSpeech === false;
 }
 
 async function startGeminiAudioRecording() {
@@ -1836,7 +1860,10 @@ async function startGeminiAudioRecording() {
     state.pendingChunkEdges = {
       startsAtSilence: !!state.chunkStartedAtSilence,
       endsAtSilence: !!endedAtSilence,
+      // 検出器が無いときは undefined のまま（＝判断材料なし）にしておく
+      hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
     };
+    if (state.silenceDetector) state.silenceDetector.resetChunkSpeech();
     state.mediaRecorder.stop(); // onstop で送信＋再スタート
   };
 
@@ -1867,6 +1894,7 @@ function stopGeminiAudioRecording() {
   state.pendingChunkEdges = {
     startsAtSilence: !!state.chunkStartedAtSilence,
     endsAtSilence: !!(state.silenceDetector && state.silenceDetector.isSilent()),
+    hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
   };
   if (recorder && recorder.state !== 'inactive') {
     try { recorder.stop(); } catch {}
@@ -2013,6 +2041,12 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
       persist();
       // 遅延ミドル整形をチェック
       maybeConsolidateShortChunks();
+    } else if (shouldDropEmptyChunk(provisionalText, edges)) {
+      // 沈黙だけのチャンク。従来はこれが「（音声不明瞭・再試行可）」として
+      // 画面に残っていた（判断根拠は shouldDropEmptyChunk のコメント）
+      diagLog.info('沈黙のみのチャンクだったので表示しない');
+      targetEl.remove();
+      persist();
     } else {
       // 空テキストも「要再試行」として残す（消さない）
       // v0.17.0: Web Speech が聞き取っていたなら、その文字は捨てない。
