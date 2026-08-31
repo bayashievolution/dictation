@@ -1995,9 +1995,17 @@ function silenceDiag(source) {
   const d = state.silenceDetector;
   if (!d) return `[検出器なし 採用=${source || '?'}]`;
   const [lo, hi] = d.chunkRangeDb();
+  // v0.19.1: 無音の計測はチャンクの区切りをまたいで続く（判定にはそれが正しい）。
+  // ただしログにそのまま出すと「このチャンクの中に3.4秒の沈黙があった」と
+  // 読めてしまうので、チャンク自身の長さで頭打ちにする。
+  // 前から続いていた分は `+` を付けて区別する
+  const elapsed = state.chunkStartedAt ? Date.now() - state.chunkStartedAt : Infinity;
+  const raw = d.longestSilentMsInChunk();
+  const shown = Math.min(raw, elapsed);
   return `[声帯域 窓${d.floorDb().toFixed(0)}〜${d.peakDb().toFixed(0)} `
     + `全体${lo.toFixed(0)}〜${hi.toFixed(0)}(幅${(hi - lo).toFixed(0)}dB) `
-    + `${d.canJudge() ? '判定可' : '判定不能'} 最長無音${d.longestSilentMsInChunk()}ms `
+    + `${d.canJudge() ? '判定可' : '判定不能'} `
+    + `最長無音${Math.round(shown)}ms${raw > elapsed ? '+' : ''} `
     + `採用=${source || '?'} ctx=${d.ctxState()}]`;
 }
 
@@ -2296,6 +2304,14 @@ async function startGeminiAudioRecording() {
   state.isRecording = true;
   state.shouldAutoRestart = true;
   state.recordingSessionId = state.activeId; // BG録音用に固定
+  // v0.19.1: 保持のオン/オフをログに残す。これが無いと、保持まわりの
+  // 動作確認をログから判断できない（実機テストで実際に困った）
+  diagLog.info(state.settings.audioKeepRecording
+    ? `録音の保持: オン（${{
+        repass: 'やり直しが終わったら消す', close: 'タブを閉じたら消す',
+        '1d': '1日', '7d': '7日', manual: '手動で消すまで',
+      }[state.settings.audioRetention] || state.settings.audioRetention}）`
+    : '録音の保持: オフ（端末に残しません）');
   diagLog.info(`録音開始 (Gemini) session=${state.recordingSessionId?.slice(-6)} `
     + `最短=${state.settings.audioChunkSec || 12}秒 `
     + (state.settings.audioSilenceCut !== false && state.silenceDetector
