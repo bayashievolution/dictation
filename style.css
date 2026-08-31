@@ -2157,6 +2157,12 @@ mark.search-hit.current {
 [data-icon] svg {
   display: block;
 }
+/* v0.21.0: 説明文の中にボタンの絵を差し込む用。行の中で浮かないよう下に少し寄せる */
+.inline-icon {
+  vertical-align: -2px;
+  margin: 0 1px;
+  color: var(--text-muted);
+}
 
 /* ───────── Settings sections ───────── */
 .field-group {
@@ -3123,3 +3129,19 @@ body.chat-active .dict-menu { bottom: 114px; }
   cursor: pointer;
 }
 .context-dict-count { flex: none; }
+
+/* ───────── 話者付きのやり直し (v0.21.0) ───────── */
+
+/* 走っている間は、押すと中止になることが分かるように点滅させる。
+   同じボタンが「実行」と「中止」を兼ねるので、状態が見えないと押せない */
+#btn-repass.firing {
+  color: var(--accent);
+  animation: repass-pulse 1.4s ease-in-out infinite;
+}
+@keyframes repass-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #btn-repass.firing { animation: none; opacity: .7; }
+}

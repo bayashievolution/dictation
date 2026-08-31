@@ -399,6 +399,7 @@ const els = {
   summaryDetailSelect: document.getElementById('summary-detail-select'),
   btnSummaryCombo: document.getElementById('btn-summary-combo'),
   btnRefineTranscript: document.getElementById('btn-refine-transcript'),
+  btnRepass: document.getElementById('btn-repass'),   // v0.21.0
   emptyHint: document.getElementById('empty-hint'),
   settingsModal: document.getElementById('settings-modal'),
   btnNotionUpload: document.getElementById('btn-notion-upload'),
@@ -2272,6 +2273,245 @@ async function sweepStoredAudio() {
   } catch (e) {
     console.warn('[audio] 掃除に失敗:', e.message || e);
   }
+}
+
+/* ───────── 話者付きの全文やり直し (v0.21.0) ─────────
+ *
+ * live の文字起こしは12〜20秒のチャンクを1本ずつ投げるので、**話者を区別できない**。
+ * 同じ声かどうかは前後を並べて聞かないと分からないし、そもそも1チャンクに
+ * 1人しか入っていないことも多い。
+ *
+ * 録音が終わったあとなら、保管しておいた音声をまとめて投げられる。
+ * そこで初めて「誰が喋ったか」を付けられる。
+ *
+ * ■ 勝手には走らせない
+ *
+ * 音声全体をもう一度 Google に上げ直すので、
+ *   - 通信量（区間ごとに数MB）
+ *   - トークン（音声は1秒=32トークン。90分で約17万トークン）
+ *   - **録音そのものがもう一度 Google に渡る**
+ * のすべてが発生する。3つ目が一番重い。必ず確認してから走らせる。
+ */
+
+/** やり直しの進行状態。二重起動を防ぎ、中止を受け取る */
+function repassState() {
+  if (!state.repass) state.repass = { running: false, cancel: null };
+  return state.repass;
+}
+
+/** ボタンの見た目を状態に合わせる */
+function updateRepassButton() {
+  if (!els.btnRepass) return;
+  const r = repassState();
+  els.btnRepass.classList.toggle('firing', r.running);
+  els.btnRepass.title = r.running
+    ? 'やり直しを中止する'
+    : '保管した録音をまとめて投げ直し、話者付きで作り直す（録音の保持がオンのときだけ）';
+}
+
+/**
+ * 話者付きでやり直す (v0.21.0)
+ *
+ * 区間ごとに「上げる → 待つ → 文字起こし → 消す」を順に回す。
+ * **1区間ずつ消す**のは、途中で止めたときに上げっぱなしのファイルを
+ * 残さないため（48時間で自動削除されるとはいえ、置いておく理由が無い）。
+ */
+async function repassWithSpeakers() {
+  const r = repassState();
+  if (r.running) {
+    if (confirm('やり直しを中止しますか？\n\nここまでに書き出した分はそのまま残ります。')) {
+      r.cancel.aborted = true;
+      setStatus('idle', 'やり直しを中止しています…');
+    }
+    return;
+  }
+
+  if (!state.settings.apiKey) { alert('Gemini API キーが未設定です'); openSettings(); return; }
+  if (state.isRecording && state.recordingSessionId === state.activeId) {
+    alert('録音中はやり直せません。先に録音を止めてください。');
+    return;
+  }
+  const session = getActiveSession();
+  if (!session) return;
+
+  let segments;
+  try {
+    segments = await audioStoreGetSegments(session.id);
+  } catch (e) {
+    alert('保管した音声を読み出せませんでした:\n' + (e.message || e));
+    return;
+  }
+  if (!segments.length) {
+    // 「なぜ無いのか」を言わないと、設定を直しようがない
+    alert(state.settings.audioKeepRecording
+      ? 'このセッションには保管された録音がありません。\n\n'
+        + '保持の設定を入れる前に録音したもの、または保持期間が過ぎて消えたものは'
+        + 'やり直せません。'
+      : '録音の保持がオフなので、やり直せる音声がありません。\n\n'
+        + '設定 →「録音の一時保管」をオンにすると、次の録音からやり直せるようになります。');
+    return;
+  }
+
+  const totalBytes = segments.reduce((n, s) => n + s.bytes, 0);
+  // 音声は 1秒あたり 32 トークン。ビットレートから秒数を見積もる
+  const bps = Number(state.settings.audioBitrate) || 64000;
+  const approxSec = Math.round(totalBytes * 8 / bps);
+  const approxTokens = approxSec * 32;
+  const mins = Math.max(1, Math.round(approxSec / 60));
+
+  if (!confirm(
+    `この録音を話者付きで作り直します。\n\n`
+    + `　音声: 約${mins}分 / ${formatBytes(totalBytes)} / ${segments.length}区間\n`
+    + `　入力トークン: 約${approxTokens.toLocaleString()}（音声は1秒=32トークン）\n\n`
+    + `⚠️ 録音全体をもう一度 Google にアップロードします。\n`
+    + `　 使い終わったファイルはこちらから削除しますが、\n`
+    + `　 削除できなかった場合も Google 側で48時間後に自動削除されます。\n\n`
+    + `いまの文字起こしは置き換わります（Ctrl+Z で戻せます）。\n\n`
+    + `続けますか？`
+  )) return;
+
+  r.running = true;
+  r.cancel = { aborted: false };
+  updateRepassButton();
+  pushUndo('話者付きでやり直し', 'pane-transcript');
+
+  const container = getWriteContainer();
+  const inBg = container !== els.confirmed;
+  const persist = () => {
+    if (inBg) syncBgToSession(); else snapshotActiveToSession();
+    persistSessions();
+  };
+
+  // 画面をいったん空にして、進行状況だけを置く
+  Array.from(container.childNodes).forEach(n => n.remove());
+  const progressEl = createParagraphEl('（やり直しの準備中…）', 'paragraph refining');
+  container.appendChild(progressEl);
+  const say = (msg) => {
+    const body = progressEl.querySelector('.p-body');
+    if (body) body.textContent = `（${msg}）`;
+  };
+
+  diagLog.info(`話者付きやり直し開始: ${segments.length}区間 / ${formatBytes(totalBytes)} / 約${mins}分`);
+
+  const rosters = [];
+  let prevTail = '';
+  let wrote = 0;
+  let stoppedBy = null;
+
+  try {
+    for (let i = 0; i < segments.length; i++) {
+      if (r.cancel.aborted) { stoppedBy = '中止'; break; }
+      const seg = segments[i];
+      const label = `${i + 1}/${segments.length}`;
+      let uploaded = null;
+
+      try {
+        say(`区間 ${label} を送信中… 0%`);
+        setStatus('processing', `やり直し ${label}`);
+        uploaded = await geminiFileUpload({
+          apiKey: state.settings.apiKey,
+          blob: seg.blob,
+          displayName: `dictation-${session.id}-seg${seg.seg}`,
+          cancel: r.cancel,
+          onProgress: (ratio) => say(`区間 ${label} を送信中… ${Math.round(ratio * 100)}%`),
+        });
+        say(`区間 ${label} の準備を待っています…`);
+        await geminiFileWaitActive({
+          apiKey: state.settings.apiKey, name: uploaded.name, cancel: r.cancel,
+        });
+
+        say(`区間 ${label} を話者付きで書き起こし中…`);
+        const out = await diarizeSegmentWithGemini({
+          apiKey: state.settings.apiKey,
+          fileUri: uploaded.uri,
+          mimeType: uploaded.mimeType,
+          sessionContext: getSessionContextForAi(),
+          knownSpeakers: mergeSpeakerRosters(rosters),
+          prevTail: prevTail.slice(-300),
+          index: i + 1,
+          total: segments.length,
+        });
+
+        rosters.push(out.speakers);
+        for (const t of out.turns) {
+          const el = createParagraphEl('', 'paragraph refined');
+          setParagraphContent(el, formatSpeakerTurn(t));
+          container.insertBefore(el, progressEl);
+          wrote++;
+        }
+        if (out.turns.length) prevTail = out.turns[out.turns.length - 1].text;
+        diagLog.info(`やり直し ${label}: ${out.turns.length}発言 / 話者${out.speakers.length}人`
+          + (out.speakers.length ? ` (${out.speakers.map(s => s.label).join('、')})` : ''));
+        persist();
+      } finally {
+        // 上げたものは、成功でも失敗でも中止でも消す
+        if (uploaded && uploaded.name) {
+          const ok = await geminiFileDelete({ apiKey: state.settings.apiKey, name: uploaded.name });
+          if (!ok) diagLog.info(`やり直し ${label}: 上げたファイルを消せませんでした（48時間で自動削除されます）`);
+        }
+      }
+    }
+  } catch (e) {
+    stoppedBy = e.message || String(e);
+    console.warn('[repass] failed:', e);
+    diagLog.info('やり直し中断: ' + stoppedBy);
+  } finally {
+    r.running = false;
+    r.cancel = null;
+    updateRepassButton();
+  }
+
+  progressEl.remove();
+
+  if (wrote === 0) {
+    // 1行も書けなかったときに空の画面を残すのは最悪なので、元に戻せることを言う
+    const el = createParagraphEl(
+      `（やり直しできませんでした: ${stoppedBy || '結果が空でした'}／Ctrl+Z で元の文字起こしに戻せます）`,
+      'paragraph needs-retry');
+    container.appendChild(el);
+    persist();
+    setStatus('error', 'やり直し失敗');
+    return;
+  }
+
+  persist();
+  if (!inBg) { updateActionButtons(); autoScroll(); }
+
+  const roster = mergeSpeakerRosters(rosters);
+  if (stoppedBy) {
+    setStatus('error', `やり直し中断（${wrote}発言まで）`);
+    alert(`途中で止まりました: ${stoppedBy}\n\n`
+      + `ここまでの ${wrote}発言は書き出してあります。\n`
+      + `元の文字起こしに戻すには Ctrl+Z を押してください。`);
+    return;
+  }
+
+  // 完了した分だけ、保持設定の「やり直しが終わったら消す」を効かせる
+  session.audioRepassDoneAt = Date.now();
+  persistSessions();
+  sweepStoredAudio();
+
+  setStatus('idle', `やり直し完了（話者${roster.length}人）`);
+  diagLog.info(`話者付きやり直し完了: ${wrote}発言 / 話者${roster.length}人`);
+  alert(`話者付きで作り直しました。\n\n`
+    + `　発言: ${wrote}件\n`
+    + `　話者: ${roster.length}人（${roster.map(s => s.label).join('、')}）\n\n`
+    + `※ 区間の変わり目で話者の対応がずれることがあります。\n`
+    + `　 区間ごとに別々に送っているので、モデルは前の区間の声を覚えていません。\n`
+    + `　 名前が分かっているなら、タグアイコンの「話者」に書いておくと安定します。`);
+}
+
+/**
+ * 発言1つを段落のテキストにする (v0.21.0)
+ *
+ * 純関数。**プレーンテキストの接頭辞**にしてあるのは、この文字起こしが
+ * コピー・Notion・HTML 保存と何通りにも出ていくため。見た目だけの装飾にすると
+ * 出口のどれかで話者が消える。
+ */
+function formatSpeakerTurn(turn) {
+  const who = (turn?.speaker || '').trim();
+  const text = (turn?.text || '').trim();
+  return who ? `${who}：${text}` : text;
 }
 
 /**
@@ -7486,6 +7726,12 @@ if (els.btnRefineTranscript) {
       }
     }
   });
+}
+
+/* v0.21.0: 話者付きのやり直し。走っている間は同じボタンが「中止」になる */
+if (els.btnRepass) {
+  els.btnRepass.addEventListener('click', () => { repassWithSpeakers(); });
+  updateRepassButton();
 }
 
 els.paneTranscriptBody.addEventListener('scroll', () => {

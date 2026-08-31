@@ -905,3 +905,210 @@ window.chatWithGemini = chatWithGemini;
 window.transcribeAudioWithGemini = transcribeAudioWithGemini;
 window.formatForOSDWithGemini = formatForOSDWithGemini;
 window.refineMemoSelectionWithGemini = refineMemoSelectionWithGemini;
+
+/* ───────── 話者判別つきの全文やり直し (v0.21.0) ─────────
+ *
+ * live の文字起こしは12〜20秒のチャンクを1本ずつ投げるので、
+ * **話者の区別ができない**。同じ声かどうかは、前後を並べて聞かないと分からない。
+ *
+ * 録音が終わったあとなら、保管しておいた音声をまとめて投げられる。
+ * そこで初めて「誰が喋ったか」を付けられる。
+ *
+ * ■ 区間ごとに投げる
+ *
+ * 90分を1本で投げると出力が数万字になり、途中で崩れたときに全部やり直しになる。
+ * 音声は保管の時点で約10分ごとの区間に分かれている（audio-store.js 参照）ので、
+ * それを1本ずつ投げる。
+ *
+ * ■ 区間をまたいだ話者の対応づけは、原理的に保証できない
+ *
+ * 別々のリクエストなので、モデルは前の区間の**声**を覚えていない。
+ * 渡せるのは前の区間で作った話者一覧（ラベルと声の特徴のメモ）だけで、
+ * それを頼りに合わせてもらう。合っている保証は無い。
+ *
+ * だから**画面に正直に出す**。「区間の変わり目で話者の対応がずれることがある」と
+ * 書いておかないと、ずれたときに文字起こし全体が信用できなくなる。
+ * 話者名が分かっているなら文脈設定の「話者」に書いてもらうほうが確実で、
+ * そのときはラベルではなく名前を使わせる。
+ */
+
+/** 応答の形を固定する。散文で返させると、話者の切れ目の解釈がぶれる */
+const DIARIZE_SCHEMA = {
+  type: 'object',
+  properties: {
+    speakers: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          label: { type: 'string' },
+          note: { type: 'string' },
+        },
+        required: ['label'],
+      },
+    },
+    turns: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          speaker: { type: 'string' },
+          text: { type: 'string' },
+        },
+        required: ['speaker', 'text'],
+      },
+    },
+  },
+  required: ['speakers', 'turns'],
+};
+
+/**
+ * 区間を1本、話者判別つきで文字起こしする (v0.21.0)
+ *
+ * @param {object} args
+ * @param {string} args.apiKey
+ * @param {string} args.fileUri       Files API に上げた音声の URI
+ * @param {string} args.mimeType
+ * @param {object} [args.sessionContext]  分野・話者・語彙
+ * @param {Array<{label:string, note?:string}>} [args.knownSpeakers] 前の区間までの話者一覧
+ * @param {string} [args.prevTail]    前の区間の末尾（繋がりの参考。ここから続きを作らせない）
+ * @param {number} [args.index]       1 始まり
+ * @param {number} [args.total]
+ * @returns {Promise<{speakers: Array, turns: Array}>}
+ */
+async function diarizeSegmentWithGemini({
+  apiKey, fileUri, mimeType, sessionContext, knownSpeakers, prevTail, index, total,
+}) {
+  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  if (!fileUri) throw new Error('音声の URI がありません');
+
+  const named = (sessionContext?.speakers || '').trim();
+
+  const instruction = [
+    'あなたは日本語音声の書き起こしを行う編集者です。',
+    '入力音声を、**誰が話したか**を付けて文字起こししてください。',
+    '',
+    '■ 話者の付け方',
+    named
+      ? '- 参考情報に話者名が挙がっている。声と対応が付くものはその名前を label に使う。'
+        + '対応が付かない声は 話者A、話者B … を使う'
+      : '- label は 話者A、話者B … とする。名前が音声の中で名乗られた場合に限り、その名前を使ってよい',
+    '- note には声の特徴と役割を短く書く（例: 低めの男性・司会）。次の区間で同じ人を',
+    '  見分けるための手がかりとして使うので、聞いて分かることだけを書く',
+    '- **声が1人しかいないなら話者は1人**。無理に分けない',
+    '- 同じ人が続けて話している間は turns を分けない。話者が変わったところで分ける',
+    '- 誰の声か決められないときは label を 話者不明 にする。当てずっぽうで割り振らない',
+    '',
+    '■ 文字起こしのルール',
+    '- 句読点を適切に補う',
+    '- フィラー（えー、あー、まぁ、んー）を削除',
+    '- 言い直しは自然な文に整える（ただし言っていない言葉を足さないこと）',
+    '- text に話者名やラベルを書かない（speaker と二重になる）',
+    '- 音声が無音・ノイズのみ・意味ある発話ゼロなら turns を空の配列にする',
+    buildNoInventionRule(),
+  ].join('\n');
+
+  const head = [];
+  const ctxBlock = buildContextBlock(sessionContext);
+  if (ctxBlock) head.push(ctxBlock, '');
+  if (Number.isFinite(index) && Number.isFinite(total) && total > 1) {
+    head.push(`【この音声は録音全体の ${index}/${total} 番目の区間です】`);
+    // 区間の切れ目は無音を狙って切ってあるが、喋りっぱなしのときは強制で切れる。
+    // どちらでも「続きを作る」のは禁止なので、そこだけは毎回言う
+    head.push('区間の前後は途中で切れている可能性がある。'
+      + '聞こえているところだけを書き、前後を想像で補わないこと。', '');
+  }
+  if (knownSpeakers && knownSpeakers.length) {
+    head.push(
+      '【前の区間までに出てきた話者】',
+      ...knownSpeakers.map(s => `- ${s.label}${s.note ? `（${s.note}）` : ''}`),
+      '同じ声だと判断できる場合は同じ label を使う。'
+        + '判断が付かなければ新しい label を作ってよい。無理に当てはめないこと。',
+      '',
+    );
+  }
+  if (prevTail) {
+    head.push(
+      '【前の区間の末尾（表記を揃えるための参考。ここから話を続けて書かないこと）】',
+      prevTail,
+      '',
+    );
+  }
+  head.push('この音声を、話者付きで文字起こししてください。');
+
+  const body = {
+    system_instruction: { parts: [{ text: instruction }] },
+    contents: [{
+      role: 'user',
+      parts: [
+        { text: head.join('\n') },
+        { file_data: { mime_type: mimeType || 'audio/webm', file_uri: fileUri } },
+      ],
+    }],
+    generationConfig: {
+      temperature: 0.2,
+      topP: 0.9,
+      // 10分の区間は日本語で 3000〜4000 字程度。JSON の飾りぶんを見て広めに取る
+      maxOutputTokens: 16384,
+      responseMimeType: 'application/json',
+      responseSchema: DIARIZE_SCHEMA,
+    },
+  };
+
+  // JSON を期待するので、散文向けのサニタイザは通さない（v0.16.1 と同じ理由）
+  const text = await _callGemini(body, apiKey, { maxRetries: 1, skipSanitize: true });
+  return parseDiarizeResult(text);
+}
+
+/**
+ * 応答を読む (v0.21.0)
+ *
+ * responseSchema を指定していても、**壊れた JSON が返らない保証は無い**
+ * （出力上限で切れるとそうなる）。ここで落ちると区間1本ぶんの
+ * アップロードが無駄になるので、読めなかったことを分かる形で返す。
+ */
+function parseDiarizeResult(text) {
+  let data;
+  try {
+    data = JSON.parse(String(text || '').trim());
+  } catch {
+    throw new Error('話者付きの結果を読めませんでした（応答が途中で切れた可能性があります）');
+  }
+  const speakers = Array.isArray(data?.speakers) ? data.speakers : [];
+  const turns = Array.isArray(data?.turns) ? data.turns : [];
+  return {
+    speakers: speakers
+      .filter(s => s && typeof s.label === 'string' && s.label.trim())
+      .map(s => ({ label: s.label.trim(), note: (s.note || '').toString().trim() })),
+    turns: turns
+      .filter(t => t && typeof t.text === 'string' && t.text.trim())
+      .map(t => ({ speaker: (t.speaker || '').toString().trim() || '話者不明', text: t.text.trim() })),
+  };
+}
+
+/**
+ * 区間ごとの話者一覧を1本にまとめる (v0.21.0)
+ *
+ * 純関数。同じ label は先に出たほうの note を残す
+ * （最初に出たときのメモのほうが、次の区間へ渡す手がかりとして素直）。
+ */
+function mergeSpeakerRosters(rosters) {
+  const out = [];
+  const seen = new Map();
+  for (const roster of rosters || []) {
+    for (const s of roster || []) {
+      const label = (s?.label || '').trim();
+      if (!label) continue;
+      if (seen.has(label)) {
+        // note が空だったところに、あとから中身が来たら埋める
+        const cur = seen.get(label);
+        if (!cur.note && s.note) cur.note = s.note;
+        continue;
+      }
+      const rec = { label, note: (s.note || '').trim() };
+      seen.set(label, rec);
+      out.push(rec);
+    }
+  }
+  return out;
+}

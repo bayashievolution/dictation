@@ -103,6 +103,10 @@
             <span class="toggle-track" data-role="toggle"><span class="toggle-knob"></span></span>
             <span class="toggle-label" data-role="action"><span data-icon="sparkles"></span>文字起こし整形</span>
           </button>
+          <!-- v0.21.0: 保管した録音をまとめて投げ直し、話者付きで作り直す -->
+          <button id="btn-repass" class="pane-btn pane-btn-icon" title="保管した録音をまとめて投げ直し、話者付きで作り直す（録音の保持がオンのときだけ）">
+            <span data-icon="users"></span>
+          </button>
           <button class="pane-btn pane-btn-icon" data-pane-undo="pane-transcript" disabled title="この タブの変更を戻す（Ctrl+Z）">
             <span data-icon="undo"></span>
           </button>
@@ -508,15 +512,20 @@
           </label>
           <div class="field">
             <small class="field-hint">
-              録音が終わったあとで、<strong>全文をもう一度 Gemini に通して話者判別つきで作り直す</strong>ための機能です。
-              チャンクに分けずに丸ごと渡すため、話者の区別や前後関係の精度が上がります。
+              録音が終わったあとで、<strong>もう一度 Gemini に通して話者判別つきで作り直す</strong>ための機能です。
+              文字起こしタブの
+              <span class="inline-icon" data-icon="users" data-icon-size="14"></span>
+              ボタンから実行します。
+              live の文字起こしは12〜20秒ごとに送るので話者を区別できませんが、
+              やり直しは約10分ずつまとめて送るため、誰が話したかを付けられます。
             </small>
           </div>
           <div class="field">
             <small class="field-hint warn-hint">
               <strong>この設定が決めるのは「端末に残すかどうか」だけです。</strong>
               Gemini モードは、この設定に関係なく文字起こしのために音声を Google へ送信しています。
-              やり直しを実行すると録音全体がアップロードされ、Google 側で48時間後に自動削除されます。
+              やり直しを実行すると録音全体がアップロードされます。
+              使い終わったファイルはこちらから削除しますが、削除できなかった場合も Google 側で48時間後に自動削除されます。
               録音の保存自体が許されない場面では、この設定をオフにしたうえで、
               Gemini モードを使うことの可否も確認してください。
             </small>
@@ -906,6 +915,7 @@
   <script src="gemini.js?v=0.21.0"></script>
   <script src="notion.js?v=0.21.0"></script>
   <script src="audio-store.js?v=0.21.0"></script>
+  <script src="gemini-files.js?v=0.21.0"></script>
   <script src="term-dicts.js?v=0.21.0"></script>
   <script src="app.js?v=0.21.0"></script>
 </body>
