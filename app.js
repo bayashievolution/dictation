@@ -2005,6 +2005,9 @@ function silenceDiag(source) {
   return `[声帯域 窓${d.floorDb().toFixed(0)}〜${d.peakDb().toFixed(0)} `
     + `全体${lo.toFixed(0)}〜${hi.toFixed(0)}(幅${(hi - lo).toFixed(0)}dB) `
     + `${d.canJudge() ? '判定可' : '判定不能'} `
+    // v0.19.2: 空チャンクを消すかどうかはこの値で決まるのに、出していなかった。
+    // 実機で「（音声不明瞭・再試行可）」が残った理由を判断できなかった
+    + `発話${d.sawSpeechInChunk() ? 'あり' : 'なし'} `
     + `最長無音${Math.round(shown)}ms${raw > elapsed ? '+' : ''} `
     + `採用=${source || '?'} ctx=${d.ctxState()}]`;
 }
@@ -2049,12 +2052,25 @@ function bigrams(str) {
  * 「はい 3秒間 黙りました」）ので、完全一致では判定できない。
  * 2文字の並びがどれだけ重なるかで見る。
  */
+/* 判定の下限を2段階にする (v0.19.2)
+ *
+ * v0.18.8 は一律 8 文字未満を対象外にしていた。実機で「乗り越えるべき」（7文字）が
+ * 二重に出て、**1文字足りずにすり抜けた**。
+ *
+ * かといって一律に下げると、あいまい一致（2文字の並びの重なり）で偶然の一致が増える。
+ * ただし**そのまま含まれている**場合は短くても確実なので、そこだけ下限を下げる。
+ */
+const DUP_MIN_EXACT = 4;   // 完全に含まれているなら、これだけあれば確か
+const DUP_MIN_FUZZY = 8;   // あいまい一致は短いと偶然当たる
+
 function isDuplicateOfTail(provisionalText, tailText, threshold = 0.7) {
   const a = normalizeForCompare(provisionalText);
   const b = normalizeForCompare(tailText);
-  // 短すぎる文字列は偶然一致しうるので判定しない（取りこぼすより残すほうがマシ）
-  if (a.length < 8 || b.length < 8) return false;
+  if (a.length < DUP_MIN_EXACT || b.length < DUP_MIN_EXACT) return false;
+  // そのまま含まれているなら、短くても重複と断定してよい
   if (b.includes(a)) return true;
+  // ここから先はあいまい一致。短い文字列は偶然当たるので判定しない
+  if (a.length < DUP_MIN_FUZZY || b.length < DUP_MIN_FUZZY) return false;
   const ba = bigrams(a), bb = bigrams(b);
   if (ba.size === 0) return false;
   let hit = 0;
