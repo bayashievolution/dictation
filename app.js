@@ -2533,6 +2533,7 @@ async function runDiarization() {
   // v0.21.1: 待つ。ここで消えるかどうかを、この場で利用者に言うため
   // （黙って消すと、次に押したときに「録音がありません」だけが出て理由が分からない）
   const swept = await sweepStoredAudio();
+sweepStoredImages();   // v0.22.0: どのメモからも参照されていない画像を片付ける
   refreshAudioUsage();
 
   setStatus('idle', `話者判別が完了（話者${roster.length}人）`);
@@ -4007,11 +4008,28 @@ ${sections.join('\n')}
 `;
 }
 
-function saveSessionAsHtml() {
+/**
+ * 書き出し用に、画像を埋め込んだセッションのコピーを作る (v0.22.0)
+ *
+ * 元のセッションは触らない（保管庫を参照する形のまま残す）。
+ * ここで作るコピーだけが data: を持ち、**1枚で完結した HTML** になる。
+ */
+async function sessionsWithInlineImages(sessions) {
+  const out = [];
+  for (const s of sessions) {
+    if (!s.memo || s.memo.indexOf('data-img-id') < 0) { out.push(s); continue; }
+    out.push({ ...s, memo: await inlineImagesForExport(s.memo) });
+  }
+  return out;
+}
+
+async function saveSessionAsHtml() {
   snapshotActiveToSession();
   const session = getActiveSession();
   if (!session) return;
-  const html = buildExportHtml(session);
+  // v0.22.0: 画像は保管庫にあるので、書き出す直前に data: へ戻す
+  const [forExport] = await sessionsWithInlineImages([session]);
+  const html = buildExportHtml(forExport);
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
@@ -4025,14 +4043,15 @@ function saveSessionAsHtml() {
  * 全セッションを1つのHTMLファイルに。各セッションは <details> 折り畳みで
  * 独立して展開できる。pane はユーザー設定の並び順を尊重。
  */
-function buildAllSessionsExportHtml() {
+function buildAllSessionsExportHtml(sessions) {
+  const list = sessions || state.sessions;
   const fmt = (ts) => {
     const d = new Date(ts);
     const pad = n => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
 
-  const sessionsHtml = state.sessions.map((session, idx) => {
+  const sessionsHtml = list.map((session, idx) => {
     const sections = [];
     for (const paneId of state.settings.paneOrder) {
       const meta = PANE_META[paneId];
@@ -4073,19 +4092,19 @@ function buildAllSessionsExportHtml() {
   }).join('\n\n');
 
   // TOCリンク
-  const tocLinks = state.sessions.map((s, idx) =>
+  const tocLinks = list.map((s, idx) =>
     `<li><a href="#sess-${idx + 1}">${idx + 1}. ${escapeHtml(s.title || '(無題)')}</a></li>`
   ).join('\n      ');
 
   const now = new Date();
   const exportedAt = fmt(now.getTime());
-  const pageTitle = `dictation — 全セッション (${state.sessions.length}件) ${exportedAt}`;
+  const pageTitle = `dictation — 全セッション (${list.length}件) ${exportedAt}`;
 
   // 再インポート用の JSON データを末尾 <script> に埋め込む（単体版と同じ方式の複数版）
   const multiData = {
     format: 'dictation-multi/v1',
     exportedAt: now.toISOString(),
-    sessions: state.sessions.map(s => ({
+    sessions: list.map(s => ({
       title: s.title,
       aiTitle: s.aiTitle || null,
       titleIsManual: !!s.titleIsManual,
@@ -4248,7 +4267,7 @@ footer.doc-foot { margin-top: 36px; text-align: center; font-size: 11px; color: 
 <div class="wrap">
   <header class="doc-head">
     <span class="brand">dictation</span>
-    <h1 class="doc-title">全セッション一覧 (${state.sessions.length}件)</h1>
+    <h1 class="doc-title">全セッション一覧 (${list.length}件)</h1>
     <div class="doc-meta">書き出し: ${exportedAt}</div>
     <div class="doc-controls">
       <button type="button" onclick="document.querySelectorAll('details.sess').forEach(d => d.open = true)">すべて展開</button>
@@ -4256,7 +4275,7 @@ footer.doc-foot { margin-top: 36px; text-align: center; font-size: 11px; color: 
     </div>
   </header>
   <details class="toc" open>
-    <summary>目次 (${state.sessions.length}件)</summary>
+    <summary>目次 (${list.length}件)</summary>
     <ol>
       ${tocLinks}
     </ol>
@@ -4272,13 +4291,13 @@ footer.doc-foot { margin-top: 36px; text-align: center; font-size: 11px; color: 
 `;
 }
 
-function saveAllSessionsAsHtml() {
+async function saveAllSessionsAsHtml() {
   snapshotActiveToSession();
   if (state.sessions.length === 0) {
     alert('書き出すセッションがありません');
     return;
   }
-  const html = buildAllSessionsExportHtml();
+  const html = buildAllSessionsExportHtml(await sessionsWithInlineImages(state.sessions));
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
@@ -6519,7 +6538,9 @@ function snapshotActiveToSession(opts = {}) {
   const s = getActiveSession();
   if (!s) return;
   const nextTranscript = els.confirmed.innerHTML;
-  const nextMemo       = els.memo.innerHTML;
+  // v0.22.0: 貼った画像の src は blob: の URL で、**保存しても次回は死んでいる**。
+  // id だけ残し、表示のたびに差し込み直す（image-store.js の冒頭を参照）
+  const nextMemo       = stripManagedImageSrc(els.memo.innerHTML);
   const nextSummary    = els.summary.innerHTML;
   // v0.15.1: Notion に上げたあとで中身が変わったら、アップ済み印を外す。
   // 「印は付いているが最新版は上がっていない」状態を作らないため。
@@ -6552,13 +6573,208 @@ function migrateMemoTaskItems() {
   });
 }
 
+/* ───────── メモに貼った画像 (v0.22.0) ─────────
+ *
+ * メモは画像を入れるメニューを**あえて置いていない**が、contenteditable の
+ * 標準機能で Ctrl+V の画像が貼れる。これを裏技として残す。
+ *
+ * 仕組みと、なぜこの形にしたのかは image-store.js の冒頭に書いた。
+ * ここは画面側だけ:
+ *
+ *   貼る   … 縮小して IndexedDB に入れ、<img data-img-id> を差し込む
+ *   出す   … 保存された HTML には src が無いので、表示のたびに blob: を差し込む
+ *   しまう … 保存の直前に src を外す（blob: の URL を保存しない）
+ */
+
+/** この画面で作った blob: の URL。タブを切り替えるときに解放する */
+let _memoObjectUrls = [];
+
+function releaseMemoObjectUrls() {
+  for (const u of _memoObjectUrls) { try { URL.revokeObjectURL(u); } catch {} }
+  _memoObjectUrls = [];
+}
+
+/**
+ * 保存された HTML の <img data-img-id> に、実物を差し込む (v0.22.0)
+ *
+ * 見つからない画像は**消さずに、消えていることが分かる形にする**。
+ * 黙って空の枠を残すと「読み込み中なのか、失われたのか」が分からない。
+ */
+async function hydrateMemoImages(root) {
+  const imgs = Array.from((root || document).querySelectorAll('img[data-img-id]'));
+  if (!imgs.length) return;
+  for (const img of imgs) {
+    if (img.getAttribute('src')) continue;   // すでに入っている
+    const id = img.dataset.imgId;
+    try {
+      const blob = await imageStoreGet(id);
+      if (!blob) { markMissingImage(img); continue; }
+      const url = URL.createObjectURL(blob);
+      _memoObjectUrls.push(url);
+      img.src = url;
+      img.classList.remove('img-missing');
+    } catch (e) {
+      markMissingImage(img);
+    }
+  }
+}
+
+function markMissingImage(img) {
+  img.classList.add('img-missing');
+  img.alt = '（画像が見つかりません）';
+  // 1x1 の透明 GIF。src を空にすると Chrome が壊れた画像アイコンを出す
+  img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+}
+
+/**
+ * 画像を1枚、保管して <img> にする (v0.22.0)
+ *
+ * **失敗しても例外を投げない。** 貼り付け操作の途中で落ちると、
+ * その時点で書いていたものごと巻き添えになる。
+ *
+ * @returns {Promise<HTMLImageElement|null>} 作れなければ null
+ */
+async function storePastedImage(blob) {
+  try {
+    if (!blob || !blob.size) return null;
+    if (blob.size > IMAGE_MAX_INPUT_BYTES) {
+      setStatus('error', `画像が大きすぎます（${formatBytes(blob.size)}）`);
+      diagLog.info(`メモ: 画像が大きすぎるので貼りませんでした ${formatBytes(blob.size)}`);
+      return null;
+    }
+    const r = await downscaleImage(blob);
+    if (r.blob.size > IMAGE_MAX_STORED_BYTES) {
+      setStatus('error', `画像が大きすぎます（縮小しても ${formatBytes(r.blob.size)}）`);
+      return null;
+    }
+    const id = newImageId();
+    await imageStorePut(id, r.blob);
+    const img = document.createElement('img');
+    img.dataset.imgId = id;
+    img.className = 'memo-img';
+    const url = URL.createObjectURL(r.blob);
+    _memoObjectUrls.push(url);
+    img.src = url;
+    diagLog.info(`メモに画像を貼りました ${formatBytes(r.from)}`
+      + (r.scaled ? ` → ${formatBytes(r.to)}（縮小）` : '（そのまま）'));
+    return img;
+  } catch (e) {
+    // 容量不足・IndexedDB が使えない等。**貼れないだけで、メモは壊さない**
+    setStatus('error', '画像を保存できませんでした: ' + (e.message || e));
+    diagLog.info('メモ: 画像の保存に失敗 ' + (e.message || e));
+    return null;
+  }
+}
+
+/**
+ * メモの貼り付けを受ける (v0.22.0)
+ *
+ * 画像なら横取りして保管し、それ以外は**ブラウザの標準の貼り付けに任せる**。
+ * 知らない種類が来たときに独自処理を挟むほうが、かえって壊れやすい。
+ * 受け取れないファイル（PDF など）は、黙って無視せず一言出す。
+ */
+async function handleMemoPaste(e) {
+  const dt = e.clipboardData;
+  if (!dt) return;
+  const decision = classifyPaste(dt.items);
+
+  if (decision.action === 'text') return;   // 標準に任せる
+
+  if (decision.action === 'reject') {
+    e.preventDefault();
+    const msg = describePasteReject(decision);
+    setStatus('error', msg);
+    diagLog.info('メモ: ' + msg);
+    setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
+                               state.isRecording ? '録音中' : '停止'), 5000);
+    return;
+  }
+
+  // 画像。標準の貼り付け（data: の巨大な img が入る）を止めてから差し替える
+  e.preventDefault();
+  const file = Array.from(dt.items)
+    .filter(i => i.kind === 'file' && /^image\//.test(i.type || ''))
+    .map(i => i.getAsFile())
+    .find(Boolean);
+  if (!file) return;
+
+  // 貼る位置を、非同期の待ちに入る前に捕まえておく
+  const sel = window.getSelection();
+  const range = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+
+  const img = await storePastedImage(file);
+  if (!img) return;
+
+  if (range) {
+    range.deleteContents();
+    range.insertNode(img);
+    range.setStartAfter(img);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } else {
+    els.memo.appendChild(img);
+  }
+  pushUndo('画像を貼り付け', 'pane-memo');
+  snapshotActiveToSession();
+  persistSessions();
+}
+
+/**
+ * 使われていない画像を片付ける。**起動時に呼ぶ。**
+ *
+ * メモから消しただけでは保管庫に残す（取り消しで戻せるようにするため）。
+ * 参照されなくなったものを、あとからまとめて消す。
+ */
+async function sweepStoredImages() {
+  try {
+    const used = new Set();
+    for (const s of state.sessions) {
+      for (const id of collectImageIds(s.memo || '')) used.add(id);
+    }
+    const n = await imageStoreSweep(used);
+    if (n > 0) diagLog.info(`使われていない画像を掃除: ${n}件`);
+  } catch (e) {
+    console.warn('[image] 掃除に失敗:', e.message || e);
+  }
+}
+
+/**
+ * HTML で保存するとき用に、画像を data: に戻す (v0.22.0)
+ *
+ * **保存した HTML はそれ1枚で完結していないと意味がない。**
+ * 保管庫を参照する形のままだと、別の端末で開いたときに画像が出ない。
+ */
+async function inlineImagesForExport(html) {
+  if (!html || html.indexOf('data-img-id') < 0) return html || '';
+  const doc = new DOMParser().parseFromString(`<div id="r">${html}</div>`, 'text/html');
+  const root = doc.getElementById('r');
+  for (const img of Array.from(root.querySelectorAll('img[data-img-id]'))) {
+    try {
+      const blob = await imageStoreGet(img.dataset.imgId);
+      if (blob) img.setAttribute('src', await blobToDataUrl(blob));
+      else markMissingImageForExport(img);
+    } catch {
+      markMissingImageForExport(img);
+    }
+  }
+  return root.innerHTML;
+}
+
+function markMissingImageForExport(img) {
+  img.setAttribute('alt', '（画像が見つかりません）');
+  img.removeAttribute('src');
+}
+
 function loadActiveSessionIntoDOM() {
   renderDictBar();   // v0.20.0: タブごとに辞書が違うので、切り替えたら描き直す
   updateDiarizeButton();   // v0.21.2: 保存済みの結果もタブごとに違う
   const s = getActiveSession();
   els.confirmed.innerHTML = s?.transcript || '';
+  releaseMemoObjectUrls();          // v0.22.0: 前のタブの blob: を解放してから
   els.memo.innerHTML = s?.memo || '';
   migrateMemoTaskItems();
+  hydrateMemoImages(els.memo);      // v0.22.0: 画像の実物を差し込む（非同期）
   els.summary.innerHTML = s?.summary || '';
   els.interim.textContent = '';
   state.pendingChunkEl = null;
@@ -7888,6 +8104,15 @@ els.memo.addEventListener('change', (e) => {
 });
 
 // ペースト時：AI整形ONなら少し待って整形発動
+/* v0.22.0: メモの貼り付け。画像は保管庫へ、受け取れないものは一言出す */
+els.memo.addEventListener('paste', (e) => {
+  // ここで throw すると貼り付け操作ごと落ちるので、必ず受け止める
+  handleMemoPaste(e).catch(err => {
+    console.warn('[memo paste] failed:', err);
+    setStatus('error', '貼り付けに失敗しました: ' + (err.message || err));
+  });
+});
+
 els.confirmed.addEventListener('paste', () => {
   if (!state.settings.aiEnabled || !state.settings.apiKey) return;
   setTimeout(() => { refineUnstructuredInTranscript({ showFeedback: false }); }, 150);

@@ -3145,3 +3145,24 @@ body.chat-active .dict-menu { bottom: 114px; }
 @media (prefers-reduced-motion: reduce) {
   #btn-diarize.firing { animation: none; opacity: .7; }
 }
+
+/* ───────── メモに貼った画像 (v0.22.0) ─────────
+ *
+ * メモは画像のメニューを置いていないが、Ctrl+V では貼れる（裏技）。
+ * 幅を指定していない画像がペインをはみ出さないようにだけしておく。
+ */
+#memo img {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+  border-radius: var(--radius-sm);
+}
+
+/* 保管庫から読み出せなかった画像。**空白で消すのではなく、消えたと分かる形にする** */
+#memo img.img-missing {
+  width: 220px;
+  height: 56px;
+  border: 1px dashed var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+}
