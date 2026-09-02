@@ -30,10 +30,30 @@ cd ~/dictation
 git status
 ```
 
-`nothing to commit, working tree clean` と出れば、そのまま次へ進みます。
+出た文字で、進んでよいかが分かります。**下の2つは進んでよい形です。**
 
-> **もし変更したファイルが並んだら**、そこで止めてください。手で直したものが
-> 消える可能性があります。そのまま画面をコピーして相談してください。
+```
+nothing to commit, working tree clean
+```
+
+```
+Untracked files:
+        .claude/
+nothing added to commit but untracked files present
+```
+
+`Untracked files:`（＝git がまだ知らないファイル）だけなら、**`git pull` で
+消えることはありません**。そのまま次へ進んでください。
+
+> **止めたほうがよいのはこちら。**
+>
+> ```
+> Changes not staged for commit:
+>         modified:   app.js
+> ```
+>
+> `modified:` が並んだら、そこで止めてください。**手で直したものが消える
+> 可能性があります。** そのまま画面をコピーして相談してください。
 
 ```bash
 git fetch origin
