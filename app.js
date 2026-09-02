@@ -181,7 +181,6 @@ const DEFAULT_SETTINGS = {
   // v0.15.0: 録音日時を入れる日付プロパティ名。'' なら使わない（タイトルに日時が残る）
   notionLastDatePropName: '',
   // v0.15.0: 保存できたタブを自動で閉じる。進捗ダイアログのチェックと連動して記憶する
-  notionAutoClose: false,
   // v0.16.0: 文字起こしに渡す文脈の既定値。新しいタブはこれを引き継いで始まる
   // （同じ講義を何度も録るので、毎回入力し直さずに済ませるため）
   defaultContextField: '',
@@ -3522,7 +3521,17 @@ function notionProgressOpen(title, { cancellable = true } = {}) {
   // 1件だけの保存は、区切りが来る前に終わるので中止できない。ボタンを出さない
   els.btnNotionCancel.hidden = !cancellable;
   els.notionAutoCloseRow.hidden = false;
-  els.notionAutoClose.checked = !!state.settings.notionAutoClose;
+  // v0.21.4: **毎回オフから始める。** 状態を覚えない。
+  //
+  // 以前は設定として記憶していたが、そうすると一度オンにした人は
+  // 以後ずっとオンのままで、**聞かれずにタブが消える**ことになる。
+  // 1件だけ送るときは送信が数秒で終わるので、消したくないと気づいてから
+  // チェックを外すまでの猶予がほとんど無い（やっさんの指摘）。
+  //
+  // ここをオフに戻しておけば、自動で閉じるのは
+  // 「**その回に自分でチェックを入れたとき**」だけになり、不意打ちが原理的に起きない。
+  // まとめて送るときも、1回チェックするだけで済む。
+  els.notionAutoClose.checked = false;
   els.btnNotionCancel.disabled = false;
   els.btnNotionCancel.textContent = '中止';
   els.btnNotionCloseTabs.hidden = true;
@@ -3693,12 +3702,8 @@ function notionFinish({ results, cancelled, remaining }) {
   const ok = results.filter(r => r.ok);
   const ng = results.filter(r => !r.ok);
 
-  // チェックの状態は次回のために覚える
+  // v0.21.4: チェックの状態は**覚えない**（notionProgressOpen の解説を参照）
   const autoClose = !!els.notionAutoClose.checked;
-  if (autoClose !== state.settings.notionAutoClose) {
-    state.settings.notionAutoClose = autoClose;
-    saveSettings();
-  }
 
   els.btnNotionCancel.hidden = true;
   els.notionAutoCloseRow.hidden = true;
