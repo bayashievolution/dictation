@@ -380,6 +380,7 @@ const els = {
   paneSummary: document.getElementById('pane-summary'),
   paneChat: document.getElementById('pane-chat'),
   paneTranscriptBody: document.querySelector('#pane-transcript .pane-body'),
+  paneMemoBody: document.querySelector('#pane-memo .pane-body'),   // v0.22.1
   chatBody: document.querySelector('#pane-chat .pane-body'),
   chatMessages: document.getElementById('chat-messages'),
   chatEmpty: document.getElementById('chat-empty'),
@@ -6766,11 +6767,271 @@ function markMissingImageForExport(img) {
   img.removeAttribute('src');
 }
 
+/* ───────── 貼った画像を触る (v0.22.1) ─────────
+ *
+ * やっさんの要望:
+ * > 裏技として画像クリックでハンドル出現、サイズ変更と移動
+ * > 右クリックで word のように、行内か前面　重なり順の変更
+ *
+ * ■ 自前で作る理由
+ *
+ * Chrome は contenteditable の画像にリサイズハンドルを出さない
+ * （Firefox は出す。`enableObjectResizing` は Chrome では効かない）。
+ * なので選択枠とハンドルを自分で重ねて描く。
+ *
+ * ■ 「前面」は Word と同じにはならない
+ *
+ * メモは文章を流し込む領域なので、絶対配置にすると**文章を書き換えたときに
+ * 位置関係が保てない**（Word は段落にアンカーを持つが、そこまで作ると
+ * メモの軽さが失われる）。さらに:
+ *
+ *   HTML保存 … 再現される（インラインの style ごと書き出すため）
+ *   Notion   … そもそも画像を送れない
+ *   コピー   … 消える
+ *
+ * **再現できるのは HTML保存だけ**なので、メニューにそう書いてある。
+ */
+
+/** 幅の下限・上限。0px や画面外の巨大サイズを作らせない */
+const IMG_MIN_WIDTH = 40;
+const IMG_MAX_WIDTH = 4000;
+
+/**
+ * ハンドルを引いたときの新しい幅 (v0.22.1)
+ *
+ * 純関数。左側の角を掴んだときは**引く向きが逆**になるので、そこを間違えると
+ * 「左に引くと大きくなる」という気持ち悪い操作になる。
+ */
+function resizeImageWidth({ startWidth, dx, corner, min, max }) {
+  const lo = Number.isFinite(min) ? min : IMG_MIN_WIDTH;
+  const hi = Number.isFinite(max) ? max : IMG_MAX_WIDTH;
+  const left = corner === 'nw' || corner === 'sw';
+  const next = (Number(startWidth) || 0) + (left ? -dx : dx);
+  return Math.round(Math.min(hi, Math.max(lo, next)));
+}
+
+/**
+ * 重なり順を決める (v0.22.1)
+ *
+ * 純関数。いま使われている値の外側に置くだけ。番号を詰め直さないのは、
+ * 詰め直すと**他の画像の style を書き換える**ことになり、取り消しの単位が
+ * 分かりにくくなるため。
+ */
+function computeZIndex(existing, direction) {
+  const nums = (existing || []).map(Number).filter(Number.isFinite);
+  if (!nums.length) return direction === 'back' ? -1 : 1;
+  return direction === 'back' ? Math.min(...nums) - 1 : Math.max(...nums) + 1;
+}
+
+let _selectedImg = null;
+
+function memoImageBox() {
+  return document.getElementById('img-handles');
+}
+
+/** 選択枠を画像に合わせる。画像が消えていたら枠も消す */
+function positionImageBox() {
+  const box = memoImageBox();
+  if (!box) return;
+  const img = _selectedImg;
+  if (!img || !img.isConnected || !els.memo.contains(img)) { clearImageSelection(); return; }
+  const host = els.memo.parentElement;          // .pane-body（position: relative）
+  const r = img.getBoundingClientRect();
+  const h = host.getBoundingClientRect();
+  box.style.left   = `${r.left - h.left + host.scrollLeft}px`;
+  box.style.top    = `${r.top  - h.top  + host.scrollTop}px`;
+  box.style.width  = `${r.width}px`;
+  box.style.height = `${r.height}px`;
+  box.hidden = false;
+}
+
+function selectMemoImage(img) {
+  _selectedImg = img;
+  let box = memoImageBox();
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'img-handles';
+    box.hidden = true;
+    // 角だけにしてある。辺のハンドルを付けると縦横比が崩せてしまい、
+    // メモに貼る画像でそれを望むことはまず無い
+    for (const c of ['nw', 'ne', 'sw', 'se']) {
+      const h = document.createElement('div');
+      h.className = `img-handle img-handle-${c}`;
+      h.dataset.corner = c;
+      box.appendChild(h);
+    }
+    els.memo.parentElement.appendChild(box);
+    box.addEventListener('pointerdown', onImageHandleDown);
+  }
+  positionImageBox();
+}
+
+function clearImageSelection() {
+  _selectedImg = null;
+  const box = memoImageBox();
+  if (box) box.hidden = true;
+  closeImageMenu();
+}
+
+/** ハンドルを引いてサイズを変える */
+function onImageHandleDown(e) {
+  const corner = e.target && e.target.dataset ? e.target.dataset.corner : null;
+  if (!corner || !_selectedImg) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const img = _selectedImg;
+  const startX = e.clientX;
+  const startWidth = img.getBoundingClientRect().width;
+
+  const move = (ev) => {
+    img.style.width = resizeImageWidth({
+      startWidth, dx: ev.clientX - startX, corner,
+    }) + 'px';
+    img.style.height = 'auto';   // 縦横比を保つ
+    positionImageBox();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    pushUndo('画像のサイズ変更', 'pane-memo');
+    snapshotActiveToSession();
+    persistSessions();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
+/** 「前面」の画像をドラッグで動かす */
+function onFloatingImageDown(e) {
+  const img = _selectedImg;
+  if (!img || img.dataset.float !== '1') return;
+  e.preventDefault();
+  const host = els.memo.parentElement;
+  const startX = e.clientX, startY = e.clientY;
+  const startLeft = parseFloat(img.style.left) || 0;
+  const startTop  = parseFloat(img.style.top)  || 0;
+
+  const move = (ev) => {
+    img.style.left = `${startLeft + (ev.clientX - startX)}px`;
+    img.style.top  = `${startTop  + (ev.clientY - startY)}px`;
+    positionImageBox();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    pushUndo('画像の移動', 'pane-memo');
+    snapshotActiveToSession();
+    persistSessions();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  void host;
+}
+
+/* ───────── 右クリックのメニュー ───────── */
+
+function closeImageMenu() {
+  const m = document.getElementById('img-menu');
+  if (m) m.remove();
+}
+
+function openImageMenu(img, x, y) {
+  closeImageMenu();
+  const floating = img.dataset.float === '1';
+  const items = floating
+    ? [
+        ['行内に戻す', () => setImageFloat(img, false)],
+        ['最前面へ', () => setImageZ(img, 'front')],
+        ['最背面へ', () => setImageZ(img, 'back')],
+        ['幅を原寸に戻す', () => resetImageWidth(img)],
+        ['削除', () => removeImage(img)],
+      ]
+    : [
+        ['前面にする（HTML保存でのみ再現）', () => setImageFloat(img, true)],
+        ['幅を原寸に戻す', () => resetImageWidth(img)],
+        ['削除', () => removeImage(img)],
+      ];
+
+  const menu = document.createElement('div');
+  menu.id = 'img-menu';
+  menu.className = 'img-menu';
+  for (const [label, fn] of items) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'img-menu-item';
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      closeImageMenu();
+      fn();
+      pushUndo('画像の操作', 'pane-memo');
+      snapshotActiveToSession();
+      persistSessions();
+      positionImageBox();
+    });
+    menu.appendChild(b);
+  }
+  document.body.appendChild(menu);
+  // 画面からはみ出さない位置に置く
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.min(x, window.innerWidth - r.width - 8)}px`;
+  menu.style.top  = `${Math.min(y, window.innerHeight - r.height - 8)}px`;
+}
+
+/**
+ * 行内 ⇄ 前面 を切り替える
+ *
+ * 前面にするとき、**いま見えている場所にそのまま置く**。
+ * 座標を 0,0 にすると画像が画面外に飛んで「消えた」と思われる。
+ */
+function setImageFloat(img, floating) {
+  if (!floating) {
+    delete img.dataset.float;
+    img.style.position = '';
+    img.style.left = '';
+    img.style.top = '';
+    img.style.zIndex = '';
+    return;
+  }
+  const host = els.memo.parentElement;
+  const r = img.getBoundingClientRect();
+  const h = host.getBoundingClientRect();
+  img.dataset.float = '1';
+  img.style.position = 'absolute';
+  img.style.left = `${Math.round(r.left - h.left + host.scrollLeft)}px`;
+  img.style.top  = `${Math.round(r.top  - h.top  + host.scrollTop)}px`;
+  img.style.zIndex = String(computeZIndex(collectImageZIndexes(), 'front'));
+}
+
+function collectImageZIndexes() {
+  return Array.from(els.memo.querySelectorAll('img[data-float="1"]'))
+    .map(i => i.style.zIndex)
+    .filter(Boolean);
+}
+
+function setImageZ(img, direction) {
+  const others = Array.from(els.memo.querySelectorAll('img[data-float="1"]'))
+    .filter(i => i !== img)
+    .map(i => i.style.zIndex)
+    .filter(Boolean);
+  img.style.zIndex = String(computeZIndex(others, direction));
+}
+
+function resetImageWidth(img) {
+  img.style.width = '';
+  img.style.height = '';
+}
+
+function removeImage(img) {
+  img.remove();
+  clearImageSelection();
+}
+
 function loadActiveSessionIntoDOM() {
   renderDictBar();   // v0.20.0: タブごとに辞書が違うので、切り替えたら描き直す
   updateDiarizeButton();   // v0.21.2: 保存済みの結果もタブごとに違う
   const s = getActiveSession();
   els.confirmed.innerHTML = s?.transcript || '';
+  clearImageSelection();            // v0.22.1: 前のタブの画像の枠を消す
   releaseMemoObjectUrls();          // v0.22.0: 前のタブの blob: を解放してから
   els.memo.innerHTML = s?.memo || '';
   migrateMemoTaskItems();
@@ -8104,6 +8365,40 @@ els.memo.addEventListener('change', (e) => {
 });
 
 // ペースト時：AI整形ONなら少し待って整形発動
+/* v0.22.1: 貼った画像を触る（クリックで枠、右クリックでメニュー）
+ *
+ * ここは**画像のときだけ**割り込む。それ以外はメモの標準の編集を邪魔しない。
+ */
+els.memo.addEventListener('pointerdown', (e) => {
+  const img = e.target && e.target.tagName === 'IMG' ? e.target : null;
+  if (!img) { clearImageSelection(); return; }
+  selectMemoImage(img);
+  // 「前面」の画像はドラッグで動かす。行内のものは標準のドラッグに任せる
+  if (img.dataset.float === '1') onFloatingImageDown(e);
+});
+
+els.memo.addEventListener('contextmenu', (e) => {
+  const img = e.target && e.target.tagName === 'IMG' ? e.target : null;
+  if (!img) return;   // 画像以外は標準の右クリックメニューのまま
+  e.preventDefault();
+  selectMemoImage(img);
+  openImageMenu(img, e.clientX, e.clientY);
+});
+
+// 枠がずれないよう、動きうるものに追随させる
+els.paneMemoBody.addEventListener('scroll', positionImageBox);
+window.addEventListener('resize', positionImageBox);
+// メモの外を触ったら選択を解く（メニューの中は除く）
+document.addEventListener('pointerdown', (e) => {
+  if (!_selectedImg) return;
+  if (e.target.closest && (e.target.closest('#img-handles') || e.target.closest('#img-menu'))) return;
+  if (els.memo.contains(e.target)) return;
+  clearImageSelection();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') clearImageSelection();
+});
+
 /* v0.22.0: メモの貼り付け。画像は保管庫へ、受け取れないものは一言出す */
 els.memo.addEventListener('paste', (e) => {
   // ここで throw すると貼り付け操作ごと落ちるので、必ず受け止める
