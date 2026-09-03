@@ -128,6 +128,26 @@ const DEFAULT_SETTINGS = {
   audioDeviceId: '',
   audioChunkSec: 12,
   audioMinChunkBytes: 400, // 旧1200から感度↑。小さい発話（小声・短語）もGeminiへ送る
+  // v0.18.0: 無音位置での区切り。audioChunkSec は「最短」、audioChunkMaxSec は「最長」。
+  // 最短を過ぎたら次の無音の切れ目で切り、最長に達したら無音でなくても切る。
+  audioSilenceCut: true,
+  audioChunkMaxSec: 20,
+  /* v0.19.0: 録音音声の一時保管（話者判別用）
+   *
+   * **既定は保持しない。** 「文字起こしはよいが録音の保存はダメ」という
+   * 同意の場面は普通にあるので、こちらを既定にする。
+   * この設定が制御するのは「端末に残すか」だけで、Gemini モードは live の
+   * 時点ですでに音声を Google に送っている（設定 UI にもそう書く）。 */
+  // v0.20.0: 自作の語彙辞書 [{id, name, terms[]}]。プリセットは term-dicts.js 側
+  termDicts: [],
+  audioKeepRecording: false,
+  // v0.21.3: 既定を close にした。repass（話者判別が終わったら消す）はいちばん早く
+  // 消えるが、**同じ録音に2回目をかけられない**。どちらもタブを閉じれば必ず消えるので、
+  // 「できるだけ早く消す」という方針は close でも満たせる。
+  // 値 'repass' はすでに保存されている設定を読めなくしないため据え置き
+  audioRetention: 'close',   // close / repass / 1d / 7d / manual
+  // 音声認識用途では 128kbps は過剰。64kbps なら 90分で約43MB
+  audioBitrate: 64000,
   // v0.13.24: 旧 webspeechInterimDebounceMs / webspeechInterimOpacity (v0.13.9) は撤去。
   // 字幕ウィンドウ側の cap-para-interim を v0.13.17 で撤去済み・UI も v0.13.23 で
   // 削除済み。設定値だけ残しても読み手なしで意味ない。
@@ -161,7 +181,13 @@ const DEFAULT_SETTINGS = {
   // v0.15.0: 録音日時を入れる日付プロパティ名。'' なら使わない（タイトルに日時が残る）
   notionLastDatePropName: '',
   // v0.15.0: 保存できたタブを自動で閉じる。進捗ダイアログのチェックと連動して記憶する
-  notionAutoClose: false,
+  // v0.16.0: 文字起こしに渡す文脈の既定値。新しいタブはこれを引き継いで始まる
+  // （同じ講義を何度も録るので、毎回入力し直さずに済ませるため）
+  defaultContextField: '',
+  defaultContextSpeakers: '',
+  defaultContextTerms: '',
+  // v0.17.0: Gemini モードでも Web Speech を並走させ、確定までの間を未確定表示で埋める
+  geminiLiveDisplay: true,
 };
 // v0.13.24: WEB_SPEECH_DEFAULTS（v0.13.9 「Web Speech 設定をデフォルトに戻す」
 // ボタン用のリセット値）は UI 撤去済み（v0.13.23）に伴い削除。
@@ -259,6 +285,17 @@ const state = {
   audioChunks: [],
   audioChunkTimer: null,
   audioInFlightCount: 0,
+  // v0.18.0: 無音位置で切るための状態
+  silenceDetector: null,      // { silentMs(), db(), close() }
+  liveLastActivityAt: 0,      // Web Speech が最後に「音声あり」を示した時刻 (v0.18.4)
+  chunkStartedAt: 0,          // 今のチャンクを開始した時刻
+  chunkStartedAtSilence: true,// 今のチャンクの「頭」が無音の切れ目だったか（録音開始直後は真）
+  pendingChunkEdges: null,    // onstop に渡す { startsAtSilence, endsAtSilence }
+  finalChunkPending: false,   // 停止時、最後のチャンクがまだ送り出されていない (v0.18.6)
+  audioSeq: 0,                // 区間の中でのかけらの通し番号 (v0.19.0 / v0.21.0)
+  audioSeg: 0,                // 区間番号（約10分ごと） (v0.21.0)
+  archiveRecorder: null,      // 話者判別用の録音機（live とは別） (v0.21.0)
+  archiveSegStartedAt: 0,     // いまの区間を始めた時刻 (v0.21.0)
 
   sessions: [],
   activeId: null,
@@ -343,6 +380,7 @@ const els = {
   paneSummary: document.getElementById('pane-summary'),
   paneChat: document.getElementById('pane-chat'),
   paneTranscriptBody: document.querySelector('#pane-transcript .pane-body'),
+  paneMemoBody: document.querySelector('#pane-memo .pane-body'),   // v0.22.1
   chatBody: document.querySelector('#pane-chat .pane-body'),
   chatMessages: document.getElementById('chat-messages'),
   chatEmpty: document.getElementById('chat-empty'),
@@ -365,6 +403,7 @@ const els = {
   summaryDetailSelect: document.getElementById('summary-detail-select'),
   btnSummaryCombo: document.getElementById('btn-summary-combo'),
   btnRefineTranscript: document.getElementById('btn-refine-transcript'),
+  btnDiarize: document.getElementById('btn-diarize'),   // v0.21.0
   emptyHint: document.getElementById('empty-hint'),
   settingsModal: document.getElementById('settings-modal'),
   btnNotionUpload: document.getElementById('btn-notion-upload'),
@@ -384,6 +423,17 @@ const els = {
   notionAutoCloseRow: document.getElementById('notion-auto-close-row'),
   btnNotionCloseTabs: document.getElementById('btn-notion-close-tabs'),
   btnNotionKeepTabs: document.getElementById('btn-notion-keep-tabs'),
+  btnContext: document.getElementById('btn-context'),
+  contextModal: document.getElementById('context-modal'),
+  inputContextField: document.getElementById('input-context-field'),
+  inputContextSpeakers: document.getElementById('input-context-speakers'),
+  inputContextTerms: document.getElementById('input-context-terms'),
+  inputContextDefault: document.getElementById('input-context-default'),
+  btnContextFromMemo: document.getElementById('btn-context-from-memo'),
+  contextMemoResult: document.getElementById('context-memo-result'),
+  btnContextSave: document.getElementById('btn-context-save'),
+  autoContextBox: document.getElementById('auto-context-box'),
+  btnContextAdoptAuto: document.getElementById('btn-context-adopt-auto'),
   notionSettingsGroup: document.getElementById('notion-settings-group'),
   inputNotionToken: document.getElementById('input-notion-token'),
   btnNotionTest: document.getElementById('btn-notion-test'),
@@ -408,6 +458,14 @@ const els = {
   modeGemini: document.getElementById('mode-gemini'),
   inputAudioDevice: document.getElementById('input-audio-device'),
   inputChunkSec: document.getElementById('input-chunk-sec'),
+  inputSilenceCut: document.getElementById('input-silence-cut'),
+  inputChunkMaxSec: document.getElementById('input-chunk-max-sec'),
+  inputAudioBitrate: document.getElementById('input-audio-bitrate'),
+  inputKeepRecording: document.getElementById('input-keep-recording'),
+  inputAudioRetention: document.getElementById('input-audio-retention'),
+  audioUsageText: document.getElementById('audio-usage-text'),
+  btnClearAudio: document.getElementById('btn-clear-audio'),
+  inputGeminiLiveDisplay: document.getElementById('input-gemini-live-display'),
   inputMinChunkBytes: document.getElementById('input-min-chunk-bytes'),
   // v0.13.24: 旧 v0.13.9 interim 設定 UI（input-webspeech-interim-debounce /
   // input-webspeech-interim-opacity / btn-webspeech-defaults）への els 参照は削除。
@@ -416,6 +474,14 @@ const els = {
   inputWsSliceChars: document.getElementById('input-webspeech-slice-chars'),
   inputWsSilenceStopSec: document.getElementById('input-webspeech-silence-stop-sec'),
   zoomBar: document.getElementById('zoom-bar'),
+  dictBar: document.getElementById('dict-bar'),
+  dictToggle: document.getElementById('dict-toggle'),
+  dictLabel: document.getElementById('dict-label'),
+  dictMenu: document.getElementById('dict-menu'),
+  dictMenuList: document.getElementById('dict-menu-list'),
+  dictMenuAuto: document.getElementById('dict-menu-auto'),
+  dictMenuClose: document.getElementById('dict-menu-close'),
+  dictMenuDetail: document.getElementById('dict-menu-detail'),
   zoomRange: document.getElementById('zoom-range'),
   zoomPercent: document.getElementById('zoom-percent'),
   zoomMinus: document.getElementById('zoom-minus'),
@@ -517,12 +583,23 @@ function getConfirmedText() {
   if (paragraphs.length === 0) return plain;
 
   // 録音+Gemini整形された .paragraph 構造を ## 見出し 付きで抽出
+  //
+  // v0.17.4: 以前は querySelector('h2') / querySelector('.p-body') で
+  // **最初の1つずつ**しか見ていなかった。ところが setParagraphContent() は
+  // 空行区切りごとに .p-body を作るので、1つの .paragraph の中に
+  // h2 + .p-body + .p-body … と並ぶことがある。
+  // その結果「見出しのある段落の2つ目以降の本文」が、画面には出ているのに
+  // コピー・Notion 送信・要約の入力から**黙って消えていた**（やっさん発見）。
+  // 子要素を順番に全部見る形に直す。
   const structured = Array.from(paragraphs)
     .map(p => {
-      const h2 = p.querySelector('h2');
-      const body = p.querySelector('.p-body');
-      if (h2 && body) return `## ${h2.textContent.trim()}\n\n${body.innerText.trim()}`;
-      return p.innerText.trim();
+      const parts = [];
+      for (const child of p.children) {
+        const t = (child.innerText || '').trim();
+        if (!t) continue;                                  // 段落間のすき間 div 等
+        parts.push(child.tagName === 'H2' ? `## ${t}` : t);
+      }
+      return parts.length ? parts.join('\n\n') : p.innerText.trim();
     })
     .filter(Boolean)
     .join('\n\n');
@@ -805,6 +882,7 @@ async function flushPendingToGemini() {
   try {
     const refined = await refineWithGemini({
       apiKey: state.settings.apiKey,
+      sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
     });
@@ -866,6 +944,7 @@ async function refineUnstructuredInTranscript({ force = false, showFeedback = tr
   try {
     const refined = await refineWithGemini({
       apiKey: state.settings.apiKey,
+      sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
     });
@@ -902,6 +981,7 @@ async function retryPendingRefinements({ showFeedback = true } = {}) {
     try {
       const refined = await refineWithGemini({
         apiKey: state.settings.apiKey,
+        sessionContext: getSessionContextForAi(),
         context: getContextForGemini(),
         newChunk: rawText,
       });
@@ -1018,6 +1098,7 @@ async function refineWholeTranscript({ showFeedback = true } = {}) {
     } else {
       refined = await refineWithGemini({
         apiKey: state.settings.apiKey,
+        sessionContext: getSessionContextForAi(),
         context: '',
         newChunk: allText,
         maxOutputTokens: 8192,
@@ -1073,6 +1154,7 @@ async function refineByChunks(fullText, progressTargetEl) {
     try {
       const out = await refineWithGemini({
         apiKey: state.settings.apiKey,
+        sessionContext: getSessionContextForAi(),
         context: prevTail.slice(-500),  // 直前チャンクの末尾500字だけ文脈として
         newChunk: blocks[i],
         maxOutputTokens: 4096,           // チャンク単位なので 4k で十分
@@ -1098,9 +1180,43 @@ async function refineByChunks(fullText, progressTargetEl) {
 const MID_CHUNK_THRESHOLD = 3;      // 何段落溜まったら発火
 const MID_TIME_THRESHOLD_MS = 60000; // 最初の短チャンクから何ms経ったら発火
 
+/**
+ * 送信中の音声チャンクが全部確定するまで黙って待つ (v0.18.6)
+ *
+ * 停止直後の最終整形が、**最後のチャンクの到着を待たずに**走っていた。
+ * 実機ログ:
+ *   18:34:35 録音停止
+ *   18:34:36 ミドル整形開始 2段落      ← まだ2つしか届いていない
+ *   18:34:36 音声チャンク送信 6.9秒    ← 最後のチャンクはこの後
+ * 結果、最後の段落だけが繋ぎ直しの対象から漏れ、文の途中で切れたまま残っていた。
+ *
+ * ensureTranscriptSettled() は確認ダイアログを出す対話用なので、ここでは使えない。
+ *
+ * recorder.stop() から onstop までは非同期なので、カウンタが増える前に見にいくと
+ * 「0件」と誤認する。finalChunkPending でその隙間を埋める。
+ */
+async function waitForAudioSettled(timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while ((state.finalChunkPending || state.audioInFlightCount > 0) && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 100));
+  }
+  if (state.finalChunkPending || state.audioInFlightCount > 0) {
+    diagLog.info(`確定待ちが${(timeoutMs / 1000)}秒で時間切れ`
+      + `（残り${state.audioInFlightCount}件）。そのまま整形に進みます`);
+  }
+  state.finalChunkPending = false;
+}
+
 function maybeConsolidateShortChunks() {
   if (state.isConsolidatingShortChunks) return; // 多重実行防止
   if (!state.settings.aiEnabled || !state.settings.apiKey) return;
+  // v0.18.9: 停止処理中は、最後のチャンクまで揃えてから一度にまとめたい。
+  // ここで先に発火すると、最後の1つが取り残されて別立てで整形される:
+  //   19:00:07 ミドル整形開始 3段落・224字   ← 3つ溜まって発火
+  //   19:00:09 ミドル整形開始 1段落・5字     ← 最後の1つだけ
+  // 分かれると、境界をまたいだ文を繋ぎ直せないうえ、呼び出しも1回余計になる。
+  // 停止処理の最後で consolidateShortChunks が全部まとめて呼ばれる
+  if (!state.isRecording && (state.finalChunkPending || state.audioInFlightCount > 0)) return;
   const container = getWriteContainer();
   if (!container) return;
   const shortParas = Array.from(container.querySelectorAll('.paragraph.short-refined'));
@@ -1137,8 +1253,12 @@ async function consolidateShortChunks(shortParas) {
   try {
     const refined = await refineWithGemini({
       apiKey: state.settings.apiKey,
+      sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
+      // v0.17.2: ここに集まるのは同じ発話を機械的に切った断片の並び。
+      // 文の途中で切れているものを繋ぎ直させる
+      joinFragments: true,
     });
     firstPara.className = 'paragraph refined';
     setParagraphContent(firstPara, refined || rawText);
@@ -1403,6 +1523,19 @@ function showMicDeniedGuide(detail) {
   ].join('\n'));
 }
 
+/** 録音中、一定間隔で文脈を拾い直すタイマー (v0.16.1) */
+function startContextExtractTimer() {
+  stopContextExtractTimer();
+  // 起動直後は記録が短くて意味がないので、最初の実行も間隔ぶん待つ
+  state.contextExtractTimer = setInterval(() => { refreshAutoContext(); }, 30 * 1000);
+}
+function stopContextExtractTimer() {
+  if (state.contextExtractTimer) {
+    clearInterval(state.contextExtractTimer);
+    state.contextExtractTimer = null;
+  }
+}
+
 async function startRecording() {
   if (state.settings.inputMode === 'gemini-audio') {
     return startGeminiAudioRecording();
@@ -1433,6 +1566,7 @@ async function startRecording() {
   try {
     state.recognition.start();
     setRecordingUI(true);
+    startContextExtractTimer();   // v0.16.1
     resetLongSilenceTimer();
     // v0.13.14: Web Speech 強制 commit タイマーを起動（commitSec=0 なら何もしない）
     restartWebSpeechCommitTimer();
@@ -1455,6 +1589,7 @@ function stopRecording() {
   state.shouldAutoRestart = false;
   if (state.midChunkWatchdog) { clearInterval(state.midChunkWatchdog); state.midChunkWatchdog = null; }
   if (state.settings.inputMode === 'gemini-audio') {
+    stopLiveDisplay();          // v0.17.0
     stopGeminiAudioRecording();
   } else {
     // v0.13.14: 強制 commit タイマーを止めてから recognition を止める
@@ -1471,8 +1606,15 @@ function stopRecording() {
   }
   setStatus('idle', '停止');
   setRecordingUI(false);
+  // v0.16.1: 文脈の自動抽出を止め、最後の内容で1回だけ更新しておく
+  // （次にこのタブで録音を再開したとき、いきなり文脈が効く）
+  stopContextExtractTimer();
+  refreshAutoContext({ force: true });
   clearAllTimers();
   flushPendingToGemini().finally(async () => {
+    // v0.18.6: 最後のチャンクが届く前に整形を始めると、その段落だけが
+    // 繋ぎ直しの対象から漏れる（文の途中で切れたまま残る）
+    await waitForAudioSettled();
     // 録音停止時に、残っている short-refined パラグラフを強制的に
     // ミドル整形（refineWithGemini で見出し付け＋文脈統合）してからサマリ化
     const container = (state.bgTranscriptEl && recSessionId !== state.activeId)
@@ -1501,6 +1643,1071 @@ function stopRecording() {
 }
 
 /* ───────── Gemini Audio recording mode ───────── */
+
+/* ───────── 無音検出（v0.18.0）─────────
+ *
+ * v0.17 まで、Gemini へ送るチャンクは setInterval で 12 秒ちょうどに切っていた。
+ * 喋っている真っ最中だろうと問答無用で切るので、
+ *
+ *   「実害 | はないので大丈夫ですが」   ← 単語の途中で切れる
+ *
+ * が普通に起きる。ここから v0.17.1（捏造）と v0.17.2（繋ぎ直し）の問題が生えていた。
+ * どちらも**切り方が乱暴なことの後始末**であって、根治ではない。
+ *
+ * さらに悪いことに、stop → start の再開には 40ms の空白があり、その間の音は
+ * どこにも記録されない。発話の途中で切ると、その 40ms 分の音が消える。
+ *
+ * なので「最短を過ぎたら、次の無音の切れ目で切る」に変える。無音の位置で切れば
+ * 40ms の空白も無音に落ちるので、音の欠落も同時に消える。
+ *
+ * ■ しきい値を固定値にしない理由
+ * このアプリの利用者は「小さい声を拾ってくれるから」Gemini モードを使っている。
+ * -40dB のような固定値にすると、静かな部屋の小声が丸ごと「無音」に落ちて、
+ * 発話の途中で切るという元の失敗に戻る。
+ * そこで**その場の暗騒音（ノイズフロア）を推定し、そこから何dB上か**で判定する。
+ * 推定の作り方は SILENCE_WINDOW_MS のコメントを参照（v0.18.3 で一度作り直している。
+ * 最初の版は実機で「3秒黙っても無音が一度も検出されない」という形で失敗した）。
+ */
+const SILENCE_MARGIN_DB = 6;     // ノイズフロアからこれだけ上までは「無音」とみなす
+/* 「どれだけ静かなら文の切れ目か」(v0.18.2)
+ *
+ * v0.18.0/0.18.1 は 350ms 一本だった。実機で「…しかし、最初冒頭 / の方に喋り始めた」
+ * と真っ二つになった。日本語の話し言葉では、考えながら喋るときの言いよどみが
+ * 350ms を軽く超える。350ms は「文の切れ目」ではなく「息継ぎ」まで拾ってしまう。
+ *
+ * かといって一律に長くすると、切ってよい場所が見つからず強制区切りが増える
+ * （それは v0.17 に戻るということ）。そこで段階的にする:
+ *
+ *   最短〜(最長-4秒)  … 文の切れ目だけを狙う
+ *   (最長-4秒)〜最長   … 短い間でも妥協する。強制で切るよりはマシ
+ *
+ * v0.18.6 で数値を上げた。v0.18.5 で測定がまともになって初めて、実際の間の
+ * 長さが分かったため（2026-08-31 18:34 の実機ログ）:
+ *
+ *   1350ms … 文末（「〜黙ってみます。」）
+ *   1300ms … 文末（「〜終わりたいと思います。」）
+ *    950ms … **文の途中の言いよどみ**（「どのように…だったでしょうか」）
+ *
+ * 700ms だと 950ms の言いよどみを文の切れ目と判定して真っ二つにしていた。
+ * 1000ms なら分かれる。ただしこれは1回の録音から取った値なので、話し方が
+ * 変わればまた見直しが要る。外すほうに転んでも、切る場所が見つからず
+ * 最長秒数の強制区切りに落ちるだけで壊れはしない。
+ */
+const SILENCE_HOLD_MS = 1000;        // 通常。文の切れ目とみなす長さ
+const SILENCE_HOLD_LATE_MS = 500;    // 最長が近いときの妥協ライン
+const SILENCE_LATE_WINDOW_MS = 4000; // 最長のこれだけ手前から妥協を始める
+
+/* 最短より前に来た「明らかな切れ目」を捨てない (v0.18.9)
+ *
+ * 実機 2026-08-31 19:00 のログ:
+ *   長さ20.0秒 尻=強制 [判定可 最長無音3800ms 採用=level]
+ *
+ * **3.8秒の沈黙を検出していたのに、そこで切らず20秒で強制区切りした。**
+ * その沈黙は「3秒今から黙ってみます」の直後、チャンク開始から約6秒の時点。
+ * 最短12秒より前だったので使えないことになっていた。
+ *
+ * 3.8秒の沈黙は誰がどう見ても文の切れ目で、20秒での強制区切りより明らかに
+ * 良い区切り位置。実際その回は末尾が「…コピーして送り」で切れ、続きが失われた。
+ *
+ * 最短を設けたのは「短すぎるチャンクは文脈が無くて精度が落ちる」ため。だが
+ * 直前の文脈は contextHint で渡しているし、短チャンクはミドル整形でまとまる。
+ * **明らかな切れ目で終わった短いチャンクは、文の途中で切れた長いチャンクより良い。**
+ *
+ *   0 ─── 3秒 ────────── 最短 ─────── (最長-4秒) ─── 最長
+ *     切らない │ 2秒以上の無音なら切る │ 1秒 │ 0.5秒 │ 強制
+ */
+const SILENCE_ABS_MIN_MS = 3000;   // これより短いチャンクは作らない
+const SILENCE_HOLD_LONG_MS = 2000; // 最短前でも、これだけ空いたら明らかな切れ目
+const SILENCE_POLL_MS = 50;      // 判定の刻み
+
+/* ノイズフロアの推定方法 (v0.18.3 で作り直し)
+ *
+ * v0.18.2 までは「開始1秒を実測して初期値にし、以後は静かなときだけ EMA 追従」
+ * だった。実機ログで、3秒黙っても無音が一度も検出されないことが分かった。
+ * 原因はデッドロック:
+ *
+ *   録音開始直後は AudioContext にまだサンプルが流れておらず、解析結果は
+ *   ゼロ = -99dB。それが初期実測に入り、フロアが -99dB で確定する。
+ *   → quiet = db < -99+6 = -93dB は実際の音では絶対に成立しない
+ *   → フロアの学習は「静かなとき」限定なので、-99 から一生回復できない
+ *
+ * 「喋り続けるとフロアが持ち上がる」のを防ぐために学習を絞ったことが、
+ * 逆方向（フロアが低すぎる）から抜け出せない作りになっていた。
+ *
+ * なので片方向の追従をやめ、**直近の窓の最小値**をフロアにする。最小値なら
+ * 両方向に自己修正する。窓は SILENCE_WINDOW_MS のバケツ2本＝直近 4〜8 秒。
+ *
+ * ただし最小値だけだと、ずっと同じ音量で喋り続けたときにフロアが発話レベルに
+ * 張りついて発話が無音に見える。そこで**同じ窓の最大値**も持ち、最大と最小の
+ * 開きが SILENCE_DYNAMIC_RANGE_DB 未満なら「大きい側と小さい側の区別がついて
+ * いない」と見なして判定を放棄する（＝最長秒数で切る）。
+ * 「静か」は相対的な概念なので、開きが無いうちは判定できない。
+ *
+ * 既知の限界（意図した挙動）: 沈黙が窓を埋め尽くすと大きい側が窓から消え、
+ * 判定不能に戻る。判断材料が無いのに「きれいに切れた」と主張するより、
+ * 強制区切りに落ちるほうが正しい。実害も小さい（そんなチャンクは中身が沈黙なので
+ * 送信閾値で捨てられる）。喋り直せば復帰する。
+ */
+/* どの周波数を見るか (v0.18.5)
+ *
+ * v0.18.4 まで全帯域の RMS を測っていた。実機で「発話と3秒の沈黙の差が4dB」に
+ * なったのは、外部のゲイン調整ではなく**測る場所が間違っていた**から。
+ *
+ *   エアコンの効いた部屋でノートPCの近くで小声 →
+ *   エアコンの低域（ゴーッという成分）が全帯域 RMS を支配し、
+ *   その上に乗っている小声の差が埋もれる
+ *
+ * 会場で問題になる暗騒音は、空調・プロジェクタの送風・PC のファンなど、
+ * たいてい低域が主。全帯域で測っている限りどの会場でも同じ失敗をする。
+ * なので**人の声の帯域だけ**を見る。電話帯域（300〜3400Hz）が定番で、
+ * 日本語の音声認識でもこの範囲に主要な情報が入る。
+ */
+const VOICE_BAND_LOW_HZ = 300;
+const VOICE_BAND_HIGH_HZ = 3400;
+
+const SILENCE_WINDOW_MS = 4000;       // 最小/最大を集めるバケツの長さ（窓は最大この2倍）
+const SILENCE_DYNAMIC_RANGE_DB = 10;  // 窓内の最大-最小がこれ未満なら判定しない
+/* 「このチャンクに発話があったか」の判定に、続いていることを要求する (v0.18.10)
+ *
+ * 実機 2026-08-31 20:36 で、1.0秒の末尾チャンク（Gemini も Web Speech も
+ * 何も拾わなかった）に「発話あり」の判定が付き、
+ * 「（音声不明瞭・再試行可）」が残った。
+ * 1フレーム(50ms)でも大きい音があれば発話と見なしていたため、
+ * 舌打ちやクリック音、前の発話の余韻でも成立してしまう。
+ */
+const SILENCE_SPEECH_MIN_MS = 200;   // これだけ続いて初めて「発話あり」
+// 完全なゼロ（-95dB 未満）は「静かな部屋」ではなく「まだ音が流れていない」。
+// これをフロアの材料にすると上記のデッドロックが起きるので、材料から外す。
+const DIGITAL_SILENCE_DB = -95;
+
+function createSilenceDetector(stream) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  let ctx, analyser, src;
+  try {
+    ctx = new Ctx();
+    src = ctx.createMediaStreamSource(stream);
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    // 既定 0.8 だと周波数データが平滑化され、短い切れ目が鈍る
+    analyser.smoothingTimeConstant = 0;
+    src.connect(analyser);
+    // 自動再生ポリシーで suspended のまま作られることがある。
+    // そのままだと解析値が常にゼロになり、無音判定が一切効かなくなる
+    // （＝最長秒数での強制区切りに落ちるだけなので致命的ではないが、機能しない）
+    if (ctx.state === 'suspended') {
+      // resume は非同期。戻るまでの数フレームはゼロが返るが、ゼロは
+      // フロアの材料から外してあるので推定は汚れない
+      ctx.resume().then(
+        () => diagLog.info('無音検出: AudioContext を resume しました'),
+        () => diagLog.info('無音検出: AudioContext の resume に失敗（強制区切りに落ちます）'),
+      );
+    }
+  } catch (e) {
+    console.warn('[silence] AudioContext を作れませんでした:', e);
+    try { ctx && ctx.close(); } catch {}
+    return null;
+  }
+
+  const buf = new Float32Array(analyser.fftSize);       // 時間領域（音が流れているかの確認用）
+  const freq = new Float32Array(analyser.frequencyBinCount); // 周波数領域（判定はこちら）
+  // 声の帯域に対応するビンの範囲を求めておく
+  const binHz = (ctx.sampleRate || 48000) / analyser.fftSize;
+  const binLo = Math.max(1, Math.floor(VOICE_BAND_LOW_HZ / binHz));
+  const binHi = Math.min(analyser.frequencyBinCount - 1, Math.ceil(VOICE_BAND_HIGH_HZ / binHz));
+
+  let silentSinceMs = 0;    // 無音が始まった時刻（0 = いま無音ではない）
+  let lastDb = -99;      // 声の帯域（判定に使う値）
+  let lastWideDb = -99;  // 全帯域（比較用。v0.18.4 まではこちらで判定していた）
+  let speechInChunk = false;   // いまのチャンクの中で発話らしい音量を見たか
+  let speechFrames = 0;        // 発話らしい音量が何フレーム続いているか
+  let longestSilentInChunk = 0; // 同上・いちばん長かった無音（診断用）
+  // チャンク全体の音量の振れ幅（診断用）。窓の値だけだと、そのチャンクに
+  // そもそも十分な差があったのかが分からない
+  let chunkMinDb = Infinity, chunkMaxDb = -Infinity;
+
+  // 直近の窓の最小/最大。バケツ2本を回して「直近 4〜8 秒」を見る
+  let curMin = Infinity, curMax = -Infinity;
+  let prevMin = Infinity, prevMax = -Infinity;
+  let bucketStartedAt = Date.now();
+
+  const floorDb = () => Math.min(curMin, prevMin);
+  const peakDb = () => Math.max(curMax, prevMax);
+  /** 大きい側と小さい側の区別がついているか（ついていなければ判定を放棄する） */
+  const canJudge = () => {
+    const f = floorDb(), p = peakDb();
+    return Number.isFinite(f) && Number.isFinite(p) && p - f >= SILENCE_DYNAMIC_RANGE_DB;
+  };
+
+  const timer = setInterval(() => {
+    // 音がそもそも流れているか（時間領域）。完全なゼロなら「まだ来ていない」
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    const rms = Math.sqrt(sum / buf.length);
+    const wideDb = rms > 0 ? 20 * Math.log10(rms) : -99;
+
+    // 判定は声の帯域だけで行う（空調などの低域に埋もれさせない）
+    analyser.getFloatFrequencyData(freq);
+    let power = 0;
+    for (let i = binLo; i <= binHi; i++) {
+      const v = freq[i];
+      if (Number.isFinite(v)) power += Math.pow(10, v / 10);
+    }
+    const db = power > 0 ? 10 * Math.log10(power) : -99;
+    lastDb = db;
+    lastWideDb = wideDb;
+    const now = Date.now();
+
+    // 完全なゼロは「まだ音が流れていない」。フロアの材料にしないし、
+    // 無音とも見なさない（材料にすると v0.18.2 のデッドロックが再発する）。
+    // 判断は時間領域の広帯域値で行う（帯域を絞った値はゼロ入力でも -99 とは限らない）
+    const hasSignal = wideDb > DIGITAL_SILENCE_DB;
+    if (hasSignal) {
+      if (db < curMin) curMin = db;
+      if (db > curMax) curMax = db;
+      if (db < chunkMinDb) chunkMinDb = db;
+      if (db > chunkMaxDb) chunkMaxDb = db;
+      if (now - bucketStartedAt >= SILENCE_WINDOW_MS) {
+        prevMin = curMin; prevMax = curMax;
+        curMin = Infinity; curMax = -Infinity;
+        bucketStartedAt = now;
+      }
+    }
+
+    const quiet = hasSignal && canJudge() && db < floorDb() + SILENCE_MARGIN_DB;
+    // 一瞬の物音を発話と取り違えないよう、続いていることを条件にする
+    if (hasSignal && canJudge() && db >= floorDb() + SILENCE_DYNAMIC_RANGE_DB) {
+      speechFrames++;
+      if (speechFrames * SILENCE_POLL_MS >= SILENCE_SPEECH_MIN_MS) speechInChunk = true;
+    } else {
+      speechFrames = 0;
+    }
+
+    if (quiet) {
+      if (!silentSinceMs) silentSinceMs = now;
+      const held = now - silentSinceMs;
+      if (held > longestSilentInChunk) longestSilentInChunk = held;
+    } else {
+      silentSinceMs = 0;
+    }
+  }, SILENCE_POLL_MS);
+
+  return {
+    /**
+     * いま何 ms 静かが続いているか（0 = 静かではない／判定できない）。
+     * どれだけ続いたら切るかの判断は decideChunkCut 側に置く。
+     */
+    silentMs() {
+      if (!silentSinceMs) return 0;
+      return Date.now() - silentSinceMs;
+    },
+    db() { return lastDb; },
+    wideDb() { return lastWideDb; },
+    floorDb() { const f = floorDb(); return Number.isFinite(f) ? f : -99; },
+    peakDb() { const p = peakDb(); return Number.isFinite(p) ? p : -99; },
+    /** 大きい側と小さい側の区別がついているか（診断用） */
+    canJudge,
+    /** AudioContext の状態（suspended のままだと解析値が全部ゼロになる） */
+    ctxState() { return ctx.state; },
+    /** いまのチャンクの中で、一度でも発話らしい音量があったか */
+    sawSpeechInChunk() { return speechInChunk; },
+    /** いまのチャンクの中でいちばん長かった無音（ms・診断用） */
+    longestSilentMsInChunk() { return longestSilentInChunk; },
+    /** そのチャンク全体での音量の振れ幅 [最小, 最大]（診断用） */
+    chunkRangeDb() {
+      return [Number.isFinite(chunkMinDb) ? chunkMinDb : -99,
+              Number.isFinite(chunkMaxDb) ? chunkMaxDb : -99];
+    },
+    /** チャンクを切ったときに呼ぶ */
+    resetChunkSpeech() {
+      speechInChunk = false; speechFrames = 0; longestSilentInChunk = 0;
+      chunkMinDb = Infinity; chunkMaxDb = -Infinity;
+    },
+    close() {
+      clearInterval(timer);
+      try { src.disconnect(); } catch {}
+      try { ctx.close(); } catch {}
+    },
+  };
+}
+
+/**
+ * 「いまチャンクを切るべきか」の判断 (v0.18.0 / しきい値は v0.18.2)
+ *
+ *   0 ─────── minMs ─────────────── maxMs
+ *   |  絶対切らない  |  無音になったら切る  | 無音でなくても切る
+ *
+ * minMs 未満で切らないのは、短すぎるチャンクは文脈が無くて精度が落ちるから。
+ * maxMs で諦めるのは、ずっと喋り続けられたときにチャンクが無限に伸びて
+ * 画面が止まる（＆ Gemini の入力上限に当たる）のを防ぐため。
+ *
+ * @returns {null|'silence'|'forced'} null = まだ切らない
+ */
+function decideChunkCut({ elapsed, minMs, maxMs, useSilenceCut, silentMs }) {
+  if (elapsed >= maxMs) return 'forced';
+  if (!useSilenceCut) return null;          // 従来動作では minMs === maxMs なので上で切れる
+  const ms = silentMs || 0;
+
+  // 最短より前でも、明らかな切れ目（長い無音）なら使う。
+  // 捨てると、そのあと切る場所が見つからず強制区切りに落ちることがある
+  if (elapsed < minMs) {
+    return (elapsed >= SILENCE_ABS_MIN_MS && ms >= SILENCE_HOLD_LONG_MS) ? 'silence' : null;
+  }
+
+  // 最長が近づいたら、短い間でも妥協する（強制で切るよりはマシ）
+  const needed = elapsed >= maxMs - SILENCE_LATE_WINDOW_MS
+    ? SILENCE_HOLD_LATE_MS
+    : SILENCE_HOLD_MS;
+  return ms >= needed ? 'silence' : null;
+}
+
+/* ───────── 話者判別用の録音（保管側） (v0.21.0) ─────────
+ *
+ * live の文字起こしとは**別の MediaRecorder** を、同じストリームに掛けて回す。
+ * 理由は audio-store.js の冒頭に書いたとおりで、live 側の
+ * `stop() → start()` で出てくるチャンクは1本ずつ独立した webm なので、
+ * 繋いでも最初の1本しか読めないため。
+ *
+ * こちらは `start(timeslice)` で回す。出てくるかけらは1本の録音の続きなので、
+ * 順に繋げば正しい webm になる。
+ *
+ * ■ 二重にエンコードすることについて
+ *
+ * Opus のエンコーダが2つ回るぶん CPU は増えるが、64kbps の音声1本ぶんなので
+ * 実用上は問題にならない。**同じストリームを2つの MediaRecorder が読める**のは
+ * MediaRecorder の仕様どおりの使い方。
+ *
+ * ■ 保持がオフなら、そもそも作らない
+ *
+ * 「既定は残さない」を守るため、`audioKeepRecording` が false のときは
+ * この録音機を作らない。作らなければ、消し忘れも起きない。
+ */
+
+/** かけらを吐く間隔。短いほど落ちたときの取りこぼしが減り、レコードが増える */
+const ARCHIVE_SLICE_MS = 5000;
+/** 区間の目安。これを過ぎたら、次の無音で区間を切り替える */
+const ARCHIVE_SEG_TARGET_MS = 10 * 60 * 1000;
+/** 無音が来なくてもここで切り替える（喋りっぱなしのとき用） */
+const ARCHIVE_SEG_MAX_MS = 12 * 60 * 1000;
+/** 区間の切り替えに要求する無音の長さ。live の区切りより厳しくする */
+const ARCHIVE_SEG_SILENCE_MS = 1500;
+
+/**
+ * 区間を切り替えるべきか (v0.21.0)
+ *
+ * live の `decideChunkCut` と別にしてあるのは、目的が違うから。
+ * live は「早く出したい」ので 12〜20 秒で切るが、こちらは
+ * **切れ目を減らしたい**（切れ目ごとに話者の対応づけが切れる）。
+ * だから目安の10分までは何があっても切らず、そのあと最初の無音で切る。
+ *
+ * @returns {null|'silence'|'forced'}
+ */
+function shouldRollArchiveSegment({ elapsed, targetMs, maxMs, silentMs }) {
+  const target = Number.isFinite(targetMs) ? targetMs : ARCHIVE_SEG_TARGET_MS;
+  const max = Number.isFinite(maxMs) ? maxMs : ARCHIVE_SEG_MAX_MS;
+  if (elapsed >= max) return 'forced';
+  if (elapsed < target) return null;
+  return (silentMs || 0) >= ARCHIVE_SEG_SILENCE_MS ? 'silence' : null;
+}
+
+/**
+ * 保管用の録音機を作って回し始める。保持がオフなら null を返す
+ */
+function startArchiveRecorder(stream, recOpts) {
+  if (!state.settings.audioKeepRecording) return null;
+  const sessionId = state.recordingSessionId || state.activeId;
+  if (!sessionId) return null;
+
+  state.audioSeg = 0;
+  state.audioSeq = 0;
+  state.archiveSegStartedAt = Date.now();
+
+  const make = () => {
+    let rec;
+    try {
+      rec = new MediaRecorder(stream, recOpts);
+    } catch (e) {
+      diagLog.info('話者判別用の録音を作れませんでした（文字起こしは続きます）: ' + (e.message || e));
+      return null;
+    }
+    rec.ondataavailable = (e) => {
+      if (!e.data || !e.data.size) return;
+      audioStorePut(sessionId, e.data, state.audioSeq++, state.audioSeg).catch(err => {
+        // 容量不足などで失敗しうる。1回だけ知らせて、以後は黙って諦める。
+        // ここで録音本体を止める価値は無い
+        if (!state.audioStoreWarned) {
+          state.audioStoreWarned = true;
+          diagLog.info('音声の保管に失敗しました（録音と文字起こしは続きます）: ' + (err.message || err));
+        }
+      });
+    };
+    rec.onstop = () => {
+      // 区間の切り替えなら次を作る。録音そのものの停止なら state 側で null になっている
+      if (!state.isRecording || state.archiveRecorder !== rec) return;
+      state.audioSeg++;
+      state.audioSeq = 0;
+      state.archiveSegStartedAt = Date.now();
+      const next = make();
+      state.archiveRecorder = next;
+      if (next) {
+        try { next.start(ARCHIVE_SLICE_MS); }
+        catch (e) { diagLog.info('話者判別用の録音を再開できませんでした: ' + (e.message || e)); }
+      }
+    };
+    rec.onerror = () => { /* 保管が壊れても live は止めない */ };
+    return rec;
+  };
+
+  const rec = make();
+  if (!rec) return null;
+  try {
+    rec.start(ARCHIVE_SLICE_MS);
+  } catch (e) {
+    diagLog.info('話者判別用の録音を開始できませんでした: ' + (e.message || e));
+    return null;
+  }
+  state.archiveRecorder = rec;
+  return rec;
+}
+
+/** 区間を切り替える（onstop が次の区間を作る） */
+function rollArchiveSegment(why) {
+  const rec = state.archiveRecorder;
+  if (!rec || rec.state !== 'recording') return;
+  const mins = ((Date.now() - state.archiveSegStartedAt) / 60000).toFixed(1);
+  diagLog.info(`話者判別用の録音: 区間${state.audioSeg}を${mins}分で区切り（${why === 'silence' ? '無音' : '強制'}）`);
+  try { rec.stop(); } catch { /* 状態が変わっていたら諦める */ }
+}
+
+/** 録音停止。最後のかけらは stop() が吐くので、それを取りこぼさないよう先に外す */
+function stopArchiveRecorder() {
+  const rec = state.archiveRecorder;
+  state.archiveRecorder = null;   // onstop の「次を作る」を止める
+  if (rec && rec.state !== 'inactive') {
+    try { rec.stop(); } catch { /* 既に止まっていれば何もしない */ }
+  }
+}
+
+/**
+ * 無音検出の状態を1行にまとめる（診断ログ用・v0.18.3）
+ *
+ * v0.18.2 は「3秒黙ったのに無音が一度も検出されない」という形で壊れていたが、
+ * ログには「尻=強制」としか出ず、検出器の中で何が起きているか分からなかった。
+ * **そのチャンク中でいちばん長かった無音**を出せば、次からは一目で切り分けられる:
+ *   最長無音 3000ms なのに強制で切れている → 区切りの判断がおかしい
+ *   最長無音 0ms なのに黙っていた          → 検出器がおかしい
+ */
+/**
+ * 「何 ms 声が途切れているか」を、使える手段から選ぶ (v0.18.4)
+ *
+ * 音量だけに頼っていたら、実機で床-38dB / 天井-34dB という**差が4dBしかない**
+ * 音が来た。20秒の中に発話と3秒の沈黙が両方入っているのにこの差では、
+ * 大きい側と小さい側を区別できない（`autoGainControl:false` は要求済みなので、
+ * Chrome の外側 ── Windows の音声拡張やドライバ、マイク本体 ── で平坦化されている）。
+ *
+ * そこで Web Speech を第二の手段にする。並走している音声認識器が「いま声が
+ * 出ているか」を判断してくれるので、**音量が平坦でも効く**。
+ *
+ * 優先順位を明確にする（両方を混ぜない）:
+ *   1. 音量で判定できるなら音量（合成音で検証済みの経路）
+ *   2. 無理なら Web Speech（音量に依存しない）
+ *   3. どちらも無理なら 0 ＝ 最長秒数での強制区切り（v0.17 と同じ）
+ *
+ * @returns {{ms: number, source: 'level'|'webspeech'|'none'}}
+ */
+function pickSilentMs({ levelMs, levelCanJudge, webMs, webActive }) {
+  if (levelCanJudge) return { ms: levelMs || 0, source: 'level' };
+  if (webActive) return { ms: webMs || 0, source: 'webspeech' };
+  return { ms: 0, source: 'none' };
+}
+
+/** いま使える無音シグナルを集める */
+function currentSilenceSignal() {
+  const d = state.silenceDetector;
+  // liveLastActivityAt が 0 ＝ Web Speech がまだ一度も聞き取っていない。
+  // その状態を「無音が続いている」と読んではいけない（判断材料が無いだけ）
+  const webActive = !!state.liveRecognition && !!state.liveLastActivityAt;
+  return pickSilentMs({
+    levelMs: d ? d.silentMs() : 0,
+    levelCanJudge: !!d && d.canJudge(),
+    webMs: webActive ? Date.now() - state.liveLastActivityAt : 0,
+    webActive,
+  });
+}
+
+function silenceDiag(source) {
+  const d = state.silenceDetector;
+  if (!d) return `[検出器なし 採用=${source || '?'}]`;
+  const [lo, hi] = d.chunkRangeDb();
+  // v0.19.1: 無音の計測はチャンクの区切りをまたいで続く（判定にはそれが正しい）。
+  // ただしログにそのまま出すと「このチャンクの中に3.4秒の沈黙があった」と
+  // 読めてしまうので、チャンク自身の長さで頭打ちにする。
+  // 前から続いていた分は `+` を付けて区別する
+  const elapsed = state.chunkStartedAt ? Date.now() - state.chunkStartedAt : Infinity;
+  const raw = d.longestSilentMsInChunk();
+  const shown = Math.min(raw, elapsed);
+  return `[声帯域 窓${d.floorDb().toFixed(0)}〜${d.peakDb().toFixed(0)} `
+    + `全体${lo.toFixed(0)}〜${hi.toFixed(0)}(幅${(hi - lo).toFixed(0)}dB) `
+    + `${d.canJudge() ? '判定可' : '判定不能'} `
+    // v0.19.2: 空チャンクを消すかどうかはこの値で決まるのに、出していなかった。
+    // 実機で「（音声不明瞭・再試行可）」が残った理由を判断できなかった
+    + `発話${d.sawSpeechInChunk() ? 'あり' : 'なし'} `
+    + `最長無音${Math.round(shown)}ms${raw > elapsed ? '+' : ''} `
+    + `採用=${source || '?'} ctx=${d.ctxState()}]`;
+}
+
+/* ───────── Web Speech の遅れによる二重表示 (v0.18.8) ─────────
+ *
+ * Web Speech の「確定」は遅れて届く。あるチャンクの音声に対応する文字が、
+ * そのチャンクを切った**後**に確定し、次のチャンクの「未確定分」として付く。
+ *
+ * 実機 2026-08-31 18:48:
+ *   チャンク3(16.0秒) … 「はい、3秒間黙りました…報告します。」の音声が入っている
+ *   チャンク4( 2.3秒) … 残りのほぼ沈黙。Gemini は空を返した
+ *   → チャンク3の音声に対応する Web Speech の文字がチャンク4に付いていたため、
+ *     v0.17.0 の「Gemini が空でも Web Speech の結果は捨てない」が働いて、
+ *     **すでに画面にある文がもう一度出た**
+ *
+ * 時刻で対応づけ直すことはできない（Web Speech は確定の元になった音声の時刻を
+ * 教えてくれない）。なので「すでに画面にあるものは出さない」で対処する。
+ * 消してよいと分かるのは**同じ内容が確かに残っているとき**だけなので、
+ * 取りこぼしにはならない。
+ */
+
+/** 比較用に表記のゆれを落とす（空白・句読点・注記を除く） */
+function normalizeForCompare(text) {
+  return (text || '')
+    .replace(/\[[^\]]*\]/g, '')                      // [Gemini は聞き取れず…] のような注記
+    .replace(/[\s\u3000]/g, '')
+    .replace(/[、。，．,.!?！？・「」『』（）()]/g, '');
+}
+
+/** 2文字ずつの並びの集合（語の切れ目が engine ごとに違っても比べられる） */
+function bigrams(str) {
+  const set = new Set();
+  for (let i = 0; i < str.length - 1; i++) set.add(str.slice(i, i + 2));
+  return set;
+}
+
+/**
+ * provisionalText が、すでに確定している末尾の文とほぼ同じ内容か
+ *
+ * Gemini と Web Speech では表記が違う（「はい、3秒間黙りました。」と
+ * 「はい 3秒間 黙りました」）ので、完全一致では判定できない。
+ * 2文字の並びがどれだけ重なるかで見る。
+ */
+/* 判定の下限を2段階にする (v0.19.2)
+ *
+ * v0.18.8 は一律 8 文字未満を対象外にしていた。実機で「乗り越えるべき」（7文字）が
+ * 二重に出て、**1文字足りずにすり抜けた**。
+ *
+ * かといって一律に下げると、あいまい一致（2文字の並びの重なり）で偶然の一致が増える。
+ * ただし**そのまま含まれている**場合は短くても確実なので、そこだけ下限を下げる。
+ */
+const DUP_MIN_EXACT = 4;   // 完全に含まれているなら、これだけあれば確か
+const DUP_MIN_FUZZY = 8;   // あいまい一致は短いと偶然当たる
+
+function isDuplicateOfTail(provisionalText, tailText, threshold = 0.7) {
+  const a = normalizeForCompare(provisionalText);
+  const b = normalizeForCompare(tailText);
+  if (a.length < DUP_MIN_EXACT || b.length < DUP_MIN_EXACT) return false;
+  // そのまま含まれているなら、短くても重複と断定してよい
+  if (b.includes(a)) return true;
+  // ここから先はあいまい一致。短い文字列は偶然当たるので判定しない
+  if (a.length < DUP_MIN_FUZZY || b.length < DUP_MIN_FUZZY) return false;
+  const ba = bigrams(a), bb = bigrams(b);
+  if (ba.size === 0) return false;
+  let hit = 0;
+  for (const g of ba) if (bb.has(g)) hit++;
+  return hit / ba.size >= threshold;
+}
+
+/** 指定要素を除いた、直近の確定テキスト（末尾 maxChars 文字） */
+function confirmedTailText(excludeEl, maxChars = 400) {
+  const container = excludeEl && excludeEl.parentElement;
+  if (!container) return '';
+  const parts = [];
+  for (const child of container.children) {
+    if (child === excludeEl) continue;
+    const t = (child.innerText || '').trim();
+    if (t) parts.push(t);
+  }
+  const all = parts.join('\n');
+  return all.length > maxChars ? all.slice(-maxChars) : all;
+}
+
+/**
+ * 期限切れの音声を掃除する (v0.19.0)
+ *
+ * **起動時に必ず呼ぶ。** 「タブを閉じたら消す」はクラッシュや強制リロードでは
+ * 走らないので、消し忘れを防ぐ本体はこちら。
+ */
+/** 設定画面の「保持中の音声: …」表示を更新する (v0.19.0) */
+async function refreshAudioUsage() {
+  if (!els.audioUsageText) return;
+  try {
+    const { sessions, totalBytes } = await audioStoreSummary();
+    els.audioUsageText.textContent = sessions.length === 0
+      ? '保持中の音声: なし'
+      : `保持中の音声: ${sessions.length}件 / ${formatBytes(totalBytes)}`;
+    if (els.btnClearAudio) els.btnClearAudio.disabled = sessions.length === 0;
+  } catch (e) {
+    // IndexedDB が使えない環境（プライベートモード等）でも設定画面は開けるべき
+    els.audioUsageText.textContent = '保持中の音声: 確認できません（' + (e.message || e) + '）';
+    if (els.btnClearAudio) els.btnClearAudio.disabled = true;
+  }
+}
+
+async function sweepStoredAudio() {
+  try {
+    const live = new Set(state.sessions.map(s => s.id));
+    const done = new Map(state.sessions
+      .filter(s => s.audioRepassDoneAt)
+      .map(s => [s.id, s.audioRepassDoneAt]));
+    const r = await audioStoreSweep({
+      // 保持がオフなら 'off' を渡して、残っている分を全部消す
+      retention: state.settings.audioKeepRecording ? state.settings.audioRetention : 'off',
+      liveSessionIds: live,
+      repassDoneAt: done,
+    });
+    if (r.deletedSessions > 0) {
+      diagLog.info(`保管していた音声を掃除: ${r.deletedSessions}件 / ${formatBytes(r.deletedBytes)}`);
+    }
+    // v0.21.1: 呼び出し側が「実際に消えたか」を言えるように結果を返す。
+    // 推測で「消しました」と書くと、消えていなかったときに嘘になる
+    return r;
+  } catch (e) {
+    console.warn('[audio] 掃除に失敗:', e.message || e);
+    return { deletedSessions: 0, deletedBytes: 0 };
+  }
+}
+
+/* ───────── 話者判別 (v0.21.0) ─────────
+ *
+ * live の文字起こしは12〜20秒のチャンクを1本ずつ投げるので、**話者を区別できない**。
+ * 同じ声かどうかは前後を並べて聞かないと分からないし、そもそも1チャンクに
+ * 1人しか入っていないことも多い。
+ *
+ * 録音が終わったあとなら、保管しておいた音声をまとめて投げられる。
+ * そこで初めて「誰が喋ったか」を付けられる。
+ *
+ * ■ 勝手には走らせない
+ *
+ * 音声全体をもう一度 Google に上げ直すので、
+ *   - 通信量（区間ごとに数MB）
+ *   - トークン（音声は1秒=32トークン。90分で約17万トークン）
+ *   - **録音そのものがもう一度 Google に渡る**
+ * のすべてが発生する。3つ目が一番重い。必ず確認してから走らせる。
+ */
+
+/** 話者判別の進行状態。二重起動を防ぎ、中止を受け取る */
+function diarizationState() {
+  if (!state.diarizing) state.diarizing = { running: false, cancel: null };
+  return state.diarizing;
+}
+
+/** ボタンの見た目を状態に合わせる */
+function updateDiarizeButton() {
+  if (!els.btnDiarize) return;
+  const r = diarizationState();
+  els.btnDiarize.classList.toggle('firing', r.running);
+  // v0.21.2: 結果が残っていれば、音声が消えていても貼り直せる。
+  // ボタンの説明もそれに合わせる（押す前に何が起きるか分かるように）
+  const s = getActiveSession();
+  const hasSaved = !!(s && s.repass && s.repass.turns && s.repass.turns.length);
+  els.btnDiarize.title = r.running
+    ? '話者判別を中止する'
+    : hasSaved
+      ? '話者付きの結果を貼り直す／録音が残っていれば話者判別をかけ直す'
+      : '保管した録音をまとめて Gemini に通し、話者付きで書き起こす（録音の保持がオンのときだけ）';
+}
+
+/**
+ * 話者判別をかける (v0.21.0)
+ *
+ * 区間ごとに「上げる → 待つ → 文字起こし → 消す」を順に回す。
+ * **1区間ずつ消す**のは、途中で止めたときに上げっぱなしのファイルを
+ * 残さないため（48時間で自動削除されるとはいえ、置いておく理由が無い）。
+ */
+async function runDiarization() {
+  const r = diarizationState();
+  if (r.running) {
+    if (confirm('話者判別を中止しますか？\n\nここまでに書き出した分はそのまま残ります。')) {
+      r.cancel.aborted = true;
+      setStatus('idle', '話者判別を中止しています…');
+    }
+    return;
+  }
+
+  if (!state.settings.apiKey) { alert('Gemini API キーが未設定です'); openSettings(); return; }
+  if (state.isRecording && state.recordingSessionId === state.activeId) {
+    alert('録音中は話者判別できません。先に録音を止めてください。');
+    return;
+  }
+  const session = getActiveSession();
+  if (!session) return;
+
+  let segments;
+  try {
+    segments = await audioStoreGetSegments(session.id);
+  } catch (e) {
+    alert('保管した音声を読み出せませんでした:\n' + (e.message || e));
+    return;
+  }
+  if (!segments.length) {
+    // v0.21.2: 音声が消えていても、結果が残っていれば貼り直せる。
+    // 「もう2度とできない」を先に否定する
+    if (session.repass && session.repass.turns && session.repass.turns.length) {
+      restoreDiarizationResult(session);
+      return;
+    }
+    alert(explainNoAudioForDiarization({
+      keepRecording: !!state.settings.audioKeepRecording,
+      retention: state.settings.audioRetention,
+      repassDoneAt: session.audioRepassDoneAt,
+    }));
+    return;
+  }
+
+  const totalBytes = segments.reduce((n, s) => n + s.bytes, 0);
+  // 音声は 1秒あたり 32 トークン。ビットレートから秒数を見積もる
+  const bps = Number(state.settings.audioBitrate) || 64000;
+  const approxSec = Math.round(totalBytes * 8 / bps);
+  const approxTokens = approxSec * 32;
+  const mins = Math.max(1, Math.round(approxSec / 60));
+
+  // v0.21.2: 前の結果があるなら、投げ直す前に**安いほう**を先に出す。
+  // 「画面から消えただけ」なら、貼り直しは一瞬でトークンもかからない
+  const saved = session.repass;
+  if (saved && saved.turns && saved.turns.length) {
+    const when = new Date(saved.doneAt).toLocaleString('ja-JP');
+    if (confirm(
+      `${when} に作った話者付きの結果が、このタブに保存されています。\n\n`
+      + `　発言: ${saved.turns.length}件\n`
+      + `　話者: ${(saved.speakers || []).length}人\n\n`
+      + `この結果を画面に貼り直しますか？（トークンはかかりません）\n\n`
+      + `［OK］保存された結果を貼り直す\n`
+      + `［キャンセル］録音からもう一度作り直す（前の結果は上書きされます）`
+    )) {
+      restoreDiarizationResult(session, { ask: false });
+      return;
+    }
+  }
+
+  if (!confirm(
+    `この録音に話者判別をかけます。\n\n`
+    + `保管した録音をまとめて Gemini に通し、話者付きで書き起こし直します。\n\n`
+    + `　音声: 約${mins}分 / ${formatBytes(totalBytes)} / ${segments.length}区間\n`
+    + `　入力トークン: 約${approxTokens.toLocaleString()}（音声は1秒=32トークン）\n\n`
+    + `⚠️ 録音全体をもう一度 Google にアップロードします。\n`
+    + `　 使い終わったファイルはこちらから削除しますが、\n`
+    + `　 削除できなかった場合も Google 側で48時間後に自動削除されます。\n\n`
+    + `いまの文字起こしは置き換わります（Ctrl+Z で戻せます）。\n\n`
+    + `続けますか？`
+  )) return;
+
+  r.running = true;
+  r.cancel = { aborted: false };
+  updateDiarizeButton();
+  pushUndo('話者判別', 'pane-transcript');
+
+  const container = getWriteContainer();
+  const inBg = container !== els.confirmed;
+  const persist = () => {
+    if (inBg) syncBgToSession(); else snapshotActiveToSession();
+    persistSessions();
+  };
+
+  // 画面をいったん空にして、進行状況だけを置く
+  Array.from(container.childNodes).forEach(n => n.remove());
+  const progressEl = createParagraphEl('（話者判別の準備中…）', 'paragraph refining');
+  container.appendChild(progressEl);
+  const say = (msg) => {
+    const body = progressEl.querySelector('.p-body');
+    if (body) body.textContent = `（${msg}）`;
+  };
+
+  diagLog.info(`話者判別開始: ${segments.length}区間 / ${formatBytes(totalBytes)} / 約${mins}分`);
+
+  const rosters = [];
+  const allTurns = [];   // v0.21.2: セッションに残して、あとから貼り直せるようにする
+  let prevTail = '';
+  let wrote = 0;
+  let stoppedBy = null;
+
+  try {
+    for (let i = 0; i < segments.length; i++) {
+      if (r.cancel.aborted) { stoppedBy = '中止'; break; }
+      const seg = segments[i];
+      const label = `${i + 1}/${segments.length}`;
+      let uploaded = null;
+
+      try {
+        say(`区間 ${label} を送信中… 0%`);
+        setStatus('processing', `話者判別 ${label}`);
+        uploaded = await geminiFileUpload({
+          apiKey: state.settings.apiKey,
+          blob: seg.blob,
+          displayName: `dictation-${session.id}-seg${seg.seg}`,
+          cancel: r.cancel,
+          onProgress: (ratio) => say(`区間 ${label} を送信中… ${Math.round(ratio * 100)}%`),
+        });
+        say(`区間 ${label} の準備を待っています…`);
+        await geminiFileWaitActive({
+          apiKey: state.settings.apiKey, name: uploaded.name, cancel: r.cancel,
+        });
+
+        say(`区間 ${label} を話者付きで書き起こし中…`);
+        const out = await diarizeSegmentWithGemini({
+          apiKey: state.settings.apiKey,
+          fileUri: uploaded.uri,
+          mimeType: uploaded.mimeType,
+          sessionContext: getSessionContextForAi(),
+          knownSpeakers: mergeSpeakerRosters(rosters),
+          prevTail: prevTail.slice(-300),
+          index: i + 1,
+          total: segments.length,
+        });
+
+        rosters.push(out.speakers);
+        for (const t of out.turns) {
+          const el = createParagraphEl('', 'paragraph refined');
+          setParagraphContent(el, formatSpeakerTurn(t));
+          container.insertBefore(el, progressEl);
+          allTurns.push(t);
+          wrote++;
+        }
+        if (out.turns.length) prevTail = out.turns[out.turns.length - 1].text;
+        diagLog.info(`話者判別 ${label}: ${out.turns.length}発言 / 話者${out.speakers.length}人`
+          + (out.speakers.length ? ` (${out.speakers.map(s => s.label).join('、')})` : ''));
+        persist();
+      } finally {
+        // 上げたものは、成功でも失敗でも中止でも消す
+        if (uploaded && uploaded.name) {
+          const ok = await geminiFileDelete({ apiKey: state.settings.apiKey, name: uploaded.name });
+          if (!ok) diagLog.info(`話者判別 ${label}: 上げたファイルを消せませんでした（48時間で自動削除されます）`);
+        }
+      }
+    }
+  } catch (e) {
+    stoppedBy = e.message || String(e);
+    console.warn('[diarize] failed:', e);
+    diagLog.info('話者判別を中断: ' + stoppedBy);
+  } finally {
+    r.running = false;
+    r.cancel = null;
+    updateDiarizeButton();
+  }
+
+  progressEl.remove();
+
+  if (wrote === 0) {
+    // 1行も書けなかったときに空の画面を残すのは最悪なので、元に戻せることを言う
+    const el = createParagraphEl(
+      `（話者判別できませんでした: ${stoppedBy || '結果が空でした'}／Ctrl+Z で元の文字起こしに戻せます）`,
+      'paragraph needs-retry');
+    container.appendChild(el);
+    persist();
+    setStatus('error', '話者判別に失敗');
+    return;
+  }
+
+  persist();
+  if (!inBg) { updateActionButtons(); autoScroll(); }
+
+  const roster = mergeSpeakerRosters(rosters);
+  // v0.21.2: 中断でも、書き出せた分は残す。ここまでの結果も作り直せない
+  saveDiarizationResult(session, { speakers: mergeSpeakerRosters(rosters), turns: allTurns });
+
+  if (stoppedBy) {
+    setStatus('error', `話者判別を中断（${wrote}発言まで）`);
+    alert(`途中で止まりました: ${stoppedBy}\n\n`
+      + `ここまでの ${wrote}発言は書き出してあります。\n`
+      + `元の文字起こしに戻すには Ctrl+Z を押してください。`);
+    return;
+  }
+
+  // 完了した分だけ、保持設定の「話者判別が終わったら消す」を効かせる
+  session.audioRepassDoneAt = Date.now();
+  persistSessions();
+  // v0.21.1: 待つ。ここで消えるかどうかを、この場で利用者に言うため
+  // （黙って消すと、次に押したときに「録音がありません」だけが出て理由が分からない）
+  const swept = await sweepStoredAudio();
+sweepStoredImages();   // v0.22.0: どのメモからも参照されていない画像を片付ける
+  refreshAudioUsage();
+
+  setStatus('idle', `話者判別が完了（話者${roster.length}人）`);
+  diagLog.info(`話者判別完了: ${wrote}発言 / 話者${roster.length}人`);
+  alert(`話者付きで書き起こしました。\n\n`
+    + `　発言: ${wrote}件\n`
+    + `　話者: ${roster.length}人（${roster.map(s => s.label).join('、')}）\n\n`
+    + `※ 区間の変わり目で話者の対応がずれることがあります。\n`
+    + `　 区間ごとに別々に送っているので、モデルは前の区間の声を覚えていません。\n`
+    + `　 名前が分かっているなら、タグアイコンの「話者」に書いておくと安定します。\n\n`
+    + (swept && swept.deletedSessions > 0
+        ? `※ 設定にしたがって、保管していた録音（${formatBytes(swept.deletedBytes)}）を消しました。\n`
+          + `　 録音からの書き起こし直しはもうできませんが、**この結果はタブに保存してあります**。\n`
+          + `　 間違って消しても、同じボタンから貼り直せます。\n`
+          + `　 別の設定で試し直したいときは、次の録音の前に「いつ消すか」を変えてください。`
+        : `※ 保管した録音は設定にしたがって残してあります。もう一度かけ直せます。`));
+}
+
+/* ───────── 話者判別の結果を残す (v0.21.2) ─────────
+ *
+ * v0.21.1 までは、話者付きの結果を**取り消し履歴にしか置いていなかった**。
+ * 「間違えて元に戻すボタンを押したら、もう2度と話者判別はできないのでは」
+ * という指摘のとおりで、これは設計の穴だった。
+ *
+ * 消えて困るのは録音ではなく**結果そのもの**。
+ * 結果はテキストなので数十KBしかなく、残しても録音のような
+ * 二次利用の問題が無い（「文字起こしはよいが録音はダメ」という同意の形に
+ * そのまま収まる）。いちばん高価で二度と作れないものを、
+ * リロードで消える場所にしか置いていなかったのが間違い。
+ *
+ * ■ 保存するのは結果だけ
+ *
+ * 話者判別**前**の文字起こしは保存しない。取り消し履歴で戻せるうえ、
+ * 戻したあとは画面にあるものがそれになる（貼り直しは pushUndo してから
+ * 行うので、そこからまた戻せる）。両方を貯めると localStorage を
+ * 二重に食うだけで、行き来はできている。
+ */
+
+/** 結果をセッションに残す。turns が空なら何もしない（空で上書きしない） */
+function saveDiarizationResult(session, { speakers, turns }) {
+  if (!session || !turns || !turns.length) return;
+  session.repass = {
+    doneAt: Date.now(),
+    speakers: (speakers || []).map(x => ({ label: x.label, note: x.note || '' })),
+    // 画面の HTML ではなくプレーンな発言の配列で持つ。
+    // 保存量が小さく、貼り直すときに段落を作り直せる
+    turns: turns.map(t => ({ speaker: t.speaker, text: t.text })),
+  };
+  persistSessions();
+  updateDiarizeButton();
+}
+
+/**
+ * 残してある結果を画面に貼り直す (v0.21.2)
+ *
+ * 話者判別本体と同じ形（1発言＝1段落）で組み直す。
+ * **先に pushUndo する**ので、貼り直しも取り消せる。
+ */
+function restoreDiarizationResult(session, { ask = true } = {}) {
+  const saved = session && session.repass;
+  if (!saved || !saved.turns || !saved.turns.length) return false;
+
+  const when = new Date(saved.doneAt).toLocaleString('ja-JP');
+  const names = (saved.speakers || []).map(x => x.label).join('、');
+  // 呼び出し側ですでに聞いている場合は二重に聞かない
+  if (ask && !confirm(
+    `${when} に作った話者付きの結果が、このタブに保存されています。\n\n`
+    + `　発言: ${saved.turns.length}件\n`
+    + `　話者: ${(saved.speakers || []).length}人${names ? `（${names}）` : ''}\n\n`
+    + `いまの文字起こしを、この結果で置き換えますか？\n`
+    + `（いまの内容は Ctrl+Z で戻せます）`
+  )) return false;
+
+  pushUndo('話者付きの結果を貼り直し', 'pane-transcript');
+  const container = getWriteContainer();
+  Array.from(container.childNodes).forEach(n => n.remove());
+  for (const t of saved.turns) {
+    const el = createParagraphEl('', 'paragraph refined');
+    setParagraphContent(el, formatSpeakerTurn(t));
+    container.appendChild(el);
+  }
+  if (container !== els.confirmed) syncBgToSession(); else snapshotActiveToSession();
+  persistSessions();
+  updateActionButtons();
+  autoScroll();
+  diagLog.info(`話者付きの結果を貼り直し: ${saved.turns.length}発言`);
+  setStatus('idle', `結果を貼り直しました（${saved.turns.length}発言）`);
+  return true;
+}
+
+/**
+ * 「話者判別をかけられる音声が無い」理由を説明する (v0.21.1)
+ *
+ * v0.21.0 は「保持の設定を入れる前の録音か、期限切れ」としか言わなかった。
+ * ところが実機でいちばん多いのは**そのどちらでもない**:
+ * 「話者判別が終わったら消す」設定で1回かけたあと、もう一度押した場合。
+ *
+ * 設計としては正しく消えているのだが、**心当たりの無い理由を挙げられると
+ * 利用者は設定を直しようがない**。実際に起きたことを言う。
+ *
+ * 純関数にしてあるのは、この文言こそが機能の本体だから
+ * （消えたこと自体は仕様であって、直せるのは説明のほうだけ）。
+ */
+function explainNoAudioForDiarization({ keepRecording, retention, repassDoneAt }) {
+  if (!keepRecording) {
+    return '録音の保持がオフなので、話者判別をかけられる音声がありません。\n\n'
+      + '設定 →「録音の保持」をオンにすると、次の録音から話者判別をかけられるようになります。';
+  }
+  if (repassDoneAt) {
+    // ここがいちばん多い。理由と、次はどうすればよいかをセットで言う
+    const when = new Date(repassDoneAt).toLocaleString('ja-JP');
+    const base = `この録音は ${when} に話者判別が済んでいて、音声はもう消えています。\n\n`;
+    return retention === 'repass'
+      ? base
+        + '設定「いつ消すか」が『話者判別が終わったら消す』なので、'
+        + '1回かけた時点で消しています。\n\n'
+        + 'もう一度かけられるようにしたいときは、次の録音の前に'
+        + '『タブを閉じたら消す』などに変えてください。\n'
+        + '（いまの文字起こしは Ctrl+Z で戻せます）'
+      : base + '文字起こしそのものは Ctrl+Z で戻せます。';
+  }
+  return 'このセッションには保管された録音がありません。\n\n'
+    + '保持の設定を入れる前に録音したもの、保持期間が過ぎたもの、'
+    + 'v0.21.0 より前に保管したものには、話者判別をかけられません。';
+}
+
+/**
+ * 発言1つを段落のテキストにする (v0.21.0)
+ *
+ * 純関数。**プレーンテキストの接頭辞**にしてあるのは、この文字起こしが
+ * コピー・Notion・HTML 保存と何通りにも出ていくため。見た目だけの装飾にすると
+ * 出口のどれかで話者が消える。
+ */
+function formatSpeakerTurn(turn) {
+  const who = (turn?.speaker || '').trim();
+  const text = (turn?.text || '').trim();
+  return who ? `${who}：${text}` : text;
+}
+
+/**
+ * Gemini が空を返したチャンクを、画面から消してよいか (v0.18.1 / v0.18.10)
+ *
+ * 無音位置で区切るようになった結果、最後の区切りのあとに「中身が沈黙だけ」の
+ * チャンクが必ず1本できるようになった。それを送ると Gemini は正しく空を返すが、
+ * 従来のコードはそれを「（音声不明瞭・再試行可）」として画面に残していた。
+ *
+ * **間違えると小声を黙って捨てることになる**ので、条件は厳しくする。
+ * 前提として次の2つは必須:
+ *   - Gemini が空（呼び出し側で確認済み）
+ *   - Web Speech も何も拾っていない（別エンジンでも聞こえていない）
+ *
+ * そのうえで、次のどちらかが言えるときに消す:
+ *   (a) 検出器がこのチャンク中に発話音量を一度も見ていない
+ *   (b) チャンクが SILENCE_ABS_MIN_MS より短い
+ *
+ * (b) は v0.18.10 で追加。実機 2026-08-31 20:36 で 1.0 秒の末尾チャンクに
+ * 「（音声不明瞭・再試行可）」が残った。(a) が成立していなかったため
+ * （幅12dB の物音を発話と判定していた。そちらは SILENCE_SPEECH_MIN_MS で対処済み）。
+ *
+ * (b) が安全な理由: cutChunk は SILENCE_ABS_MIN_MS より前に切らないので、
+ * これより短いチャンクは**録音停止時の末尾**しか存在しない。そのうえ両エンジンが
+ * 何も拾っていないので、消しても失う文字が無い。
+ * この表示は「再試行できます」と言うが、再試行はテキストを整形し直す仕組みなので、
+ * 中身が空のこれを再試行しても何も起きない。
+ *
+ * 検出器が無い場合 hadSpeech は undefined なので (a) は成立せず、(b) だけで判断する。
+ */
+function shouldDropEmptyChunk(provisionalText, edges) {
+  if (provisionalText) return false;
+  if (!edges) return false;
+  if (edges.hadSpeech === false) return true;
+  return Number.isFinite(edges.durationMs) && edges.durationMs < SILENCE_ABS_MIN_MS;
+}
 
 async function startGeminiAudioRecording() {
   if (!state.settings.apiKey) {
@@ -1533,6 +2740,28 @@ async function startGeminiAudioRecording() {
     return;
   }
 
+  // v0.18.4: 要求した制約が本当に効いているかは getSettings() でしか分からない。
+  // autoGainControl が true のままだと、静かになるとゲインが上がって暗騒音が
+  // 発話と同じ音量まで持ち上がり、無音が無音に見えなくなる
+  try {
+    const st = state.audioStream.getAudioTracks()[0]?.getSettings?.() || {};
+    diagLog.info(`マイク実設定 AGC=${st.autoGainControl} ノイズ抑制=${st.noiseSuppression} `
+      + `エコー除去=${st.echoCancellation} ${st.sampleRate || '?'}Hz`);
+  } catch (e) { /* getSettings 非対応でも録音は続ける */ }
+
+  // v0.18.0: 無音位置で切るための検出器。作れなかった場合は null になり、
+  // 従来どおりの固定間隔にフォールバックする（録音自体は止めない）。
+  // 前回の分が残っていたら必ず閉じる（AudioContext はページあたりの生成数に
+  // 上限があり、漏らすと数回の録音で作れなくなる）
+  if (state.silenceDetector) {
+    try { state.silenceDetector.close(); } catch {}
+    state.silenceDetector = null;
+  }
+  if (state.audioChunkTimer) { clearInterval(state.audioChunkTimer); state.audioChunkTimer = null; }
+  state.silenceDetector = state.settings.audioSilenceCut !== false
+    ? createSilenceDetector(state.audioStream)
+    : null;
+
   let mimeType = 'audio/webm;codecs=opus';
   if (!MediaRecorder.isTypeSupported(mimeType)) {
     mimeType = 'audio/webm';
@@ -1540,7 +2769,12 @@ async function startGeminiAudioRecording() {
   }
 
   state.audioChunks = [];
-  const recorder = new MediaRecorder(state.audioStream, mimeType ? { mimeType } : undefined);
+  // v0.19.0: 音声認識用途では既定(約128kbps)は過剰。下げると保管サイズも送信量も減る
+  const recOpts = {};
+  if (mimeType) recOpts.mimeType = mimeType;
+  const bitrate = Number(state.settings.audioBitrate);
+  if (Number.isFinite(bitrate) && bitrate >= 16000) recOpts.audioBitsPerSecond = bitrate;
+  const recorder = new MediaRecorder(state.audioStream, recOpts);
   state.mediaRecorder = recorder;
 
   recorder.ondataavailable = (e) => {
@@ -1553,20 +2787,39 @@ async function startGeminiAudioRecording() {
       const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
       // 設定の minChunkBytes 未満は無音と見なしてスキップ（デフォ400: 従来1200より感度↑）
       const minBytes = Number.isFinite(state.settings.audioMinChunkBytes) ? state.settings.audioMinChunkBytes : 400;
+      // v0.21.0: 保管はこの経路では行わない。ここに来るチャンクは1本ずつ
+      // 独立した webm で、繋いでも最初の1本しか読めないため
+      // （話者判別用は startArchiveRecorder が別に録っている）
       if (blob.size > minBytes) {
         // 発話あり（と推定） → 長無音タイマーをリセット
         resetLongSilenceTimer();
-        diagLog.info(`音声チャンク送信 ${blob.size}B (>${minBytes})`);
-        sendAudioChunkToGemini(blob);
+        const edges = state.pendingChunkEdges || { startsAtSilence: false, endsAtSilence: false };
+        // 長さも出す。強制区切りばかりになっていないかを実機ログで見分けるため
+        diagLog.info(`音声チャンク送信 ${blob.size}B (>${minBytes}) `
+          + `長さ${((edges.durationMs || 0) / 1000).toFixed(1)}秒 `
+          + `切り口 頭=${edges.startsAtSilence ? '無音' : '強制'} 尻=${edges.endsAtSilence ? '無音' : '強制'} `
+          + (edges.diag || ''));
+        // 未確定分はここで確定（次のチャンクに持ち越さない）。
+        // 送らなかったチャンクでは取り出さず、次まで溜め続ける
+        sendAudioChunkToGemini(blob, takeLiveFinals(), edges);
       } else {
         diagLog.info(`音声チャンクスキップ ${blob.size}B (<=${minBytes}, 無音判定)`);
       }
     }
+    // 停止時の最後のチャンク。ここまで来れば送り出し済み
+    state.finalChunkPending = false;
     // 録音継続中なら再スタート
     if (state.isRecording && state.mediaRecorder === recorder) {
       setTimeout(() => {
         if (state.isRecording && recorder.state === 'inactive') {
-          try { recorder.start(); } catch (e) { console.warn('restart failed', e); }
+          try {
+            recorder.start();
+            // 次チャンクの「頭」は、直前のチャンクの「尻」と同じ切り口になる。
+            // 無音で切ったなら頭も無音始まり、強制で切ったなら文の途中から始まる。
+            state.chunkStartedAtSilence = !!(state.pendingChunkEdges
+              && state.pendingChunkEdges.endsAtSilence);
+            state.chunkStartedAt = Date.now();
+          } catch (e) { console.warn('restart failed', e); }
         }
       }, 40);
     }
@@ -1587,18 +2840,74 @@ async function startGeminiAudioRecording() {
   state.isRecording = true;
   state.shouldAutoRestart = true;
   state.recordingSessionId = state.activeId; // BG録音用に固定
-  diagLog.info(`録音開始 (Gemini) session=${state.recordingSessionId?.slice(-6)} chunkSec=${state.settings.audioChunkSec || 12}`);
+  // v0.19.1: 保持のオン/オフをログに残す。これが無いと、保持まわりの
+  // 動作確認をログから判断できない（実機テストで実際に困った）
+  diagLog.info(state.settings.audioKeepRecording
+    ? `録音の保持: オン（${{
+        repass: '話者判別が終わったら消す', close: 'タブを閉じたら消す',
+        '1d': '1日', '7d': '7日', manual: '手動で消すまで',
+      }[state.settings.audioRetention] || state.settings.audioRetention}）`
+    : '録音の保持: オフ（端末に残しません）');
+  diagLog.info(`録音開始 (Gemini) session=${state.recordingSessionId?.slice(-6)} `
+    + `最短=${state.settings.audioChunkSec || 12}秒 `
+    + (state.settings.audioSilenceCut !== false && state.silenceDetector
+        ? `最長=${state.settings.audioChunkMaxSec || 20}秒 (無音位置で区切る)`
+        : '(固定間隔)'));
   setRecordingUI(true);
+  startContextExtractTimer();   // v0.16.1
+  startLiveDisplay();           // v0.17.0
   setStatus('listening', '録音中 (Gemini)');
   resetLongSilenceTimer();
 
-  // チャンク区切り
-  const intervalMs = Math.max(5, Math.min(60, state.settings.audioChunkSec || 12)) * 1000;
+  // チャンク区切り（v0.18.0: 無音位置で切る。判断は decideChunkCut）
+  const minMs = Math.max(5, Math.min(60, state.settings.audioChunkSec || 12)) * 1000;
+  const useSilenceCut = state.settings.audioSilenceCut !== false && !!state.silenceDetector;
+  // 最長は最短より短くできない。既定は 20 秒
+  const maxMs = useSilenceCut
+    ? Math.max(minMs + 2000, Math.min(90, state.settings.audioChunkMaxSec || 20) * 1000)
+    : minMs;
+
+  state.chunkStartedAt = Date.now();
+  state.chunkStartedAtSilence = true;   // 録音開始直後は必ず「頭から」
+
+  // v0.21.0: 話者判別用の録音は live とは別の録音機で録る。
+  // 保持がオフなら作らない（作らなければ消し忘れも起きない）
+  startArchiveRecorder(state.audioStream, recOpts);
+
+  const cutChunk = (endedAtSilence, source) => {
+    if (!state.mediaRecorder || state.mediaRecorder.state !== 'recording') return;
+    state.pendingChunkEdges = {
+      startsAtSilence: !!state.chunkStartedAtSilence,
+      endsAtSilence: !!endedAtSilence,
+      // 検出器が無いときは undefined のまま（＝判断材料なし）にしておく
+      hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
+      durationMs: Date.now() - state.chunkStartedAt,
+      diag: silenceDiag(source),
+    };
+    if (state.silenceDetector) state.silenceDetector.resetChunkSpeech();
+    state.mediaRecorder.stop(); // onstop で送信＋再スタート
+  };
+
   state.audioChunkTimer = setInterval(() => {
-    if (state.mediaRecorder && state.mediaRecorder.state === 'recording') {
-      state.mediaRecorder.stop(); // onstop で送信＋再スタート
+    if (!state.mediaRecorder || state.mediaRecorder.state !== 'recording') return;
+    const sig = useSilenceCut ? currentSilenceSignal() : { ms: 0, source: 'none' };
+    const cut = decideChunkCut({
+      elapsed: Date.now() - state.chunkStartedAt,
+      minMs, maxMs, useSilenceCut,
+      silentMs: sig.ms,
+    });
+    if (cut) cutChunk(cut === 'silence', sig.source);
+
+    // v0.21.0: 話者判別用の録音を約10分ごとに区切る。live の区切りとは
+    // 独立して判断する（目的が違う。shouldRollArchiveSegment の解説を参照）
+    if (state.archiveRecorder) {
+      const roll = shouldRollArchiveSegment({
+        elapsed: Date.now() - state.archiveSegStartedAt,
+        silentMs: sig.ms,
+      });
+      if (roll) rollArchiveSegment(roll);
     }
-  }, intervalMs);
+  }, SILENCE_POLL_MS);
 
   // 時間しきい値（60秒経過）だけでも発火できるよう、ウォッチドッグを常駐させる
   if (state.midChunkWatchdog) clearInterval(state.midChunkWatchdog);
@@ -1612,8 +2921,26 @@ function stopGeminiAudioRecording() {
   }
   const recorder = state.mediaRecorder;
   state.mediaRecorder = null; // onstop の再スタートを抑止
+  // 最後のチャンクの切り口。尻は検出器の実測に従う
+  // （利用者が文の途中で停止したなら「強制」＝続きを作らせない）
+  const stopSig = currentSilenceSignal();
+  state.pendingChunkEdges = {
+    startsAtSilence: !!state.chunkStartedAtSilence,
+    endsAtSilence: stopSig.ms >= SILENCE_HOLD_LATE_MS,
+    hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
+    durationMs: state.chunkStartedAt ? Date.now() - state.chunkStartedAt : 0,
+    diag: silenceDiag(stopSig.source),
+  };
   if (recorder && recorder.state !== 'inactive') {
-    try { recorder.stop(); } catch {}
+    state.finalChunkPending = true;   // onstop で下ろす
+    try { recorder.stop(); } catch { state.finalChunkPending = false; }
+  }
+  // v0.21.0: 保管側も止める。**ストリームを閉じる前に**止めること
+  // （トラックが先に止まると、最後のかけらが出てこない）
+  stopArchiveRecorder();
+  if (state.silenceDetector) {
+    try { state.silenceDetector.close(); } catch {}
+    state.silenceDetector = null;
   }
   if (state.audioStream) {
     state.audioStream.getTracks().forEach(t => t.stop());
@@ -1621,12 +2948,122 @@ function stopGeminiAudioRecording() {
   }
 }
 
-async function sendAudioChunkToGemini(blob) {
+/* ───────── Gemini モードのリアルタイム表示 (v0.17.0) ─────────
+ *
+ * Gemini モードは 12 秒ごとに一気に文字が出るので、喋っている間は画面が動かない。
+ * そこで Web Speech を「表示専用」で並走させ、確定までの間を埋める。
+ * （マイクを同時に使えることは mic-test.html で実機確認済み）
+ *
+ *   喋る → Web Speech の文字が「未確定」として出る
+ *        → チャンクの区切りでその文が段落に固定される（まだ未確定の見た目）
+ *        → Gemini の結果が返ったらその段落が置き換わる（確定）
+ *
+ * ここで作る recognition は **transcript に一切書かない**。
+ * buildRecognition() は appendRawChunk や字幕バッファと密結合しているので流用しない。
+ *
+ * チャンクの区切りで受け渡すので、Web Speech と Gemini の時間軸を突き合わせる必要がない。
+ * 「区切りまでに Web Speech が確定した分」がそのままそのチャンクの未確定表示になる。
+ */
+
+/** 表示専用の Web Speech を作る。文字起こしペインには書かない */
+function buildLiveDisplayRecognition() {
+  if (!SpeechRecognition) return null;
+  const rec = new SpeechRecognition();
+  rec.lang = 'ja-JP';
+  rec.continuous = true;
+  rec.interimResults = true;
+
+  rec.onresult = (event) => {
+    let interim = '';
+    let gotText = false;
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const r = event.results[i];
+      if (r.isFinal) { state.liveFinals = (state.liveFinals || '') + r[0].transcript; gotText = true; }
+      else { interim += r[0].transcript; if (r[0].transcript) gotText = true; }
+    }
+    // v0.18.4: 「いま声が出ているか」の記録。音量ではなく音声認識器の判断なので、
+    // マイク側のゲイン調整で音量が平坦化されていても効く
+    if (gotText) state.liveLastActivityAt = Date.now();
+    // BG録音中は共有の #interim に書かない（表示中の別タブに漏れるため）
+    if (isBgRecording()) els.interim.textContent = '';
+    else els.interim.textContent = (state.liveFinals || '') + interim;
+  };
+
+  rec.onerror = (e) => {
+    // 表示専用なので、失敗しても録音は続ける。Gemini 側が本体
+    if (e.error !== 'no-speech' && e.error !== 'aborted') {
+      console.warn('[live] Web Speech エラー（表示のみ・録音は継続）:', e.error);
+    }
+  };
+
+  rec.onend = () => {
+    // continuous でも切れることがあるので、録音中なら黙って再開する
+    if (state.isRecording && state.liveRecognition === rec) {
+      try { rec.start(); } catch (_) {}
+    }
+  };
+  return rec;
+}
+
+function startLiveDisplay() {
+  if (state.settings.geminiLiveDisplay === false) return;
+  stopLiveDisplay();
+  state.liveFinals = '';
+  const rec = buildLiveDisplayRecognition();
+  if (!rec) {
+    diagLog.info('リアルタイム表示: この環境は Web Speech 非対応のためスキップ');
+    return;
+  }
+  state.liveRecognition = rec;
+  // v0.18.11: ここで現在時刻を入れてはいけない。
+  // 入れると「録音開始からずっと無音」に見えて、まだ一言も喋っていない
+  // 3.0秒（最短チャンク長）の時点で区切ってしまう。実機 2026-08-31 20:42:
+  //   音声チャンク送信 長さ3.0秒 [幅5dB 判定不能 最長無音0ms 採用=webspeech]
+  // 表示はされないが Gemini への送信が1回まるまる無駄になる。
+  // 0 のままにしておけば currentSilenceSignal の webActive が false になり、
+  // Web Speech が実際に何か聞き取るまでこの手段は使われない
+  // （レベル検出器で「大きい側を知るまで判定しない」としたのと同じ原則）。
+  state.liveLastActivityAt = 0;
+  try {
+    rec.start();
+    diagLog.info('リアルタイム表示 (Web Speech 並走) を開始');
+  } catch (e) {
+    console.warn('[live] 開始できませんでした（表示のみ・録音は継続）:', e.message);
+    state.liveRecognition = null;
+  }
+}
+
+function stopLiveDisplay() {
+  const rec = state.liveRecognition;
+  state.liveRecognition = null;
+  if (rec) {
+    rec.onend = null;
+    try { rec.stop(); } catch (_) {}
+  }
+  els.interim.textContent = '';
+  // state.liveFinals はここでは消さない。
+  // 停止時に MediaRecorder が最後のチャンクを吐くので、その未確定表示に使う。
+  // 次の録音開始時に startLiveDisplay() が '' に戻すので溜まりっぱなしにはならない。
+}
+
+/** チャンクの区切りで、そこまでに確定した文を取り出して次に持ち越さない */
+function takeLiveFinals() {
+  const t = (state.liveFinals || '').trim();
+  state.liveFinals = '';
+  els.interim.textContent = '';
+  return t;
+}
+
+async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) {
   state.audioInFlightCount++;
   const container = getWriteContainer();
   const inBg = container !== els.confirmed;
   if (!inBg) hideEmptyHint();
-  const targetEl = createParagraphEl('（文字起こし中…）', 'paragraph refining');
+  // v0.17.0: Web Speech が聞き取った分があれば、それを未確定として置いておく。
+  // 無ければ従来どおり「（文字起こし中…）」
+  const targetEl = provisionalText
+    ? createParagraphEl(provisionalText, 'paragraph refining provisional')
+    : createParagraphEl('（文字起こし中…）', 'paragraph refining');
   container.appendChild(targetEl);
   if (inBg) syncBgToSession();
   else autoScroll();
@@ -1640,8 +3077,10 @@ async function sendAudioChunkToGemini(blob) {
   try {
     const text = await transcribeAudioWithGemini({
       apiKey: state.settings.apiKey,
+      sessionContext: getSessionContextForAi(),
       audioBlob: blob,
       contextHint: getContextForGemini(),
+      edges,
     });
     if (text && text.trim()) {
       // Geminiオーディオ経由の短チャンクは `.short-refined` とマーク。
@@ -1654,18 +3093,50 @@ async function sendAudioChunkToGemini(blob) {
       persist();
       // 遅延ミドル整形をチェック
       maybeConsolidateShortChunks();
+    } else if (shouldDropEmptyChunk(provisionalText, edges)) {
+      // 沈黙だけのチャンク。従来はこれが「（音声不明瞭・再試行可）」として
+      // 画面に残っていた（判断根拠は shouldDropEmptyChunk のコメント）
+      diagLog.info('沈黙のみのチャンクだったので表示しない');
+      targetEl.remove();
+      persist();
+    } else if (isDuplicateOfTail(provisionalText, confirmedTailText(targetEl))) {
+      // v0.18.8: Web Speech の確定が遅れて次のチャンクに付いた分。
+      // 同じ内容がすでに画面にあるので出さない（判断根拠は上のコメント）
+      diagLog.info('Web Speech の確定が直前の内容と重複していたので表示しない');
+      targetEl.remove();
+      persist();
     } else {
-      // 空テキストも「需再試行」として残す（消さない）
-      // 「音声不明瞭の可能性。後で整形ボタンから再試行できます」
+      // 空テキストも「要再試行」として残す（消さない）
+      // v0.17.0: Web Speech が聞き取っていたなら、その文字は捨てない。
+      // Gemini が空でも「聞こえていた内容」は残っているほうが役に立つ
       targetEl.className = 'paragraph needs-retry';
-      setParagraphContent(targetEl, '（音声不明瞭・再試行可）');
+      /* v0.19.3: 文言を正直にする。
+       *
+       * 実機で番組終わりのジングル（音楽）にこれが付いた。従来の
+       * 「（音声不明瞭・再試行可）」は2点で嘘をついていた:
+       *   - 「音声不明瞭」… 不明瞭なのではなく、そもそも言葉ではない
+       *   - 「再試行可」  … 再試行はテキストを整形し直す仕組みで、
+       *                     中身が空のこれを再試行しても何も起きない
+       *
+       * 音楽かどうかの判別は作らない。hadSpeech は「大きい音があったか」を
+       * 見ているだけなので鳴り続ける音楽は素通りするが、それを直すには
+       * 変調スペクトルのような別の特徴量が要る。ここで得られるものに対して
+       * 大きすぎる。**何秒ぶんが文字にならなかったか**が分かれば用は足りる。 */
+      const sec = ((edges && edges.durationMs) || 0) / 1000;
+      setParagraphContent(targetEl, provisionalText
+        ? provisionalText + '　[Gemini は聞き取れず・Web Speech の結果です]'
+        : `（この${sec ? sec.toFixed(1) + '秒' : '区間'}は言葉として聞き取れませんでした。音楽や物音の可能性があります）`);
       persist();
     }
   } catch (e) {
     // 通信エラー等も黙って needs-retry に落とす（赤バナーは出さない）
     console.warn('[audio transcribe] skipped (marked for retry):', e.message || e);
+    // v0.17.0: 失敗しても Web Speech の結果は残す。ここで捨てると、
+    // 聞き取れていたのに何も残らないという最悪の結果になる
     targetEl.className = 'paragraph needs-retry';
-    setParagraphContent(targetEl, '[文字起こし失敗: ' + (e.message || '').slice(0, 60) + ']');
+    setParagraphContent(targetEl, provisionalText
+      ? provisionalText + '　[Gemini 失敗・Web Speech の結果です: ' + (e.message || '').slice(0, 40) + ']'
+      : '[文字起こし失敗: ' + (e.message || '').slice(0, 60) + ']');
     persist();
   } finally {
     state.audioInFlightCount--;
@@ -2052,7 +3523,17 @@ function notionProgressOpen(title, { cancellable = true } = {}) {
   // 1件だけの保存は、区切りが来る前に終わるので中止できない。ボタンを出さない
   els.btnNotionCancel.hidden = !cancellable;
   els.notionAutoCloseRow.hidden = false;
-  els.notionAutoClose.checked = !!state.settings.notionAutoClose;
+  // v0.21.4: **毎回オフから始める。** 状態を覚えない。
+  //
+  // 以前は設定として記憶していたが、そうすると一度オンにした人は
+  // 以後ずっとオンのままで、**聞かれずにタブが消える**ことになる。
+  // 1件だけ送るときは送信が数秒で終わるので、消したくないと気づいてから
+  // チェックを外すまでの猶予がほとんど無い（やっさんの指摘）。
+  //
+  // ここをオフに戻しておけば、自動で閉じるのは
+  // 「**その回に自分でチェックを入れたとき**」だけになり、不意打ちが原理的に起きない。
+  // まとめて送るときも、1回チェックするだけで済む。
+  els.notionAutoClose.checked = false;
   els.btnNotionCancel.disabled = false;
   els.btnNotionCancel.textContent = '中止';
   els.btnNotionCloseTabs.hidden = true;
@@ -2091,12 +3572,61 @@ function requestNotionCancel() {
  * @param {Array} sessions
  * @returns {Promise<{results:Array, cancelled:boolean}>}
  */
+/**
+ * 未確定の文字起こしが残っていないか確かめる (v0.17.3)
+ *
+ * Notion 保存のあと「閉じる」を押すとタブは削除される。
+ * このとき Gemini の返事待ちのチャンクが残っていると、
+ * **保存されないまま消える＝永久に失われる**。
+ * やっさんの普段の使い方（保存して閉じる）だと現実に起きうるので、先に止める。
+ *
+ * @returns {Promise<boolean>} 続行してよければ true
+ */
+async function ensureTranscriptSettled() {
+  if (state.isRecording) {
+    return confirm(
+      '録音中です。\n'
+      + 'いま保存すると、これから確定する分は含まれません。\n\n'
+      + '録音を止めてから保存することをおすすめします。このまま続けますか？'
+    );
+  }
+
+  if (state.audioInFlightCount > 0) {
+    const n = state.audioInFlightCount;
+    const wait = confirm(
+      `まだ確定していない文字起こしが ${n} 件あります。\n`
+      + 'いま保存すると、その分は含まれません。\n\n'
+      + '「OK」= 確定を待ってから保存します（最大30秒）\n'
+      + '「キャンセル」= 保存をやめます'
+    );
+    if (!wait) return false;
+
+    const deadline = Date.now() + 30000;
+    while (state.audioInFlightCount > 0 && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+    if (state.audioInFlightCount > 0) {
+      return confirm(
+        `30秒待ちましたが、まだ ${state.audioInFlightCount} 件が確定していません。\n`
+        + 'このまま保存しますか？（その分は含まれません）'
+      );
+    }
+    // 待っている間に確定した分を取り込む
+    snapshotActiveToSession();
+    persistSessions();
+  }
+  return true;
+}
+
 async function uploadSessionsToNotion(sessions) {
   const targets = sessions.filter(sessionHasContentForNotion);
   if (targets.length === 0) {
     alert('Notion に保存する中身がありません。');
     return { results: [], cancelled: false };
   }
+
+  // 確定待ちを残したまま保存 → 閉じる、で内容が消えるのを防ぐ
+  if (!(await ensureTranscriptSettled())) return { results: [], cancelled: false };
 
   const summary = targets.length === 1
     ? `「${targets[0].title}」を1ノートとして保存します。`
@@ -2174,12 +3704,8 @@ function notionFinish({ results, cancelled, remaining }) {
   const ok = results.filter(r => r.ok);
   const ng = results.filter(r => !r.ok);
 
-  // チェックの状態は次回のために覚える
+  // v0.21.4: チェックの状態は**覚えない**（notionProgressOpen の解説を参照）
   const autoClose = !!els.notionAutoClose.checked;
-  if (autoClose !== state.settings.notionAutoClose) {
-    state.settings.notionAutoClose = autoClose;
-    saveSettings();
-  }
 
   els.btnNotionCancel.hidden = true;
   els.notionAutoCloseRow.hidden = true;
@@ -2483,11 +4009,28 @@ ${sections.join('\n')}
 `;
 }
 
-function saveSessionAsHtml() {
+/**
+ * 書き出し用に、画像を埋め込んだセッションのコピーを作る (v0.22.0)
+ *
+ * 元のセッションは触らない（保管庫を参照する形のまま残す）。
+ * ここで作るコピーだけが data: を持ち、**1枚で完結した HTML** になる。
+ */
+async function sessionsWithInlineImages(sessions) {
+  const out = [];
+  for (const s of sessions) {
+    if (!s.memo || s.memo.indexOf('data-img-id') < 0) { out.push(s); continue; }
+    out.push({ ...s, memo: await inlineImagesForExport(s.memo) });
+  }
+  return out;
+}
+
+async function saveSessionAsHtml() {
   snapshotActiveToSession();
   const session = getActiveSession();
   if (!session) return;
-  const html = buildExportHtml(session);
+  // v0.22.0: 画像は保管庫にあるので、書き出す直前に data: へ戻す
+  const [forExport] = await sessionsWithInlineImages([session]);
+  const html = buildExportHtml(forExport);
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
@@ -2501,14 +4044,15 @@ function saveSessionAsHtml() {
  * 全セッションを1つのHTMLファイルに。各セッションは <details> 折り畳みで
  * 独立して展開できる。pane はユーザー設定の並び順を尊重。
  */
-function buildAllSessionsExportHtml() {
+function buildAllSessionsExportHtml(sessions) {
+  const list = sessions || state.sessions;
   const fmt = (ts) => {
     const d = new Date(ts);
     const pad = n => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
 
-  const sessionsHtml = state.sessions.map((session, idx) => {
+  const sessionsHtml = list.map((session, idx) => {
     const sections = [];
     for (const paneId of state.settings.paneOrder) {
       const meta = PANE_META[paneId];
@@ -2549,19 +4093,19 @@ function buildAllSessionsExportHtml() {
   }).join('\n\n');
 
   // TOCリンク
-  const tocLinks = state.sessions.map((s, idx) =>
+  const tocLinks = list.map((s, idx) =>
     `<li><a href="#sess-${idx + 1}">${idx + 1}. ${escapeHtml(s.title || '(無題)')}</a></li>`
   ).join('\n      ');
 
   const now = new Date();
   const exportedAt = fmt(now.getTime());
-  const pageTitle = `dictation — 全セッション (${state.sessions.length}件) ${exportedAt}`;
+  const pageTitle = `dictation — 全セッション (${list.length}件) ${exportedAt}`;
 
   // 再インポート用の JSON データを末尾 <script> に埋め込む（単体版と同じ方式の複数版）
   const multiData = {
     format: 'dictation-multi/v1',
     exportedAt: now.toISOString(),
-    sessions: state.sessions.map(s => ({
+    sessions: list.map(s => ({
       title: s.title,
       aiTitle: s.aiTitle || null,
       titleIsManual: !!s.titleIsManual,
@@ -2724,7 +4268,7 @@ footer.doc-foot { margin-top: 36px; text-align: center; font-size: 11px; color: 
 <div class="wrap">
   <header class="doc-head">
     <span class="brand">dictation</span>
-    <h1 class="doc-title">全セッション一覧 (${state.sessions.length}件)</h1>
+    <h1 class="doc-title">全セッション一覧 (${list.length}件)</h1>
     <div class="doc-meta">書き出し: ${exportedAt}</div>
     <div class="doc-controls">
       <button type="button" onclick="document.querySelectorAll('details.sess').forEach(d => d.open = true)">すべて展開</button>
@@ -2732,7 +4276,7 @@ footer.doc-foot { margin-top: 36px; text-align: center; font-size: 11px; color: 
     </div>
   </header>
   <details class="toc" open>
-    <summary>目次 (${state.sessions.length}件)</summary>
+    <summary>目次 (${list.length}件)</summary>
     <ol>
       ${tocLinks}
     </ol>
@@ -2748,13 +4292,13 @@ footer.doc-foot { margin-top: 36px; text-align: center; font-size: 11px; color: 
 `;
 }
 
-function saveAllSessionsAsHtml() {
+async function saveAllSessionsAsHtml() {
   snapshotActiveToSession();
   if (state.sessions.length === 0) {
     alert('書き出すセッションがありません');
     return;
   }
-  const html = buildAllSessionsExportHtml();
+  const html = buildAllSessionsExportHtml(await sessionsWithInlineImages(state.sessions));
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
@@ -4210,6 +5754,403 @@ function enableDragSort(list, { itemSelector, idAttr = 'pane-id', onReorder }) {
   });
 }
 
+/* ───────── 録音の文脈（語彙ヒント） v0.16.0 ─────────
+ *
+ * 講義や会議は分野の語彙がほぼ決まっている。同音異義語と固有名詞は音だけでは
+ * 決められないので、先に語を渡して選ばせる。
+ * 実測例: Web Speech が「Gemini」を「ジムニー」と書いた。これは語彙で防げる誤り。
+ *
+ * 渡す先は音声文字起こし（transcribeAudioWithGemini）と整形（refineWithGemini）の両方。
+ * Web Speech モードでも整形の段で誤変換を直せることがあるため。
+ */
+
+/** 「改行/カンマ/読点」区切りの文字列 → 語の配列 */
+function splitTerms(text) {
+  return String(text || '').split(/[\n,、]/).map(t => t.trim()).filter(Boolean);
+}
+
+/**
+ * Gemini に渡す文脈。手入力と自動抽出をまとめる。
+ * 中身が空なら undefined を返し、プロンプトに何も足さない（従来と同じ挙動になる）。
+ *
+ * 手入力を先に並べる。やっさんが書いた語が最終権限で、
+ * 自動抽出はその補いという位置づけ（v0.16.1）。
+ */
+/* ───────── 語彙辞書のフッター (v0.20.0) ─────────
+ *
+ * 「いま何の語彙が効いているか」が常に見えていないと、間違ったまま録り続けてしまう。
+ * 右下の拡大ルーラーと対になる左下のピルに出す。
+ *
+ * 辞書を選んでも**自動辞書は消さない**。20分喋ったあとの自動辞書は
+ * 実際に話された語からできているので価値が高く、捨てるのは損。
+ * 「いまの自動辞書 ＋ 選んだ辞書」で合成する（mergeTermSources）。
+ */
+
+/** いま適用中の辞書 id（プリセット・自作の混在） */
+function getActiveDictIds() {
+  return getActiveSession()?.context?.dictIds || [];
+}
+
+/** フッターのピルを描き直す */
+function renderDictBar() {
+  if (!els.dictLabel) return;
+  const s = getActiveSession();
+  const ids = getActiveDictIds();
+  const names = ids
+    .map(id => findTermDict(id, state.settings.termDicts))
+    .filter(Boolean)
+    .map(d => d.name);
+  const manualCount = splitTerms(s?.context?.terms).length;
+  const autoCount = (s?.autoContext?.terms || []).length;
+
+  els.dictLabel.textContent = describeTermState({ dictNames: names, manualCount, autoCount });
+  if (els.dictBar) {
+    els.dictBar.classList.toggle('has-dict', names.length > 0 || manualCount > 0);
+  }
+}
+
+/** メニューの中身を描き直す */
+function renderDictMenu() {
+  if (!els.dictMenuList) return;
+  const ids = getActiveDictIds();
+  const user = state.settings.termDicts || [];
+  els.dictMenuList.innerHTML = '';
+
+  const add = (d, isUser) => {
+    const on = ids.includes(d.id);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dict-item' + (on ? ' on' : '');
+    btn.innerHTML = `<span class="dict-check">${on ? '✓' : ''}</span>`
+      + `<span class="dict-item-body">`
+      + `<span class="dict-item-name"></span>`
+      + `<span class="dict-item-sub"></span></span>`;
+    btn.querySelector('.dict-item-name').textContent = d.name;
+    btn.querySelector('.dict-item-sub').textContent =
+      `${(d.terms || []).length}語${d.hint ? ' ・ ' + d.hint : ''}${isUser ? ' ・ 自作' : ''}`;
+    btn.addEventListener('click', () => toggleDict(d.id));
+    els.dictMenuList.appendChild(btn);
+  };
+
+  for (const d of TERM_PRESETS) add(d, false);
+  for (const d of user) add(d, true);
+
+  const autoCount = (getActiveSession()?.autoContext?.terms || []).length;
+  if (els.dictMenuAuto) {
+    els.dictMenuAuto.textContent = autoCount
+      ? `自動辞書: ${autoCount}語（録音中に育ちます）`
+      : '自動辞書: まだありません';
+  }
+}
+
+/** 辞書のオン/オフ。録音中でも即座に効く */
+function toggleDict(id) {
+  const s = getActiveSession();
+  if (!s) return;
+  if (!s.context) s.context = {};
+  const ids = (s.context.dictIds || []).slice();
+  const i = ids.indexOf(id);
+  if (i >= 0) ids.splice(i, 1); else ids.push(id);
+  s.context.dictIds = ids;
+  persistSessions();
+  renderDictBar();
+  renderDictMenu();
+  const d = findTermDict(id, state.settings.termDicts);
+  diagLog.info(`辞書を${i >= 0 ? '外した' : '適用した'}: ${d ? d.name : id}`);
+}
+
+function openDictMenu() {
+  if (!els.dictMenu) return;
+  renderDictMenu();
+  els.dictMenu.hidden = false;
+}
+function closeDictMenu() {
+  if (els.dictMenu) els.dictMenu.hidden = true;
+}
+
+/**
+ * いまの自動辞書を、名前を付けて自作辞書として保存する (v0.20.0)
+ *
+ * 自動で育った語をその場限りで捨てず、次の録音でも使えるようにする。
+ * 手入力の語も一緒に入れる（どちらも「この分野で出る語」なので）。
+ */
+function saveAutoAsDict() {
+  const s = getActiveSession();
+  if (!s) return;
+  const terms = mergeTermSources({
+    manual: splitTerms(s.context?.terms),
+    auto: s.autoContext?.terms || [],
+  }).terms;
+  if (!terms.length) {
+    alert('保存できる語がまだありません。\n録音するか「よく出る語」に書き足してください。');
+    return;
+  }
+  const suggested = (s.autoContext?.topicPath || [])[0] || s.context?.field || s.title || '新しい辞書';
+  const name = prompt(`辞書の名前（${terms.length}語を保存します）`, String(suggested).slice(0, 20));
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+
+  const dicts = state.settings.termDicts || (state.settings.termDicts = []);
+  const existing = dicts.find(d => d.name === trimmed);
+  if (existing) {
+    if (!confirm(`「${trimmed}」は既にあります。語を足しますか？\n（既存の語は消えません）`)) return;
+    // 既存に足す。重複は mergeTermSources が落とす
+    existing.terms = mergeTermSources({ manual: existing.terms, dict: terms }).terms;
+  } else {
+    dicts.push({ id: 'user:' + Date.now().toString(36), name: trimmed, terms });
+  }
+  saveSettings();
+  // 保存した辞書をこのタブに適用しておく（保存したのに効かない、を避ける）
+  const saved = dicts.find(d => d.name === trimmed);
+  if (saved && !(s.context.dictIds || []).includes(saved.id)) {
+    s.context.dictIds = (s.context.dictIds || []).concat(saved.id);
+    persistSessions();
+  }
+  renderDictBar();
+  renderDictMenu();
+  renderContextDicts();
+  diagLog.info(`辞書「${trimmed}」を保存しました（${terms.length}語）`);
+}
+
+/** 文脈モーダル内の辞書一覧（管理用） */
+function renderContextDicts() {
+  const box = document.getElementById('context-dict-list');
+  if (!box) return;
+  const ids = getActiveDictIds();
+  const user = state.settings.termDicts || [];
+  box.innerHTML = '';
+  const rows = TERM_PRESETS.map(d => [d, false]).concat(user.map(d => [d, true]));
+  for (const [d, isUser] of rows) {
+    const row = document.createElement('div');
+    row.className = 'context-dict-row';
+    const on = ids.includes(d.id);
+    row.innerHTML = `<label class="context-dict-name"><input type="checkbox" ${on ? 'checked' : ''}> `
+      + `<span></span></label>`
+      + `<span class="field-hint context-dict-count"></span>`;
+    row.querySelector('span:not(.field-hint)').textContent = d.name + (isUser ? '（自作）' : '');
+    row.querySelector('.context-dict-count').textContent = `${(d.terms || []).length}語`;
+    row.querySelector('input').addEventListener('change', () => {
+      toggleDict(d.id);
+      renderContextDicts();
+    });
+    if (isUser) {
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'pane-btn';
+      del.textContent = '削除';
+      del.addEventListener('click', () => {
+        if (!confirm(`自作辞書「${d.name}」を削除します。よろしいですか？`)) return;
+        state.settings.termDicts = user.filter(x => x.id !== d.id);
+        saveSettings();
+        renderContextDicts();
+        renderDictBar();
+      });
+      row.appendChild(del);
+    }
+    box.appendChild(row);
+  }
+}
+
+function getSessionContextForAi() {
+  const s = getActiveSession();
+  const c = s?.context;
+  if (!c) return undefined;
+
+  // v0.20.0: 手入力 → 辞書 → 自動 の順で合成する（優先順位は mergeTermSources 参照）
+  const merged = mergeTermSources({
+    manual: splitTerms(c.terms),
+    dict: collectDictTerms(c.dictIds, state.settings.termDicts),
+    auto: s.autoContext?.terms || [],
+  });
+  const terms = merged.terms;
+
+  const ctx = {
+    field: (c.field || '').trim(),
+    speakers: (c.speakers || '').trim(),
+    terms: terms.join('、'),
+    topicPath: s.autoContext?.topicPath || [],
+    flow: s.autoContext?.flow || '',
+  };
+  const has = ctx.field || ctx.speakers || ctx.terms || ctx.topicPath.length || ctx.flow;
+  return has ? ctx : undefined;
+}
+
+/* ───────── 文脈の自動抽出 (v0.16.1) ─────────
+ *
+ * メモが空でも文脈を効かせるため、記録が溜まってきたら語彙と議題を拾い直す。
+ * 録音中に一定間隔で走らせ、停止時にも1回走らせる。
+ */
+
+const CONTEXT_EXTRACT_INTERVAL_MS = 120 * 1000;   // 2分ごと
+let contextExtractInFlight = false;
+
+/** メモの見出し・箇条書きだけを取り出す（抽出の手がかりとして最優先で渡す） */
+function getMemoOutlineText() {
+  const lines = [];
+  els.memo.querySelectorAll('h1, h2, h3, li, .task-item').forEach(el => {
+    const t = (el.innerText || '').trim();
+    if (t && t.length <= 60) lines.push(t);
+  });
+  return lines.slice(0, 40).join('\n');
+}
+
+/**
+ * 記録から語彙と議題を拾って session.autoContext を更新する。
+ * @param {object} [opts]
+ * @param {boolean} [opts.force] - 間隔を無視して実行（録音停止時など）
+ */
+async function refreshAutoContext(opts = {}) {
+  if (contextExtractInFlight) return;
+  if (!state.settings.aiEnabled || !state.settings.apiKey) return;
+
+  const session = getActiveSession();
+  if (!session) return;
+  const auto = session.autoContext || (session.autoContext = { terms: [], topicPath: [], flow: '', updatedAt: 0 });
+  if (!opts.force && Date.now() - (auto.updatedAt || 0) < CONTEXT_EXTRACT_INTERVAL_MS) return;
+
+  // 末尾側だけ渡す。全文を毎回送ると長くなるうえ、いま何の話かは直近で決まる
+  const full = getConfirmedText();
+  if (!full || full.length < 200) return;
+  const tail = full.slice(-4000);
+
+  contextExtractInFlight = true;
+  try {
+    const out = await extractContextWithGemini({
+      apiKey: state.settings.apiKey,
+      transcript: tail,
+      memoOutline: getMemoOutlineText(),
+      knownTerms: splitTerms(session.context?.terms),
+    });
+    // 非同期の間にセッションが閉じられている可能性がある
+    const still = state.sessions.find(x => x.id === session.id);
+    if (!still) return;
+    still.autoContext = {
+      terms: out.terms,
+      topicPath: out.topicPath,
+      flow: out.flow,
+      updatedAt: Date.now(),
+    };
+    persistSessions();
+    diagLog.info(`文脈を更新: 語${out.terms.length}件 / 議題「${out.topicPath.join(' > ') || '—'}」`);
+    renderDictBar();   // v0.20.0: 自動辞書が育ったらフッターにも出す
+    // 文脈モーダルを開いていたら表示も更新する
+    if (els.contextModal && !els.contextModal.classList.contains('hidden')) renderAutoContext(still);
+  } catch (e) {
+    console.warn('[context] 自動抽出に失敗:', e.message);
+  } finally {
+    contextExtractInFlight = false;
+  }
+}
+
+/** 文脈モーダルの「自動で拾った内容」欄を描く */
+function renderAutoContext(session) {
+  if (!els.autoContextBox) return;
+  const a = session?.autoContext;
+  const hasAny = a && (a.terms?.length || a.topicPath?.length || a.flow);
+  if (!hasAny) {
+    els.autoContextBox.textContent = '（まだありません。録音が2〜3分進むと自動で埋まります）';
+    els.btnContextAdoptAuto.disabled = true;
+    return;
+  }
+  const lines = [];
+  if (a.topicPath?.length) lines.push(`いまの議題: ${a.topicPath.join(' > ')}`);
+  if (a.flow) lines.push(`流れ: ${a.flow}`);
+  if (a.terms?.length) lines.push(`拾った語: ${a.terms.join('、')}`);
+  els.autoContextBox.textContent = lines.join('\n');
+  els.btnContextAdoptAuto.disabled = !a.terms?.length;
+}
+
+/** 自動で拾った語を、手入力の欄に移す（以後そちらが最終権限になる） */
+function adoptAutoTerms() {
+  const s = getActiveSession();
+  const auto = s?.autoContext?.terms || [];
+  if (!auto.length) return;
+  const existing = splitTerms(els.inputContextTerms.value);
+  const added = auto.filter(t => !existing.includes(t));
+  els.inputContextTerms.value = existing.concat(added).join('\n');
+  els.contextMemoResult.textContent = added.length
+    ? `自動で拾った語から ${added.length}件を追加しました。ここで直せます`
+    : 'すでにすべて登録済みでした';
+  els.contextMemoResult.className = 'field-hint notion-test-result ' + (added.length ? 'is-ok' : 'is-note');
+}
+
+function openContextModal() {
+  const s = getActiveSession();
+  if (!s) return;
+  if (!s.context) s.context = { field: '', speakers: '', terms: '' };
+  els.inputContextField.value = s.context.field || '';
+  els.inputContextSpeakers.value = s.context.speakers || '';
+  els.inputContextTerms.value = s.context.terms || '';
+  els.inputContextDefault.checked = false;
+  els.contextMemoResult.textContent = '';
+  els.contextMemoResult.className = 'field-hint';
+  renderAutoContext(s);
+  renderContextDicts();          // v0.20.0
+  els.contextModal.classList.remove('hidden');
+  els.inputContextField.focus();
+}
+
+function closeContextModal() {
+  els.contextModal.classList.add('hidden');
+  renderDictBar();   // v0.20.0: 手入力を直したらフッターの表示も追随させる
+}
+
+function saveContextModal() {
+  const s = getActiveSession();
+  if (!s) return closeContextModal();
+  s.context = {
+    field: els.inputContextField.value.trim(),
+    speakers: els.inputContextSpeakers.value.trim(),
+    terms: els.inputContextTerms.value.trim(),
+  };
+  if (els.inputContextDefault.checked) {
+    state.settings.defaultContextField = s.context.field;
+    state.settings.defaultContextSpeakers = s.context.speakers;
+    state.settings.defaultContextTerms = s.context.terms;
+    saveSettings();
+  }
+  persistSessions();
+  closeContextModal();
+}
+
+/**
+ * メモペインから語彙を拾う。
+ * 見出し・箇条書き・チェック項目の「行」を候補にして、既存の語と重複しないものを足す。
+ * 文章まるごとではなく短い語だけを拾う（長文を語彙として渡しても効かないうえ、
+ * 台本として読まれる危険が増すため）。
+ */
+function importContextFromMemo() {
+  const lines = [];
+  els.memo.querySelectorAll('h1, h2, h3, li, .task-item').forEach(el => {
+    const t = (el.innerText || '').trim();
+    if (t) lines.push(t);
+  });
+
+  // 1行が長いものは語彙ではなく文なので除く。記号だけの行も捨てる
+  const picked = [];
+  for (const raw of lines) {
+    const t = raw.replace(/\s+/g, ' ').trim();
+    if (!t || t.length > 30) continue;
+    if (!/[\u3040-\u30ff\u4e00-\u9fff a-zA-Z0-9]/.test(t)) continue;
+    if (!picked.includes(t)) picked.push(t);
+  }
+
+  if (picked.length === 0) {
+    els.contextMemoResult.textContent = 'メモに拾える見出し・箇条書きがありませんでした';
+    els.contextMemoResult.className = 'field-hint notion-test-result is-ng';
+    return;
+  }
+
+  const existing = els.inputContextTerms.value.split(/[\n,、]/).map(x => x.trim()).filter(Boolean);
+  const added = picked.filter(t => !existing.includes(t));
+  els.inputContextTerms.value = existing.concat(added).join('\n');
+  els.contextMemoResult.textContent = added.length
+    ? `${added.length}件を追加しました（重複は除いています）`
+    : 'メモの内容はすべて登録済みでした';
+  els.contextMemoResult.className = 'field-hint notion-test-result ' + (added.length ? 'is-ok' : 'is-note');
+}
+
 /* ───────── Notion 連携の設定 UI (v0.14.1) ───────── */
 
 /** 接続テスト欄の色を design-system の変数で塗り分ける（style.css の .notion-test-result） */
@@ -4295,6 +6236,13 @@ function openSettings() {
     els.modeWebSpeech.checked = true;
   }
   els.inputChunkSec.value = state.settings.audioChunkSec || 12;
+  if (els.inputSilenceCut) els.inputSilenceCut.checked = state.settings.audioSilenceCut !== false;
+  if (els.inputChunkMaxSec) els.inputChunkMaxSec.value = state.settings.audioChunkMaxSec || 20;
+  if (els.inputAudioBitrate) els.inputAudioBitrate.value = String(state.settings.audioBitrate || 64000);
+  if (els.inputKeepRecording) els.inputKeepRecording.checked = !!state.settings.audioKeepRecording;
+  if (els.inputAudioRetention) els.inputAudioRetention.value = state.settings.audioRetention || 'close';
+  refreshAudioUsage();
+  if (els.inputGeminiLiveDisplay) els.inputGeminiLiveDisplay.checked = state.settings.geminiLiveDisplay !== false;
   if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
   if (els.inputWsCommitSec) {
     // v0.13.29: localStorage に古い値（3/4/5 等、v0.13.26 で削除した選択肢）が
@@ -4356,6 +6304,31 @@ function saveSettingsFromForm() {
   state.settings.inputMode = els.modeGemini.checked ? 'gemini-audio' : 'web-speech';
   state.settings.audioDeviceId = els.inputAudioDevice ? els.inputAudioDevice.value : '';
   state.settings.audioChunkSec = Math.max(5, Math.min(60, Number(els.inputChunkSec.value) || 12));
+  if (els.inputSilenceCut) state.settings.audioSilenceCut = els.inputSilenceCut.checked;
+  if (els.inputAudioBitrate) {
+    const br = Number(els.inputAudioBitrate.value);
+    state.settings.audioBitrate = Number.isFinite(br) && br >= 16000 ? br : 64000;
+  }
+  if (els.inputKeepRecording) {
+    const wasOn = !!state.settings.audioKeepRecording;
+    state.settings.audioKeepRecording = els.inputKeepRecording.checked;
+    // オフに切り替えたら、残っている分をその場で消す（次の起動を待たない）
+    if (wasOn && !state.settings.audioKeepRecording) {
+      audioStoreClearAll()
+        .then(n => { if (n > 0) diagLog.info(`保持をオフにしたので音声 ${n} 件を消しました`); })
+        .catch(() => {})
+        .finally(refreshAudioUsage);
+    }
+  }
+  if (els.inputAudioRetention) state.settings.audioRetention = els.inputAudioRetention.value || 'close';
+  if (els.inputChunkMaxSec) {
+    // 最長は最短より短くできない（短いと無音を探す余地が消える）
+    state.settings.audioChunkMaxSec = Math.max(
+      state.settings.audioChunkSec + 2,
+      Math.min(90, Number(els.inputChunkMaxSec.value) || 20),
+    );
+  }
+  if (els.inputGeminiLiveDisplay) state.settings.geminiLiveDisplay = els.inputGeminiLiveDisplay.checked;
   if (els.inputMinChunkBytes) state.settings.audioMinChunkBytes = Math.max(100, Math.min(5000, Number(els.inputMinChunkBytes.value) || 400));
   if (els.inputWsCommitSec) {
     const newSec = Math.max(0, Math.min(20, Number(els.inputWsCommitSec.value) || 0));
@@ -4400,13 +6373,13 @@ function switchInnerPane(paneId) {
   const wasChat = document.body.classList.contains('chat-active');
   const willBeChat = paneId === 'pane-chat';
   if (wasChat !== willBeChat) {
-    const zb = els.zoomBar;
-    if (zb) {
-      zb.classList.add('fading');
+    const bars = [els.zoomBar, els.dictBar].filter(Boolean);
+    if (bars.length) {
+      bars.forEach(b => b.classList.add('fading'));
       // 0.5s フェード: 480ms で透明、位置切替、480ms でフェードイン
       setTimeout(() => {
         document.body.classList.toggle('chat-active', willBeChat);
-        zb.classList.remove('fading');
+        bars.forEach(b => b.classList.remove('fading'));
       }, 480);
     } else {
       document.body.classList.toggle('chat-active', willBeChat);
@@ -4469,6 +6442,11 @@ function initSessions() {
     if (s.summary === undefined) s.summary = '';
     if (s.transcript === undefined) s.transcript = '';
     if (!Array.isArray(s.chat)) s.chat = [];
+    // v0.16.0: 文脈が無い古いセッションに空の器を足す
+    if (!s.context || typeof s.context !== 'object') s.context = { field: '', speakers: '', terms: '' };
+    if (!s.autoContext || typeof s.autoContext !== 'object') {
+      s.autoContext = { terms: [], topicPath: [], flow: '', updatedAt: 0 };
+    }
   }
   state.activeId = localStorage.getItem(ACTIVE_TAB_KEY);
   if (!Array.isArray(state.sessions) || state.sessions.length === 0) {
@@ -4480,12 +6458,33 @@ function initSessions() {
   }
 }
 
+/**
+ * セッションを localStorage に保存する
+ *
+ * v0.21.2: 失敗を黙らなくした。ここは全セッションを1つのキーに入れているので、
+ * 容量超過で落ちると**その回の変更が丸ごと消える**。console にしか出していないと、
+ * 利用者は保存できていないことに気づかないまま書き続けることになる。
+ * （話者判別の結果を残すようにして保存量が増えたので、なおさら黙っていられない）
+ */
+let _persistFailedAt = 0;
 function persistSessions() {
   try {
     localStorage.setItem(SESSIONS_KEY, JSON.stringify(state.sessions));
     if (state.activeId) localStorage.setItem(ACTIVE_TAB_KEY, state.activeId);
+    _persistFailedAt = 0;
   } catch (e) {
     console.error('persistSessions failed', e);
+    // 保存のたびに出すとうるさいので、1分に1回だけ知らせる
+    const now = Date.now();
+    if (now - _persistFailedAt > 60000) {
+      _persistFailedAt = now;
+      const quota = e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || ''));
+      const msg = quota
+        ? '保存領域がいっぱいで、いまの内容を保存できませんでした。古いタブを削除するか、HTMLで保存してください'
+        : '内容を保存できませんでした: ' + (e.message || e);
+      diagLog.info(msg);
+      setStatus('error', quota ? '保存領域がいっぱいです' : '保存に失敗しました');
+    }
   }
 }
 
@@ -4506,6 +6505,17 @@ function createSession({ activate = true, title = null, skipSave = false } = {})
     memo: '',
     summary: '',
     chat: [],
+    // v0.16.0: 文字起こしの語彙ヒント。既定値を引き継いで開始する
+    context: {
+      field: state.settings.defaultContextField || '',
+      speakers: state.settings.defaultContextSpeakers || '',
+      terms: state.settings.defaultContextTerms || '',
+      // v0.20.0: 適用中の辞書。直前のタブで使っていたものを引き継ぐ
+      // （同じ分野の録音が続くのが普通なので、毎回選び直させない）
+      dictIds: (getActiveSession()?.context?.dictIds || []).slice(),
+    },
+    // v0.16.1: 記録から自動で拾った語彙と議題。手入力とは別に持ち、手入力を優先する
+    autoContext: { terms: [], topicPath: [], flow: '', updatedAt: 0 },
   };
   state.sessions.push(session);
   if (activate) state.activeId = id;
@@ -4529,7 +6539,9 @@ function snapshotActiveToSession(opts = {}) {
   const s = getActiveSession();
   if (!s) return;
   const nextTranscript = els.confirmed.innerHTML;
-  const nextMemo       = els.memo.innerHTML;
+  // v0.22.0: 貼った画像の src は blob: の URL で、**保存しても次回は死んでいる**。
+  // id だけ残し、表示のたびに差し込み直す（image-store.js の冒頭を参照）
+  const nextMemo       = stripManagedImageSrc(els.memo.innerHTML);
   const nextSummary    = els.summary.innerHTML;
   // v0.15.1: Notion に上げたあとで中身が変わったら、アップ済み印を外す。
   // 「印は付いているが最新版は上がっていない」状態を作らないため。
@@ -4562,11 +6574,468 @@ function migrateMemoTaskItems() {
   });
 }
 
+/* ───────── メモに貼った画像 (v0.22.0) ─────────
+ *
+ * メモは画像を入れるメニューを**あえて置いていない**が、contenteditable の
+ * 標準機能で Ctrl+V の画像が貼れる。これを裏技として残す。
+ *
+ * 仕組みと、なぜこの形にしたのかは image-store.js の冒頭に書いた。
+ * ここは画面側だけ:
+ *
+ *   貼る   … 縮小して IndexedDB に入れ、<img data-img-id> を差し込む
+ *   出す   … 保存された HTML には src が無いので、表示のたびに blob: を差し込む
+ *   しまう … 保存の直前に src を外す（blob: の URL を保存しない）
+ */
+
+/** この画面で作った blob: の URL。タブを切り替えるときに解放する */
+let _memoObjectUrls = [];
+
+function releaseMemoObjectUrls() {
+  for (const u of _memoObjectUrls) { try { URL.revokeObjectURL(u); } catch {} }
+  _memoObjectUrls = [];
+}
+
+/**
+ * 保存された HTML の <img data-img-id> に、実物を差し込む (v0.22.0)
+ *
+ * 見つからない画像は**消さずに、消えていることが分かる形にする**。
+ * 黙って空の枠を残すと「読み込み中なのか、失われたのか」が分からない。
+ */
+async function hydrateMemoImages(root) {
+  const imgs = Array.from((root || document).querySelectorAll('img[data-img-id]'));
+  if (!imgs.length) return;
+  for (const img of imgs) {
+    if (img.getAttribute('src')) continue;   // すでに入っている
+    const id = img.dataset.imgId;
+    try {
+      const blob = await imageStoreGet(id);
+      if (!blob) { markMissingImage(img); continue; }
+      const url = URL.createObjectURL(blob);
+      _memoObjectUrls.push(url);
+      img.src = url;
+      img.classList.remove('img-missing');
+    } catch (e) {
+      markMissingImage(img);
+    }
+  }
+}
+
+function markMissingImage(img) {
+  img.classList.add('img-missing');
+  img.alt = '（画像が見つかりません）';
+  // 1x1 の透明 GIF。src を空にすると Chrome が壊れた画像アイコンを出す
+  img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+}
+
+/**
+ * 画像を1枚、保管して <img> にする (v0.22.0)
+ *
+ * **失敗しても例外を投げない。** 貼り付け操作の途中で落ちると、
+ * その時点で書いていたものごと巻き添えになる。
+ *
+ * @returns {Promise<HTMLImageElement|null>} 作れなければ null
+ */
+async function storePastedImage(blob) {
+  try {
+    if (!blob || !blob.size) return null;
+    if (blob.size > IMAGE_MAX_INPUT_BYTES) {
+      setStatus('error', `画像が大きすぎます（${formatBytes(blob.size)}）`);
+      diagLog.info(`メモ: 画像が大きすぎるので貼りませんでした ${formatBytes(blob.size)}`);
+      return null;
+    }
+    const r = await downscaleImage(blob);
+    if (r.blob.size > IMAGE_MAX_STORED_BYTES) {
+      setStatus('error', `画像が大きすぎます（縮小しても ${formatBytes(r.blob.size)}）`);
+      return null;
+    }
+    const id = newImageId();
+    await imageStorePut(id, r.blob);
+    const img = document.createElement('img');
+    img.dataset.imgId = id;
+    img.className = 'memo-img';
+    const url = URL.createObjectURL(r.blob);
+    _memoObjectUrls.push(url);
+    img.src = url;
+    diagLog.info(`メモに画像を貼りました ${formatBytes(r.from)}`
+      + (r.scaled ? ` → ${formatBytes(r.to)}（縮小）` : '（そのまま）'));
+    return img;
+  } catch (e) {
+    // 容量不足・IndexedDB が使えない等。**貼れないだけで、メモは壊さない**
+    setStatus('error', '画像を保存できませんでした: ' + (e.message || e));
+    diagLog.info('メモ: 画像の保存に失敗 ' + (e.message || e));
+    return null;
+  }
+}
+
+/**
+ * メモの貼り付けを受ける (v0.22.0)
+ *
+ * 画像なら横取りして保管し、それ以外は**ブラウザの標準の貼り付けに任せる**。
+ * 知らない種類が来たときに独自処理を挟むほうが、かえって壊れやすい。
+ * 受け取れないファイル（PDF など）は、黙って無視せず一言出す。
+ */
+async function handleMemoPaste(e) {
+  const dt = e.clipboardData;
+  if (!dt) return;
+  const decision = classifyPaste(dt.items);
+
+  if (decision.action === 'text') return;   // 標準に任せる
+
+  if (decision.action === 'reject') {
+    e.preventDefault();
+    const msg = describePasteReject(decision);
+    setStatus('error', msg);
+    diagLog.info('メモ: ' + msg);
+    setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
+                               state.isRecording ? '録音中' : '停止'), 5000);
+    return;
+  }
+
+  // 画像。標準の貼り付け（data: の巨大な img が入る）を止めてから差し替える
+  e.preventDefault();
+  const file = Array.from(dt.items)
+    .filter(i => i.kind === 'file' && /^image\//.test(i.type || ''))
+    .map(i => i.getAsFile())
+    .find(Boolean);
+  if (!file) return;
+
+  // 貼る位置を、非同期の待ちに入る前に捕まえておく
+  const sel = window.getSelection();
+  const range = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+
+  const img = await storePastedImage(file);
+  if (!img) return;
+
+  if (range) {
+    range.deleteContents();
+    range.insertNode(img);
+    range.setStartAfter(img);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } else {
+    els.memo.appendChild(img);
+  }
+  pushUndo('画像を貼り付け', 'pane-memo');
+  snapshotActiveToSession();
+  persistSessions();
+}
+
+/**
+ * 使われていない画像を片付ける。**起動時に呼ぶ。**
+ *
+ * メモから消しただけでは保管庫に残す（取り消しで戻せるようにするため）。
+ * 参照されなくなったものを、あとからまとめて消す。
+ */
+async function sweepStoredImages() {
+  try {
+    const used = new Set();
+    for (const s of state.sessions) {
+      for (const id of collectImageIds(s.memo || '')) used.add(id);
+    }
+    const n = await imageStoreSweep(used);
+    if (n > 0) diagLog.info(`使われていない画像を掃除: ${n}件`);
+  } catch (e) {
+    console.warn('[image] 掃除に失敗:', e.message || e);
+  }
+}
+
+/**
+ * HTML で保存するとき用に、画像を data: に戻す (v0.22.0)
+ *
+ * **保存した HTML はそれ1枚で完結していないと意味がない。**
+ * 保管庫を参照する形のままだと、別の端末で開いたときに画像が出ない。
+ */
+async function inlineImagesForExport(html) {
+  if (!html || html.indexOf('data-img-id') < 0) return html || '';
+  const doc = new DOMParser().parseFromString(`<div id="r">${html}</div>`, 'text/html');
+  const root = doc.getElementById('r');
+  for (const img of Array.from(root.querySelectorAll('img[data-img-id]'))) {
+    try {
+      const blob = await imageStoreGet(img.dataset.imgId);
+      if (blob) img.setAttribute('src', await blobToDataUrl(blob));
+      else markMissingImageForExport(img);
+    } catch {
+      markMissingImageForExport(img);
+    }
+  }
+  return root.innerHTML;
+}
+
+function markMissingImageForExport(img) {
+  img.setAttribute('alt', '（画像が見つかりません）');
+  img.removeAttribute('src');
+}
+
+/* ───────── 貼った画像を触る (v0.22.1) ─────────
+ *
+ * やっさんの要望:
+ * > 裏技として画像クリックでハンドル出現、サイズ変更と移動
+ * > 右クリックで word のように、行内か前面　重なり順の変更
+ *
+ * ■ 自前で作る理由
+ *
+ * Chrome は contenteditable の画像にリサイズハンドルを出さない
+ * （Firefox は出す。`enableObjectResizing` は Chrome では効かない）。
+ * なので選択枠とハンドルを自分で重ねて描く。
+ *
+ * ■ 「前面」は Word と同じにはならない
+ *
+ * メモは文章を流し込む領域なので、絶対配置にすると**文章を書き換えたときに
+ * 位置関係が保てない**（Word は段落にアンカーを持つが、そこまで作ると
+ * メモの軽さが失われる）。さらに:
+ *
+ *   HTML保存 … 再現される（インラインの style ごと書き出すため）
+ *   Notion   … そもそも画像を送れない
+ *   コピー   … 消える
+ *
+ * **再現できるのは HTML保存だけ**なので、メニューにそう書いてある。
+ */
+
+/** 幅の下限・上限。0px や画面外の巨大サイズを作らせない */
+const IMG_MIN_WIDTH = 40;
+const IMG_MAX_WIDTH = 4000;
+
+/**
+ * ハンドルを引いたときの新しい幅 (v0.22.1)
+ *
+ * 純関数。左側の角を掴んだときは**引く向きが逆**になるので、そこを間違えると
+ * 「左に引くと大きくなる」という気持ち悪い操作になる。
+ */
+function resizeImageWidth({ startWidth, dx, corner, min, max }) {
+  const lo = Number.isFinite(min) ? min : IMG_MIN_WIDTH;
+  const hi = Number.isFinite(max) ? max : IMG_MAX_WIDTH;
+  const left = corner === 'nw' || corner === 'sw';
+  const next = (Number(startWidth) || 0) + (left ? -dx : dx);
+  return Math.round(Math.min(hi, Math.max(lo, next)));
+}
+
+/**
+ * 重なり順を決める (v0.22.1)
+ *
+ * 純関数。いま使われている値の外側に置くだけ。番号を詰め直さないのは、
+ * 詰め直すと**他の画像の style を書き換える**ことになり、取り消しの単位が
+ * 分かりにくくなるため。
+ */
+function computeZIndex(existing, direction) {
+  const nums = (existing || []).map(Number).filter(Number.isFinite);
+  if (!nums.length) return direction === 'back' ? -1 : 1;
+  return direction === 'back' ? Math.min(...nums) - 1 : Math.max(...nums) + 1;
+}
+
+let _selectedImg = null;
+
+function memoImageBox() {
+  return document.getElementById('img-handles');
+}
+
+/** 選択枠を画像に合わせる。画像が消えていたら枠も消す */
+function positionImageBox() {
+  const box = memoImageBox();
+  if (!box) return;
+  const img = _selectedImg;
+  if (!img || !img.isConnected || !els.memo.contains(img)) { clearImageSelection(); return; }
+  const host = els.memo.parentElement;          // .pane-body（position: relative）
+  const r = img.getBoundingClientRect();
+  const h = host.getBoundingClientRect();
+  box.style.left   = `${r.left - h.left + host.scrollLeft}px`;
+  box.style.top    = `${r.top  - h.top  + host.scrollTop}px`;
+  box.style.width  = `${r.width}px`;
+  box.style.height = `${r.height}px`;
+  box.hidden = false;
+}
+
+function selectMemoImage(img) {
+  _selectedImg = img;
+  let box = memoImageBox();
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'img-handles';
+    box.hidden = true;
+    // 角だけにしてある。辺のハンドルを付けると縦横比が崩せてしまい、
+    // メモに貼る画像でそれを望むことはまず無い
+    for (const c of ['nw', 'ne', 'sw', 'se']) {
+      const h = document.createElement('div');
+      h.className = `img-handle img-handle-${c}`;
+      h.dataset.corner = c;
+      box.appendChild(h);
+    }
+    els.memo.parentElement.appendChild(box);
+    box.addEventListener('pointerdown', onImageHandleDown);
+  }
+  positionImageBox();
+}
+
+function clearImageSelection() {
+  _selectedImg = null;
+  const box = memoImageBox();
+  if (box) box.hidden = true;
+  closeImageMenu();
+}
+
+/** ハンドルを引いてサイズを変える */
+function onImageHandleDown(e) {
+  const corner = e.target && e.target.dataset ? e.target.dataset.corner : null;
+  if (!corner || !_selectedImg) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const img = _selectedImg;
+  const startX = e.clientX;
+  const startWidth = img.getBoundingClientRect().width;
+
+  const move = (ev) => {
+    img.style.width = resizeImageWidth({
+      startWidth, dx: ev.clientX - startX, corner,
+    }) + 'px';
+    img.style.height = 'auto';   // 縦横比を保つ
+    positionImageBox();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    pushUndo('画像のサイズ変更', 'pane-memo');
+    snapshotActiveToSession();
+    persistSessions();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
+/** 「前面」の画像をドラッグで動かす */
+function onFloatingImageDown(e) {
+  const img = _selectedImg;
+  if (!img || img.dataset.float !== '1') return;
+  e.preventDefault();
+  const host = els.memo.parentElement;
+  const startX = e.clientX, startY = e.clientY;
+  const startLeft = parseFloat(img.style.left) || 0;
+  const startTop  = parseFloat(img.style.top)  || 0;
+
+  const move = (ev) => {
+    img.style.left = `${startLeft + (ev.clientX - startX)}px`;
+    img.style.top  = `${startTop  + (ev.clientY - startY)}px`;
+    positionImageBox();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    pushUndo('画像の移動', 'pane-memo');
+    snapshotActiveToSession();
+    persistSessions();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  void host;
+}
+
+/* ───────── 右クリックのメニュー ───────── */
+
+function closeImageMenu() {
+  const m = document.getElementById('img-menu');
+  if (m) m.remove();
+}
+
+function openImageMenu(img, x, y) {
+  closeImageMenu();
+  const floating = img.dataset.float === '1';
+  const items = floating
+    ? [
+        ['行内に戻す', () => setImageFloat(img, false)],
+        ['最前面へ', () => setImageZ(img, 'front')],
+        ['最背面へ', () => setImageZ(img, 'back')],
+        ['幅を原寸に戻す', () => resetImageWidth(img)],
+        ['削除', () => removeImage(img)],
+      ]
+    : [
+        ['前面にする（HTML保存でのみ再現）', () => setImageFloat(img, true)],
+        ['幅を原寸に戻す', () => resetImageWidth(img)],
+        ['削除', () => removeImage(img)],
+      ];
+
+  const menu = document.createElement('div');
+  menu.id = 'img-menu';
+  menu.className = 'img-menu';
+  for (const [label, fn] of items) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'img-menu-item';
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      closeImageMenu();
+      fn();
+      pushUndo('画像の操作', 'pane-memo');
+      snapshotActiveToSession();
+      persistSessions();
+      positionImageBox();
+    });
+    menu.appendChild(b);
+  }
+  document.body.appendChild(menu);
+  // 画面からはみ出さない位置に置く
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.min(x, window.innerWidth - r.width - 8)}px`;
+  menu.style.top  = `${Math.min(y, window.innerHeight - r.height - 8)}px`;
+}
+
+/**
+ * 行内 ⇄ 前面 を切り替える
+ *
+ * 前面にするとき、**いま見えている場所にそのまま置く**。
+ * 座標を 0,0 にすると画像が画面外に飛んで「消えた」と思われる。
+ */
+function setImageFloat(img, floating) {
+  if (!floating) {
+    delete img.dataset.float;
+    img.style.position = '';
+    img.style.left = '';
+    img.style.top = '';
+    img.style.zIndex = '';
+    return;
+  }
+  const host = els.memo.parentElement;
+  const r = img.getBoundingClientRect();
+  const h = host.getBoundingClientRect();
+  img.dataset.float = '1';
+  img.style.position = 'absolute';
+  img.style.left = `${Math.round(r.left - h.left + host.scrollLeft)}px`;
+  img.style.top  = `${Math.round(r.top  - h.top  + host.scrollTop)}px`;
+  img.style.zIndex = String(computeZIndex(collectImageZIndexes(), 'front'));
+}
+
+function collectImageZIndexes() {
+  return Array.from(els.memo.querySelectorAll('img[data-float="1"]'))
+    .map(i => i.style.zIndex)
+    .filter(Boolean);
+}
+
+function setImageZ(img, direction) {
+  const others = Array.from(els.memo.querySelectorAll('img[data-float="1"]'))
+    .filter(i => i !== img)
+    .map(i => i.style.zIndex)
+    .filter(Boolean);
+  img.style.zIndex = String(computeZIndex(others, direction));
+}
+
+function resetImageWidth(img) {
+  img.style.width = '';
+  img.style.height = '';
+}
+
+function removeImage(img) {
+  img.remove();
+  clearImageSelection();
+}
+
 function loadActiveSessionIntoDOM() {
+  renderDictBar();   // v0.20.0: タブごとに辞書が違うので、切り替えたら描き直す
+  updateDiarizeButton();   // v0.21.2: 保存済みの結果もタブごとに違う
   const s = getActiveSession();
   els.confirmed.innerHTML = s?.transcript || '';
+  clearImageSelection();            // v0.22.1: 前のタブの画像の枠を消す
+  releaseMemoObjectUrls();          // v0.22.0: 前のタブの blob: を解放してから
   els.memo.innerHTML = s?.memo || '';
   migrateMemoTaskItems();
+  hydrateMemoImages(els.memo);      // v0.22.0: 画像の実物を差し込む（非同期）
   els.summary.innerHTML = s?.summary || '';
   els.interim.textContent = '';
   state.pendingChunkEl = null;
@@ -4679,6 +7148,8 @@ function closeSession(id) {
   const wasActive = state.activeId === id;
   // 録音対象セッションが閉じられるなら（BGでも）録音を止める
   if (state.isRecording && state.recordingSessionId === id) stopRecording();
+  // v0.19.0: タブが消えるなら、その音声も消す（設定に関係なく）
+  audioStoreDeleteSession(id).catch(() => {});
   state.sessions.splice(idx, 1);
   if (state.sessions.length === 0) {
     createSession({ activate: true, skipSave: true });
@@ -4709,6 +7180,8 @@ function closeMultipleSessions(ids, { skipConfirm = false } = {}) {
   }
   const activeIsTarget = targets.some(s => s.id === state.activeId);
   const idSet = new Set(targets.map(s => s.id));
+  // v0.19.0: 消えるタブの音声も消す
+  for (const id of idSet) audioStoreDeleteSession(id).catch(() => {});
   state.sessions = state.sessions.filter(s => !idSet.has(s.id));
   if (state.sessions.length === 0) {
     createSession({ activate: true, skipSave: true });
@@ -5207,6 +7680,35 @@ els.fileLoad.addEventListener('change', (e) => {
 });
 els.btnClearAll.addEventListener('click', clearAllPanes);
 els.btnSettings.addEventListener('click', openSettings);
+if (els.btnContext) {
+  els.btnContext.addEventListener('click', openContextModal);
+
+  /* v0.20.0: フッターの辞書ピル */
+  if (els.dictToggle) {
+    els.dictToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (els.dictMenu && els.dictMenu.hidden) openDictMenu(); else closeDictMenu();
+    });
+  }
+  if (els.dictMenuClose) els.dictMenuClose.addEventListener('click', closeDictMenu);
+  if (els.dictMenuDetail) {
+    els.dictMenuDetail.addEventListener('click', () => { closeDictMenu(); openContextModal(); });
+  }
+  // メニューの外を押したら閉じる（メニュー内のクリックは止める）
+  if (els.dictMenu) els.dictMenu.addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', () => closeDictMenu());
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && els.dictMenu && !els.dictMenu.hidden) closeDictMenu();
+  });
+  const btnSaveAutoDict = document.getElementById('btn-save-auto-dict');
+  if (btnSaveAutoDict) btnSaveAutoDict.addEventListener('click', saveAutoAsDict);
+  els.btnContextSave.addEventListener('click', saveContextModal);
+  els.btnContextFromMemo.addEventListener('click', importContextFromMemo);
+  els.btnContextAdoptAuto.addEventListener('click', adoptAutoTerms);
+  els.contextModal.querySelectorAll('[data-dismiss]').forEach(b => {
+    b.addEventListener('click', closeContextModal);
+  });
+}
 if (els.btnNotionTest) els.btnNotionTest.addEventListener('click', testNotionConnection);
 if (els.btnNotionForget) els.btnNotionForget.addEventListener('click', forgetNotionTarget);
 
@@ -5863,6 +8365,49 @@ els.memo.addEventListener('change', (e) => {
 });
 
 // ペースト時：AI整形ONなら少し待って整形発動
+/* v0.22.1: 貼った画像を触る（クリックで枠、右クリックでメニュー）
+ *
+ * ここは**画像のときだけ**割り込む。それ以外はメモの標準の編集を邪魔しない。
+ */
+els.memo.addEventListener('pointerdown', (e) => {
+  const img = e.target && e.target.tagName === 'IMG' ? e.target : null;
+  if (!img) { clearImageSelection(); return; }
+  selectMemoImage(img);
+  // 「前面」の画像はドラッグで動かす。行内のものは標準のドラッグに任せる
+  if (img.dataset.float === '1') onFloatingImageDown(e);
+});
+
+els.memo.addEventListener('contextmenu', (e) => {
+  const img = e.target && e.target.tagName === 'IMG' ? e.target : null;
+  if (!img) return;   // 画像以外は標準の右クリックメニューのまま
+  e.preventDefault();
+  selectMemoImage(img);
+  openImageMenu(img, e.clientX, e.clientY);
+});
+
+// 枠がずれないよう、動きうるものに追随させる
+els.paneMemoBody.addEventListener('scroll', positionImageBox);
+window.addEventListener('resize', positionImageBox);
+// メモの外を触ったら選択を解く（メニューの中は除く）
+document.addEventListener('pointerdown', (e) => {
+  if (!_selectedImg) return;
+  if (e.target.closest && (e.target.closest('#img-handles') || e.target.closest('#img-menu'))) return;
+  if (els.memo.contains(e.target)) return;
+  clearImageSelection();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') clearImageSelection();
+});
+
+/* v0.22.0: メモの貼り付け。画像は保管庫へ、受け取れないものは一言出す */
+els.memo.addEventListener('paste', (e) => {
+  // ここで throw すると貼り付け操作ごと落ちるので、必ず受け止める
+  handleMemoPaste(e).catch(err => {
+    console.warn('[memo paste] failed:', err);
+    setStatus('error', '貼り付けに失敗しました: ' + (err.message || err));
+  });
+});
+
 els.confirmed.addEventListener('paste', () => {
   if (!state.settings.aiEnabled || !state.settings.apiKey) return;
   setTimeout(() => { refineUnstructuredInTranscript({ showFeedback: false }); }, 150);
@@ -5889,6 +8434,12 @@ if (els.btnRefineTranscript) {
   });
 }
 
+/* v0.21.0: 話者判別。走っている間は同じボタンが「中止」になる */
+if (els.btnDiarize) {
+  els.btnDiarize.addEventListener('click', () => { runDiarization(); });
+  updateDiarizeButton();
+}
+
 els.paneTranscriptBody.addEventListener('scroll', () => {
   state.userScrolledUp = !isPinnedToBottom();
   els.btnScrollBottom.classList.toggle('hidden', !state.userScrolledUp);
@@ -5905,6 +8456,7 @@ document.addEventListener('keydown', (e) => {
     if (!els.settingsModal.classList.contains('hidden')) closeSettings();
     // v0.14.2: 保存先ピッカーは Promise で待っているので、Escape でも必ず解決させる
     if (els.notionPicker && !els.notionPicker.classList.contains('hidden')) closeNotionPicker(null);
+    if (els.contextModal && !els.contextModal.classList.contains('hidden')) closeContextModal();
     if (!els.silenceDialog.classList.contains('hidden')) {
       hideSilenceDialog();
       resetLongSilenceTimer();
@@ -6159,7 +8711,24 @@ renderInnerTabs();
 if (typeof renderIcons === 'function') renderIcons();
 els.zoomRange.value = state.settings.appZoom;
 els.zoomPercent.textContent = state.settings.appZoom + '%';
+if (els.btnClearAudio) {
+  els.btnClearAudio.addEventListener('click', async () => {
+    if (!confirm('保持している録音音声をすべて消します。よろしいですか？\n（文字起こしの結果は消えません）')) return;
+    try {
+      const n = await audioStoreClearAll();
+      diagLog.info(`保持していた音声 ${n} 件を手動で消しました`);
+    } catch (e) {
+      alert('消せませんでした: ' + (e.message || e));
+    }
+    refreshAudioUsage();
+  });
+}
+
 initSessions();
+renderDictBar();   // v0.20.0
+// v0.19.0: 期限切れの音声を掃除する。「タブを閉じたら消す」はクラッシュや
+// 強制リロードでは走らないので、消し忘れを防ぐ本体はこちら
+sweepStoredAudio();
 renderTabs();
 loadActiveSessionIntoDOM();
 updateActionButtons();

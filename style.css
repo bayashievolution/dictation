@@ -2157,6 +2157,12 @@ mark.search-hit.current {
 [data-icon] svg {
   display: block;
 }
+/* v0.21.0: 説明文の中にボタンの絵を差し込む用。行の中で浮かないよう下に少し寄せる */
+.inline-icon {
+  vertical-align: -2px;
+  margin: 0 1px;
+  color: var(--text-muted);
+}
 
 /* ───────── Settings sections ───────── */
 .field-group {
@@ -2651,6 +2657,7 @@ mark.search-hit.current {
 .field input[type="text"],
 .field input[type="password"],
 .field input[type="number"],
+.field textarea,
 .field select {
   width: 100%;
   padding: 8px 10px;
@@ -2676,13 +2683,30 @@ mark.search-hit.current {
 }
 
 .field input:hover,
+.field textarea:hover,
 .field select:hover {
   border-color: #4a4a54;
 }
 
 .field input:focus,
+.field textarea:focus,
 .field select:focus {
   border-color: var(--accent);
+}
+
+/* v0.16.2: textarea が .field のスタイルから漏れていて、
+   ブラウザ既定の見た目（明るい枠・別フォント）のまま出ていた。
+   複数行なので行間と縦リサイズだけ個別に指定する。 */
+.field textarea {
+  line-height: 1.7;
+  resize: vertical;
+  min-height: 72px;
+}
+
+/* .field には placeholder の色指定が無く、ブラウザ既定のままだった */
+.field input::placeholder,
+.field textarea::placeholder {
+  color: var(--text-faint);
 }
 
 .field input[type="number"]::-webkit-inner-spin-button,
@@ -2817,13 +2841,15 @@ mark.search-hit.current {
   opacity: 1;
 }
 
-/* チャットタブ時は入力欄と被らないよう zoom-bar を上に持ち上げる */
-body.chat-active #zoom-bar {
+/* チャットタブ時は入力欄と被らないよう持ち上げる（辞書ピルも同じ） */
+body.chat-active #zoom-bar,
+body.chat-active #dict-bar {
   bottom: 76px;
 }
 
 /* ペイン切替中のフェード */
-#zoom-bar.fading {
+#zoom-bar.fading,
+#dict-bar.fading {
   opacity: 0;
 }
 
@@ -2902,4 +2928,301 @@ body.chat-active #zoom-bar {
   flex: 0 0 auto;
   color: var(--accent);
   opacity: 0.85;
+}
+
+/* 文脈モーダル: 自動で拾った内容 v0.16.1 */
+.auto-context-box {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.8;
+  white-space: pre-line;
+  color: var(--text-muted);
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+/* Gemini モードのリアルタイム表示: 未確定の段落 v0.17.0 */
+.paragraph.provisional .p-body {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.paragraph.provisional .p-body::after {
+  content: '未確定';
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
+  font-style: normal;
+  color: var(--text-faint);
+  vertical-align: middle;
+}
+
+/* v0.19.0: 録音の保持 */
+.audio-usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+/* 送信先についての注意書き。既存の --danger を使う（新しい色を増やさない） */
+.field-hint.warn-hint {
+  display: block;
+  border-left: 3px solid var(--danger);
+  padding-left: 10px;
+  color: var(--text);
+}
+.btn.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* ───────── 語彙辞書のフッターピル (v0.20.0) ─────────
+ *
+ * 右下の #zoom-bar と対になる左下のピル。1本のバーにしなかったのは、
+ * サイドパネルが狭く（実質360px前後）、拡大ルーラーだけで200px超を使うため。
+ * 2つのピルにすれば、狭いときは自然に上下に逃げる。
+ */
+#dict-bar {
+  position: fixed;
+  bottom: 18px;
+  left: 12px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  max-width: calc(100vw - 260px);   /* ズームピルに被らせない */
+  background: rgba(35, 35, 42, 0.88);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+  opacity: 0.45;
+  transition: opacity 0.2s var(--ease-out);
+  user-select: none;
+}
+#dict-bar:hover,
+#dict-bar.has-dict {
+  opacity: 1;
+}
+
+.dict-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 12px;
+  background: none;
+  border: none;
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+#dict-bar.has-dict .dict-btn { color: var(--text); }
+.dict-btn [data-icon] { flex: none; width: 13px; height: 13px; }
+#dict-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 辞書メニュー */
+.dict-menu {
+  position: fixed;
+  bottom: 56px;
+  left: 12px;
+  z-index: 60;
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 120px));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55);
+}
+body.chat-active .dict-menu { bottom: 114px; }
+
+.dict-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.dict-menu-hint { padding: 0 12px 8px; }
+.dict-menu-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 6px;
+}
+.dict-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 8px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.dict-item:hover { background: var(--bg-subtle); }
+.dict-item .dict-check {
+  flex: none;
+  width: 14px;
+  margin-top: 2px;
+  color: var(--accent);
+}
+.dict-item-body { min-width: 0; }
+.dict-item-name { display: block; }
+.dict-item-sub {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 1px;
+}
+.dict-item.on .dict-item-name { color: var(--accent); font-weight: 700; }
+
+.dict-menu-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* 文脈モーダル内の辞書一覧 */
+.context-dict-list {
+  max-height: 190px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+}
+.context-dict-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  font-size: 13px;
+}
+.context-dict-row:hover { background: var(--bg-subtle); }
+.context-dict-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.context-dict-count { flex: none; }
+
+/* ───────── 話者付きのやり直し (v0.21.0) ───────── */
+
+/* 走っている間は、押すと中止になることが分かるように点滅させる。
+   同じボタンが「実行」と「中止」を兼ねるので、状態が見えないと押せない */
+#btn-diarize.firing {
+  color: var(--accent);
+  animation: repass-pulse 1.4s ease-in-out infinite;
+}
+@keyframes repass-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #btn-diarize.firing { animation: none; opacity: .7; }
+}
+
+/* ───────── メモに貼った画像 (v0.22.0) ─────────
+ *
+ * メモは画像のメニューを置いていないが、Ctrl+V では貼れる（裏技）。
+ * 幅を指定していない画像がペインをはみ出さないようにだけしておく。
+ */
+#memo img {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+  border-radius: var(--radius-sm);
+}
+
+/* 保管庫から読み出せなかった画像。**空白で消すのではなく、消えたと分かる形にする** */
+#memo img.img-missing {
+  width: 220px;
+  height: 56px;
+  border: 1px dashed var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+}
+
+/* ───────── 貼った画像の選択枠 (v0.22.1) ─────────
+ *
+ * Chrome は contenteditable の画像にリサイズハンドルを出さないので自前で描く。
+ * .pane-body が position: relative なので、その中に重ねる。
+ */
+#img-handles {
+  position: absolute;
+  pointer-events: none;              /* 枠そのものはクリックを通す */
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  z-index: 20;
+}
+.img-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;             /* 角の中心に置く */
+  background: var(--bg-elevated);
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  pointer-events: auto;              /* 掴めるのはハンドルだけ */
+  touch-action: none;                /* 指で引くときにスクロールさせない */
+}
+.img-handle-nw { left: 0;    top: 0;    cursor: nwse-resize; }
+.img-handle-ne { left: 100%; top: 0;    cursor: nesw-resize; }
+.img-handle-sw { left: 0;    top: 100%; cursor: nesw-resize; }
+.img-handle-se { left: 100%; top: 100%; cursor: nwse-resize; }
+
+/* 右クリックのメニュー */
+.img-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+}
+.img-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.img-menu-item:hover { background: var(--bg-subtle); }
+
+/* 「前面」にした画像。**再現できるのは HTML保存だけ**（メニューにも書いてある） */
+#memo img[data-float="1"] {
+  position: absolute;
+  max-width: none;                   /* 置いた場所と大きさをそのまま保つ */
 }

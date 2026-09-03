@@ -312,13 +312,36 @@ function notionListBlocks(listEl, depth = 0) {
  *   h1〜h3, p, div, ul>li, ol>li, div.task-item(チェックボックス), blockquote, hr, pre/code
  * それ以外のタグは段落として扱う。
  */
+/**
+ * 画像の代わりに置く印 (v0.22.0)
+ *
+ * **画像は Notion に送れない。** 画像ブロックは外部URLかアップロード済み
+ * ファイルしか受け付けず、メモに貼った画像は端末の中にしかない。
+ *
+ * 黙って落とすと「送ったつもりで消えている」ことに気づけないので、印を残す。
+ * メモの他の内容は今までどおり送れる。
+ */
+function notionImageNote() {
+  return notionBlock.paragraph(notionRichText(
+    '［画像はここにありましたが、Notion には送れません。HTML で保存すると残ります］',
+    { italic: true }));
+}
+
 function notionBlocksFromHtml(html) {
   if (!html || !html.trim()) return [];
   const doc = new DOMParser().parseFromString(`<div id="root">${html}</div>`, 'text/html');
   const root = doc.getElementById('root');
   const blocks = [];
 
+  // v0.22.0: 画像が <div> の中に入っていると、テキストとしては空になって
+  // 黙って落ちる。テキストにする直前に、含まれている画像のぶんの印を先に置く
+  const pushImageNotes = (node) => {
+    const imgs = node.querySelectorAll ? node.querySelectorAll('img') : [];
+    for (let i = 0; i < imgs.length; i++) blocks.push(notionImageNote());
+  };
+
   const pushText = (node, make) => {
+    pushImageNotes(node);
     const rich = notionRichTextFromNode(node);
     // 空行は落とす。メモエディタは空行を <div><br></div> で表現するので、
     // 中身が改行・空白だけのものも「空」とみなす（Notion 側に空段落を作らないため）。
@@ -335,6 +358,7 @@ function notionBlocksFromHtml(html) {
       case 'h3': case 'h4': case 'h5': case 'h6':
         pushText(el, r => notionBlock.heading(3, r)); return;
       case 'hr': blocks.push(notionBlock.divider()); return;
+      case 'img': blocks.push(notionImageNote()); return;
       case 'blockquote': pushText(el, notionBlock.quote); return;
       case 'pre': {
         const rich = notionRichText(el.textContent || '');

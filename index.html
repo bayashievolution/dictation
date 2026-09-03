@@ -47,6 +47,9 @@
       <button id="btn-search" class="btn btn-ghost btn-square" title="検索＆置換（Ctrl+F）">
         <span class="btn-icon" data-icon="search"></span>
       </button>
+      <button id="btn-context" class="btn btn-ghost btn-square" title="この録音の文脈（分野・話者・用語）を設定して文字起こしの精度を上げる">
+        <span class="btn-icon" data-icon="tag"></span>
+      </button>
       <button id="btn-settings" class="btn btn-ghost btn-square" title="設定">
         <span class="btn-icon" data-icon="settings"></span>
       </button>
@@ -99,6 +102,10 @@
           <button id="btn-refine-transcript" class="toggle-switch toggle-with-action" title="ノブ=録音中の自動整形ON/OFF／本体の『文字起こし整形』クリック=トグル状態に関わらず上から下まで全体を文脈込みで整形＋見出し付け">
             <span class="toggle-track" data-role="toggle"><span class="toggle-knob"></span></span>
             <span class="toggle-label" data-role="action"><span data-icon="sparkles"></span>文字起こし整形</span>
+          </button>
+          <!-- v0.21.0: 保管した録音をまとめて投げ直し、話者付きで作り直す -->
+          <button id="btn-diarize" class="pane-btn pane-btn-icon" title="保管した録音をまとめて投げ直し、話者付きで作り直す（録音の保持がオンのときだけ）">
+            <span data-icon="users"></span>
           </button>
           <button class="pane-btn pane-btn-icon" data-pane-undo="pane-transcript" disabled title="この タブの変更を戻す（Ctrl+Z）">
             <span data-icon="undo"></span>
@@ -259,6 +266,33 @@
 
   </div>
 
+  <!-- v0.20.0: フッター左＝辞書、右＝拡大ルーラー。
+       いま何の語彙が効いているかが常に見えていないと、間違ったまま録り続けてしまう -->
+  <div id="dict-bar" title="語彙辞書（クリックで切替）">
+    <button type="button" id="dict-toggle" class="dict-btn">
+      <span data-icon="tag"></span>
+      <span id="dict-label">辞書なし</span>
+    </button>
+  </div>
+
+  <div id="dict-menu" class="dict-menu" hidden>
+    <div class="dict-menu-head">
+      <span>語彙辞書</span>
+      <button type="button" class="modal-close" id="dict-menu-close"><span data-icon="x"></span></button>
+    </div>
+    <p class="field-hint dict-menu-hint">
+      選ぶと<strong>いまの自動辞書に足されます</strong>（置き換えではありません）。
+      録音中でも切り替えられます。
+    </p>
+    <div id="dict-menu-list" class="dict-menu-list"></div>
+    <div class="dict-menu-foot">
+      <span id="dict-menu-auto" class="field-hint"></span>
+      <button type="button" id="dict-menu-detail" class="pane-btn">
+        <span data-icon="pencil"></span><span>詳しく設定</span>
+      </button>
+    </div>
+  </div>
+
   <div id="zoom-bar" title="拡大率">
     <button class="zoom-btn" id="zoom-minus" title="縮小">−</button>
     <input type="range" id="zoom-range" min="75" max="200" step="5" value="100" />
@@ -402,8 +436,18 @@
                 <span class="field-label">音声入力デバイス</span>
                 <select id="input-audio-device"></select>
               </label>
+              <label class="field field-row">
+                <input id="input-gemini-live-display" type="checkbox" />
+                <span>リアルタイム表示を使う（Web Speech を並走）</span>
+              </label>
+              <div class="field">
+                <small class="field-hint">
+                  Gemini の結果が返るまでの間、Web Speech が聞き取った文字を「未確定」として表示します。
+                  確定するとその場が Gemini の文字起こしに置き換わります。マイクは同時に使えることを実機で確認済みです。
+                </small>
+              </div>
               <label class="field">
-                <span class="field-label">Geminiチャンク間隔（秒）</span>
+                <span class="field-label">最短何秒で区切るか（秒）</span>
                 <div class="number-stepper">
                   <input id="input-chunk-sec" type="number" min="5" max="60" step="1" />
                   <div class="number-stepper-btns">
@@ -411,7 +455,29 @@
                     <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
                   </div>
                 </div>
-                <small class="field-hint">この秒数ごとに音声を Gemini へ送信。長いほど精度アップ・遅延増、短いほど反応速い。既定 12 秒。</small>
+                <small class="field-hint">この秒数<strong>より前では切りません</strong>。長いほど精度アップ・遅延増、短いほど反応速い。既定 12 秒。</small>
+              </label>
+              <label class="field field-row">
+                <input id="input-silence-cut" type="checkbox" />
+                <span>無音の切れ目で区切る</span>
+              </label>
+              <div class="field">
+                <small class="field-hint">
+                  最短秒数を過ぎたあと、話が途切れたところを狙って区切ります。
+                  文の途中で切れなくなるので、言っていない言葉が足される不具合が起きにくくなります。
+                  オフにすると、従来どおり最短秒数ちょうどで区切ります。
+                </small>
+              </div>
+              <label class="field">
+                <span class="field-label">最長何秒まで待つか（秒）</span>
+                <div class="number-stepper">
+                  <input id="input-chunk-max-sec" type="number" min="7" max="90" step="1" />
+                  <div class="number-stepper-btns">
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-max-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-max-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">ずっと喋り続けて無音が来ない場合、この秒数で諦めて区切ります。既定 20 秒。</small>
               </label>
               <label class="field">
                 <span class="field-label">音声送信しきい値（バイト）</span>
@@ -424,6 +490,67 @@
                 </div>
                 <small class="field-hint">このサイズ未満の音声チャンクは無音とみなしてスキップ。小声も拾いたいなら下げる（既定 400）／無駄送信を減らすなら上げる。</small>
               </label>
+              <label class="field">
+                <span class="field-label">音質（kbps）</span>
+                <select id="input-audio-bitrate">
+                  <option value="32000">32 — 最小（90分で約21MB）</option>
+                  <option value="64000">64 — 標準（90分で約43MB）</option>
+                  <option value="96000">96 — 高め（90分で約65MB）</option>
+                  <option value="128000">128 — 従来（90分で約86MB）</option>
+                </select>
+                <small class="field-hint">音声認識用途では 64kbps で十分です。下げると送信量と保管サイズが減ります。</small>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <h3 class="field-group-title">録音の保持</h3>
+          <label class="field field-row">
+            <input id="input-keep-recording" type="checkbox" />
+            <span>録音を端末に一時保存する（話者判別用）</span>
+          </label>
+          <div class="field">
+            <small class="field-hint">
+              録音が終わったあとで、<strong>保管した録音をまとめて Gemini に通し、話者付きで書き起こす</strong>ための機能です。
+              文字起こしタブの
+              <span class="inline-icon" data-icon="users" data-icon-size="14"></span>
+              ボタンから実行します。
+              live の文字起こしは12〜20秒ごとに送るので話者を区別できませんが、
+              話者判別は約10分ずつまとめて送るため、誰が話したかを付けられます。
+            </small>
+          </div>
+          <div class="field">
+            <small class="field-hint warn-hint">
+              <strong>この設定が決めるのは「端末に残すかどうか」だけです。</strong>
+              Gemini モードは、この設定に関係なく文字起こしのために音声を Google へ送信しています。
+              話者判別を実行すると録音全体がアップロードされます。
+              使い終わったファイルはこちらから削除しますが、削除できなかった場合も Google 側で48時間後に自動削除されます。
+              録音の保存自体が許されない場面では、この設定をオフにしたうえで、
+              Gemini モードを使うことの可否も確認してください。
+            </small>
+          </div>
+          <label class="field">
+            <span class="field-label">いつ消すか</span>
+            <select id="input-audio-retention">
+              <option value="close">タブを閉じたら消す（推奨）</option>
+              <option value="repass">話者判別が終わったら消す（24時間で自動失効）</option>
+              <option value="1d">1日たったら消す</option>
+              <option value="7d">7日たったら消す</option>
+              <option value="manual">手動で消すまで残す</option>
+            </select>
+            <small class="field-hint">
+              どの設定でも<strong>タブを閉じた時点でその録音は消えます</strong>。
+              起動のたびに期限切れを掃除するので、途中でブラウザが落ちても残りません。
+              『話者判別が終わったら消す』はいちばん早く消えますが、
+              <strong>同じ録音に2回目をかけられなくなります</strong>
+              （結果そのものはタブに残るので、貼り直しはいつでもできます）。
+            </small>
+          </label>
+          <div class="field">
+            <div class="audio-usage-row">
+              <span id="audio-usage-text" class="field-hint">保持中の音声: 確認中…</span>
+              <button type="button" id="btn-clear-audio" class="btn btn-ghost btn-sm">すべて消す</button>
             </div>
           </div>
         </div>
@@ -627,6 +754,92 @@
   </div>
 
   <!-- 無音停止確認ダイアログ -->
+  <!-- v0.16.0: 録音の文脈。ここに書いた語彙が文字起こしのプロンプトに載る。
+       同音異義語と固有名詞の誤りは音だけでは直せないので、先に語を教えておく。 -->
+  <div id="context-modal" class="modal hidden">
+    <div class="modal-backdrop" data-dismiss></div>
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <h2>この録音の文脈</h2>
+        <button class="modal-close" data-dismiss><span data-icon="x"></span></button>
+      </div>
+      <div class="modal-body">
+        <p class="field-hint" style="margin-bottom:14px">
+          ここに書いた内容は<strong>語彙のヒント</strong>として文字起こしに渡されます。
+          同音異義語（家庭／課程／過程）や固有名詞は音だけでは決められないので、
+          先に教えておくと精度が上がります。<strong>台本としては使われません</strong>（書いた内容が勝手に本文に入ることはありません）。
+        </p>
+
+        <label class="field">
+          <span class="field-label">分野・場面</span>
+          <input id="input-context-field" type="text" placeholder="例: 講義 / 会議 / 打ち合わせ / インタビュー" />
+          <small class="field-hint">分野があれば「〇〇学の講義」のように書くと、その分野の語が選ばれやすくなります</small>
+        </label>
+
+        <label class="field">
+          <span class="field-label">話者</span>
+          <input id="input-context-speakers" type="text" placeholder="例: 山田さん、佐藤さん、司会" />
+          <small class="field-hint">話者判別を入れたときに名前で出せるようになります</small>
+        </label>
+
+        <label class="field">
+          <span class="field-label">よく出る語・固有名詞</span>
+          <textarea id="input-context-terms" rows="5" placeholder="製品名・サービス名&#10;社名・団体名&#10;略語&#10;人名"></textarea>
+          <small class="field-hint">改行かカンマ区切り。人名・専門用語・製品名など、誤変換されやすいものを</small>
+        </label>
+
+        <div class="field">
+          <span class="field-label">語彙辞書</span>
+          <small class="field-hint" style="margin-bottom:6px">
+            選んだ辞書の語が、上の「よく出る語」と自動で拾った語に<strong>足されます</strong>。
+            合計50語まで（手入力 → 辞書 → 自動 の順に残ります）。
+          </small>
+          <div id="context-dict-list" class="context-dict-list"></div>
+          <div class="diag-log-actions" style="margin-top:8px">
+            <button type="button" id="btn-save-auto-dict" class="pane-btn" title="いま育っている自動辞書と手入力の語に名前を付けて保存する">
+              <span data-icon="tag"></span><span>いまの語を辞書として保存</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="diag-log-actions">
+            <button type="button" id="btn-context-from-memo" class="pane-btn" title="メモペインに書いた見出しや箇条書きから語を拾う">
+              <span data-icon="pencil"></span><span>メモから取り込む</span>
+            </button>
+            <span id="context-memo-result" class="field-hint"></span>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="diag-log-head">
+            <span class="field-label">自動で拾った内容</span>
+            <div class="diag-log-actions">
+              <button type="button" id="btn-context-adopt-auto" class="pane-btn" title="拾った語を上の欄に移して自分で直せるようにする">
+                <span data-icon="check"></span><span>上の欄に取り込む</span>
+              </button>
+            </div>
+          </div>
+          <div id="auto-context-box" class="auto-context-box"></div>
+          <small class="field-hint">
+            録音中に記録から自動で拾っています。誤変換をそのまま覚えないよう、
+            単純な頻度ではなく AI に「正しい表記」を判断させています。
+            おかしければ取り込んで直してください（<strong>上の欄が最終権限</strong>です）
+          </small>
+        </div>
+
+        <label class="field field-row">
+          <input id="input-context-default" type="checkbox" />
+          <span>この内容を新しいタブの初期値にする</span>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-context-save" class="btn btn-primary">保存</button>
+        <button class="btn btn-ghost" data-dismiss>キャンセル</button>
+      </div>
+    </div>
+  </div>
+
   <!-- v0.14.2: Notion 保存先ピッカー。
        毎回聞くが、前回の保存先が最初から選ばれた状態で開く（そのまま保存を押せば済む）。 -->
   <div id="notion-picker" class="modal hidden">
@@ -668,7 +881,7 @@
         <p id="notion-progress-body" style="font-size:14px; line-height:1.7; white-space:pre-line;"></p>
         <label class="field field-row" id="notion-auto-close-row">
           <input id="notion-auto-close" type="checkbox" />
-          <span>保存できたタブを自動的に閉じる</span>
+          <span>保存できたタブを、確認せずに閉じる（この回だけ）</span>
         </label>
         <div id="notion-progress-list" class="notion-progress-list"></div>
       </div>
@@ -699,9 +912,15 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.15.2"></script>
-  <script src="gemini.js?v=0.15.2"></script>
-  <script src="notion.js?v=0.15.2"></script>
-  <script src="app.js?v=0.15.2"></script>
+  <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
+       （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
+  <script src="icons.js?v=0.22.1"></script>
+  <script src="gemini.js?v=0.22.1"></script>
+  <script src="notion.js?v=0.22.1"></script>
+  <script src="audio-store.js?v=0.22.1"></script>
+  <script src="image-store.js?v=0.22.1"></script>
+  <script src="gemini-files.js?v=0.22.1"></script>
+  <script src="term-dicts.js?v=0.22.1"></script>
+  <script src="app.js?v=0.22.1"></script>
 </body>
 </html>
