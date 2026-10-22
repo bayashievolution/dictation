@@ -146,6 +146,9 @@ const DEFAULT_SETTINGS = {
   // 「できるだけ早く消す」という方針は close でも満たせる。
   // 値 'repass' はすでに保存されている設定を読めなくしないため据え置き
   audioRetention: 'close',   // close / repass / 1d / 7d / manual
+  // v0.24.0: 後処理を利用者自身の Claude Code に回す。既定はオフ
+  //（Gemini は置き換えない。持っている人だけが使う足し算の機能）
+  useClaudeBridge: false,
   // 音声認識用途では 128kbps は過剰。64kbps なら 90分で約43MB
   audioBitrate: 64000,
   // v0.13.24: 旧 webspeechInterimDebounceMs / webspeechInterimOpacity (v0.13.9) は撤去。
@@ -466,6 +469,9 @@ const els = {
   inputAudioBitrate: document.getElementById('input-audio-bitrate'),
   inputKeepRecording: document.getElementById('input-keep-recording'),
   inputAudioRetention: document.getElementById('input-audio-retention'),
+  inputClaudeBridge: document.getElementById('input-claude-bridge'),          // v0.24.0
+  claudeBridgeStatus: document.getElementById('claude-bridge-status'),        // v0.24.0
+  btnClaudeBridgeTest: document.getElementById('btn-claude-bridge-test'),     // v0.24.0
   audioUsageText: document.getElementById('audio-usage-text'),
   btnClearAudio: document.getElementById('btn-clear-audio'),
   inputGeminiLiveDisplay: document.getElementById('input-gemini-live-display'),
@@ -1105,6 +1111,7 @@ async function refineWholeTranscript({ showFeedback = true } = {}) {
         context: '',
         newChunk: allText,
         maxOutputTokens: 8192,
+        feature: 'whole-refine',   // v0.24.0: 後処理なので Claude に回してよい
       });
     }
     target.className = 'paragraph refined';
@@ -1161,6 +1168,7 @@ async function refineByChunks(fullText, progressTargetEl) {
         context: prevTail.slice(-500),  // 直前チャンクの末尾500字だけ文脈として
         newChunk: blocks[i],
         maxOutputTokens: 4096,           // チャンク単位なので 4k で十分
+        feature: 'whole-refine',         // v0.24.0: 全体整形の一部。後処理なので回してよい
       });
       const outClean = (out || blocks[i]).trim();
       results.push(outClean);
@@ -2538,6 +2546,11 @@ async function runDiarization() {
   // （黙って消すと、次に押したときに「録音がありません」だけが出て理由が分からない）
   const swept = await sweepStoredAudio();
 sweepStoredImages();   // v0.22.0: どのメモからも参照されていない画像を片付ける
+applyClaudeBridgeSetting();   // v0.24.0: 保存されている設定を claude-bridge.js に渡す
+
+if (els.btnClaudeBridgeTest) {
+  els.btnClaudeBridgeTest.addEventListener('click', () => { testClaudeBridge(); });
+}
   refreshAudioUsage();
 
   setStatus('idle', `話者判別が完了（話者${roster.length}人）`);
@@ -3388,6 +3401,44 @@ function buildNotionToggles(session) {
 function sessionHasContentForNotion(session) {
   return !!(session && (session.transcript || session.memo || session.summary
     || (session.chat || []).some(m => !m.thinking && !m.error)));
+}
+
+/* ───────── Claude Code 連携 (v0.24.0) ─────────
+ *
+ * > 持ってる人は Claude のサブスク料金でおさまるならそれがいいよね
+ *
+ * Gemini は置き換えない。**後処理だけ**を利用者自身の Claude Code に回す。
+ * 分岐は gemini.js の _callGemini 1か所にあるので、ここは
+ * 設定を claude-bridge.js に渡すのと、接続確認を出すだけ。
+ */
+
+function applyClaudeBridgeSetting() {
+  if (typeof claudeBridgeSetEnabled === 'function') {
+    claudeBridgeSetEnabled(!!state.settings.useClaudeBridge);
+  }
+}
+
+/**
+ * 中継が生きているか確かめて、画面に出す
+ *
+ * **claude 本体は起動しない。** 起動すると8〜10秒待たされるので、
+ * サーバーが居るかどうかだけを聞く。
+ */
+async function testClaudeBridge() {
+  const el = els.claudeBridgeStatus;
+  if (!el) return;
+  el.className = 'field-hint';
+  el.textContent = '確認中…';
+  const r = await claudeBridgeHealth();
+  if (r && r.ok) {
+    el.className = 'field-hint is-ok';
+    el.textContent = r.invocation
+      ? `中継は動いています（claude の呼び方: ${r.invocation}）`
+      : '中継は動いています（claude はまだ一度も呼んでいません）';
+  } else {
+    el.className = 'field-hint is-ng';
+    el.textContent = '中継に繋がりません。start.bat でサーバーを起動してください';
+  }
 }
 
 /* ───────── 保存先ピッカー ───────── */
@@ -6343,6 +6394,7 @@ function openSettings() {
   if (els.inputAudioBitrate) els.inputAudioBitrate.value = String(state.settings.audioBitrate || 64000);
   if (els.inputKeepRecording) els.inputKeepRecording.checked = !!state.settings.audioKeepRecording;
   if (els.inputAudioRetention) els.inputAudioRetention.value = state.settings.audioRetention || 'close';
+  if (els.inputClaudeBridge) els.inputClaudeBridge.checked = !!state.settings.useClaudeBridge;   // v0.24.0
   refreshAudioUsage();
   if (els.inputGeminiLiveDisplay) els.inputGeminiLiveDisplay.checked = state.settings.geminiLiveDisplay !== false;
   if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
@@ -6423,6 +6475,11 @@ function saveSettingsFromForm() {
     }
   }
   if (els.inputAudioRetention) state.settings.audioRetention = els.inputAudioRetention.value || 'close';
+  // v0.24.0: Claude Code 連携。gemini.js 側はこの値を claude-bridge.js 経由で見る
+  if (els.inputClaudeBridge) {
+    state.settings.useClaudeBridge = els.inputClaudeBridge.checked;
+    applyClaudeBridgeSetting();
+  }
   if (els.inputChunkMaxSec) {
     // 最長は最短より短くできない（短いと無音を探す余地が消える）
     state.settings.audioChunkMaxSec = Math.max(

@@ -235,7 +235,43 @@ function _stripThinkingArtifacts(text) {
   return t;
 }
 
-async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800, skipSanitize = false } = {}) {
+/**
+ * Claude Code ブリッジに回せるなら回す (v0.24.0)
+ *
+ * **ここ1か所**で分岐する。各プロンプトには一切触らない。
+ * Gemini 向けに積み上げた書き方（捏造を止める／「分かりません」を出しすぎない）を
+ * そのまま使いたいので、body を畳んで送るだけにしてある。
+ *
+ * 繋がらなければ null を返し、呼び出し側は今までどおり Gemini に行く。
+ * ただし**戻したことは画面に出す**（黙って戻すと、サブスクで済ませたいのに
+ * 気づかないまま Gemini のトークンを使い続けることになる）。
+ *
+ * @returns {Promise<string|null>} 文字列なら Claude の結果。null なら Gemini へ
+ */
+async function _tryClaudeBridge(body, feature) {
+  if (typeof claudeBridgeShouldUse !== 'function') return null;   // 読み込まれていない
+  if (!claudeBridgeShouldUse({ enabled: claudeBridgeIsEnabled(), feature, body })) return null;
+
+  const prompt = claudeBridgePromptFromBody(body);
+  if (!prompt) return null;
+
+  const r = await claudeBridgeRun(prompt);
+  if (r.ok && r.text) {
+    if (window.diagLog) window.diagLog.info(`Claude Code で処理しました（${feature} / ${r.seconds}秒）`);
+    return r.text;
+  }
+  if (window.diagLog) {
+    window.diagLog.info(`Claude Code に回せなかったので Gemini で処理します（${feature}）: ${r.error}`);
+  }
+  if (window.setStatus) window.setStatus('error', 'Claude に繋がらないので Gemini で処理しました');
+  return null;
+}
+
+async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800, skipSanitize = false, feature = '' } = {}) {
+  // v0.24.0: 後処理だけ、利用者自身の Claude Code に回せる
+  const viaClaude = await _tryClaudeBridge(body, feature);
+  if (viaClaude !== null) return viaClaude;
+
   // 思考モードの出力混入を防ぐため、明示的に無効化。
   // thinkingBudget:0 だけだとまれに漏れるので includeThoughts:false も併用。
   if (!body.generationConfig) body.generationConfig = {};
@@ -307,7 +343,12 @@ async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800, sk
   throw lastErr || new Error('Gemini 呼び出し失敗（リトライ上限）');
 }
 
-async function refineWithGemini({ apiKey, context, newChunk, sessionContext, joinFragments = false, maxOutputTokens = 2048 }) {
+async function refineWithGemini({
+  apiKey, context, newChunk, sessionContext, joinFragments = false, maxOutputTokens = 2048,
+  // v0.24.0: 録音中のチャンク整形は Claude に回さない（8〜10秒かかり間に合わない）。
+  // 全体整形だけが 'whole-refine' を渡してくる
+  feature = 'chunk-refine',
+}) {
   if (!apiKey) throw new Error('Gemini API キーが設定されていません');
   if (!newChunk || !newChunk.trim()) return '';
 
@@ -369,7 +410,7 @@ async function refineWithGemini({ apiKey, context, newChunk, sessionContext, joi
     },
   };
 
-  const text = await _callGemini(body, apiKey);
+  const text = await _callGemini(body, apiKey, { feature: feature });
   return text.trim();
 }
 
@@ -490,7 +531,7 @@ async function summarizeWithGemini({ apiKey, transcript, title, detail }) {
     },
   };
 
-  const text = await _callGemini(body, apiKey);
+  const text = await _callGemini(body, apiKey, { feature: 'summary' });
   return text.trim();
 }
 
@@ -535,7 +576,7 @@ async function generateTitleWithGemini({ apiKey, summary, transcript }) {
     },
   };
 
-  const raw = await _callGemini(body, apiKey);
+  const raw = await _callGemini(body, apiKey, { feature: 'title' });
 
   // AI が誤って改行や装飾を含めても安全に1行のタイトル文字列に整形する
   let cleaned = raw.trim()
@@ -658,7 +699,7 @@ async function chatWithGemini({ apiKey, contextSources, history, question }) {
     },
   };
 
-  const text = await _callGemini(body, apiKey);
+  const text = await _callGemini(body, apiKey, { feature: 'chat' });
   return text.trim();
 }
 
@@ -804,7 +845,7 @@ async function formatForOSDWithGemini({ apiKey, text, lineLength = 30, continuat
     },
   };
 
-  const out = await _callGemini(body, apiKey, { maxRetries: 1 });
+  const out = await _callGemini(body, apiKey, { feature: 'osd', maxRetries: 1 });
   return (out || '').trim();
 }
 
@@ -848,7 +889,7 @@ async function refineMemoSelectionWithGemini({ apiKey, text }) {
     },
   };
 
-  const out = await _callGemini(body, apiKey, { maxRetries: 1 });
+  const out = await _callGemini(body, apiKey, { feature: 'memo-refine', maxRetries: 1 });
   return (out || '').trim();
 }
 
