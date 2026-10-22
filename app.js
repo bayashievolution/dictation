@@ -417,6 +417,9 @@ const els = {
   notionProgressBody: document.getElementById('notion-progress-body'),
   notionProgressList: document.getElementById('notion-progress-list'),
   notionPickerDate: document.getElementById('notion-picker-date'),
+  notionPickerDateRow: document.getElementById('notion-picker-date-row'),   // v0.23.0
+  notionPickerNote: document.getElementById('notion-picker-note'),          // v0.23.0
+  notionPickerNoteHint: document.getElementById('notion-picker-note-hint'), // v0.23.0
   notionProgressFooter: document.getElementById('notion-progress-footer'),
   btnNotionCancel: document.getElementById('btn-notion-cancel'),
   notionAutoClose: document.getElementById('notion-auto-close'),
@@ -3391,6 +3394,7 @@ function sessionHasContentForNotion(session) {
 
 let notionPickerResolve = null;
 let notionPickerSchema = null;   // 選択中 DB の { titleProp, dateProps }
+let notionPickerNotes = [];      // v0.23.0: 選択中 DB の既存ノート
 let notionSchemaSeq = 0;         // 取得の世代番号。古い応答が後から勝つのを防ぐ
 
 function closeNotionPicker(result) {
@@ -3406,6 +3410,64 @@ function setNotionPickerError(msg) {
 }
 
 /**
+ * 選択中の DB の中にある既存ノートを「保存のしかた」セレクトに並べる (v0.23.0)
+ *
+ * 既定は必ず**「新しいノートを作る」**。これまでの動作を変えないため、
+ * そして**うっかり他人のノートに追記する事故を起こさない**ため。
+ *
+ * 一覧が取れなくても止めない。新規作成はそれだけで成立するので、
+ * 「既存ノートが選べないだけ」に落とす。
+ */
+async function loadNotionPickerNotes(dsId, seq) {
+  const sel = els.notionPickerNote;
+  if (!sel) return;
+  sel.innerHTML = '<option value="">新しいノートを作る</option>';
+  sel.disabled = true;
+
+  let notes = [];
+  try {
+    notes = await notionListNotesInDataSource(state.settings.notionToken, dsId);
+  } catch (e) {
+    console.warn('[notion] 既存ノートの取得に失敗:', e.message);
+    if (seq !== notionSchemaSeq) return;
+    els.notionPickerNoteHint.textContent =
+      '既存ノートの一覧を取得できませんでした（新しいノートの作成はできます）';
+    sel.disabled = false;
+    return;
+  }
+  if (seq !== notionSchemaSeq) return;   // 待っている間に選択が変わっていたら捨てる
+
+  notionPickerNotes = notes;
+  const opts = ['<option value="">新しいノートを作る</option>'];
+  if (notes.length) {
+    opts.push('<optgroup label="既存のノートに追記">');
+    for (const n of notes) {
+      opts.push(`<option value="${escapeHtml(n.id)}">${escapeHtml(n.title)}</option>`);
+    }
+    opts.push('</optgroup>');
+  }
+  sel.innerHTML = opts.join('');
+  sel.value = '';
+  sel.disabled = false;
+  els.notionPickerNoteHint.textContent = notes.length
+    ? '既存のノートを選ぶと、そのノートの末尾に追記します'
+    : 'このデータベースにはまだノートがありません';
+  updateNotionPickerMode();
+}
+
+/**
+ * 追記を選んだら、日付列の指定を隠す (v0.23.0)
+ *
+ * 日付列は**新しいページを作るときにだけ**書き込む欄なので、追記では使わない。
+ * 出したままにすると「追記しても日付が入る」と誤解させる。
+ */
+function updateNotionPickerMode() {
+  const appending = !!(els.notionPickerNote && els.notionPickerNote.value);
+  if (els.notionPickerDateRow) els.notionPickerDateRow.hidden = appending;
+  if (els.btnNotionPickerOk) els.btnNotionPickerOk.textContent = appending ? '追記' : '保存';
+}
+
+/**
  * 選択中の DB の列構成を取り、日付プロパティのセレクトを埋める。
  * 日付列が無い DB では「使わない」だけになる。
  */
@@ -3413,6 +3475,10 @@ async function loadNotionPickerSchema() {
   const seq = ++notionSchemaSeq;
   const dsId = els.notionPickerSelect.value;
   notionPickerSchema = null;
+  notionPickerNotes = [];
+  // v0.23.0: 既存ノートの一覧も読む。列構成と独立なので待ち合わせない
+  //（一覧が取れなくても新規作成はできる）
+  if (dsId) loadNotionPickerNotes(dsId, seq);
   els.notionPickerDate.innerHTML = '<option value="">読み込み中…</option>';
   els.notionPickerDate.disabled = true;
   els.btnNotionPickerOk.disabled = true;
@@ -3465,6 +3531,12 @@ async function openNotionPicker(summaryText) {
   els.notionPickerSelect.disabled = true;
   els.notionPickerDate.innerHTML = '';
   els.notionPickerDate.disabled = true;
+  if (els.notionPickerNote) {
+    els.notionPickerNote.innerHTML = '<option value="">新しいノートを作る</option>';
+    els.notionPickerNote.disabled = true;
+  }
+  notionPickerNotes = [];
+  updateNotionPickerMode();
   els.btnNotionPickerOk.disabled = true;
   els.notionPicker.classList.remove('hidden');
 
@@ -3498,11 +3570,17 @@ async function openNotionPicker(summaryText) {
     notionPickerResolve = (picked) => {
       if (!picked || !notionPickerSchema) return resolve(null);
       const id = els.notionPickerSelect.value;
+      // v0.23.0: 空なら今までどおり新規作成、入っていればそのノートへ追記
+      const noteId = els.notionPickerNote ? els.notionPickerNote.value : '';
+      const note = notionPickerNotes.find(n => n.id === noteId) || null;
       return resolve({
         id,
         title: list.find(d => d.id === id)?.title || '',
         titleProp: notionPickerSchema.titleProp,
         dateProp: els.notionPickerDate.value || '',
+        pageId: noteId || '',
+        pageUrl: note?.url || '',
+        pageTitle: note?.title || '',
       });
     };
   });
@@ -3641,8 +3719,14 @@ async function uploadSessionsToNotion(sessions) {
   state.settings.notionLastDatePropName = dest.dateProp || '';
   saveSettings();
 
+  // v0.23.0: 既存ノートへの追記かどうかで、画面の言葉を変える。
+  // 「保存」と出したまま既存ノートに書き足すのは、起きたことと違う
+  const appending = !!dest.pageId;
+  const verb = appending ? '追記' : '保存';
   notionProgressOpen(
-    targets.length === 1 ? 'Notion に保存中…' : `Notion に保存中…（0/${targets.length}）`,
+    targets.length === 1
+      ? `Notion に${verb}中…`
+      : `Notion に${verb}中…（0/${targets.length}）`,
     { cancellable: targets.length > 1 },
   );
 
@@ -3651,17 +3735,31 @@ async function uploadSessionsToNotion(sessions) {
   let cancelled = false;
   for (const session of targets) {
     if (notionCancelRequested) { cancelled = true; break; }
-    notionProgressSet(`「${session.title}」を保存しています…`);
+    notionProgressSet(appending
+      ? `「${session.title}」を「${dest.pageTitle}」に追記しています…`
+      : `「${session.title}」を保存しています…`);
     try {
-      await notionCreateNote({
-        token: state.settings.notionToken,
-        dataSourceId: dest.id,
-        titleProp: dest.titleProp,
-        dateProp: dest.dateProp,
-        dateTs: session.createdAt,
-        title: notionNoteTitle(session, dest.dateProp),
-        toggles: buildNotionToggles(session),
-      });
+      if (appending) {
+        await notionAppendToNote({
+          token: state.settings.notionToken,
+          pageId: dest.pageId,
+          pageUrl: dest.pageUrl,
+          dateTs: session.createdAt,
+          // 追記では日付列を使わないので、タイトルに日時を残す
+          title: notionNoteTitle(session, ''),
+          toggles: buildNotionToggles(session),
+        });
+      } else {
+        await notionCreateNote({
+          token: state.settings.notionToken,
+          dataSourceId: dest.id,
+          titleProp: dest.titleProp,
+          dateProp: dest.dateProp,
+          dateTs: session.createdAt,
+          title: notionNoteTitle(session, dest.dateProp),
+          toggles: buildNotionToggles(session),
+        });
+      }
       // アップ済み印。閉じずに残したタブをタブバーで見分けられるようにする
       session.notionUploadedAt = Date.now();
       results.push({ session, ok: true });
@@ -3671,8 +3769,10 @@ async function uploadSessionsToNotion(sessions) {
       notionProgressAddRow(session.title, 'ng', e.message);
       // v0.15.2: どの保存先に送ろうとして失敗したかも残す。
       // 以前はタブ名と理由だけで、あとからログを見ても保存先が特定できなかった。
-      console.warn(`[notion] アップロード失敗: ${session.title}`,
-        `／保存先: ${dest.title} (${dest.id})`,
+      console.warn(`[notion] ${verb}に失敗: ${session.title}`,
+        appending
+          ? `／追記先: ${dest.pageTitle} (${dest.pageId})`
+          : `／保存先: ${dest.title} (${dest.id})`,
         `／日付列: ${dest.dateProp || 'なし'}`,
         `／理由: ${e.message}`);
     }
@@ -3681,7 +3781,7 @@ async function uploadSessionsToNotion(sessions) {
   }
   if (notionCancelRequested) cancelled = true;
   if (results.some(r => r.ok)) { persistSessions(); renderTabs(); }
-  return { results, cancelled, remaining: targets.length - done };
+  return { results, cancelled, remaining: targets.length - done , verb };
 }
 
 /**
@@ -3700,7 +3800,9 @@ function notionNoteTitle(session, dateProp) {
  * アップロード結果を出して「閉じますか？」を聞く。
  * 成功したタブだけを閉じる対象にする（やっさん指示: 失敗した分は残す）。
  */
-function notionFinish({ results, cancelled, remaining }) {
+function notionFinish({ results, cancelled, remaining, verb }) {
+  // v0.23.0: 既存ノートへの追記のときは「保存」と言わない
+  const act = verb || '保存';
   const ok = results.filter(r => r.ok);
   const ng = results.filter(r => !r.ok);
 
@@ -3712,8 +3814,8 @@ function notionFinish({ results, cancelled, remaining }) {
   els.btnNotionKeepTabs.hidden = false;
 
   if (ok.length === 0) {
-    els.notionProgressTitle.textContent = cancelled ? 'Notion への保存を中止しました' : 'Notion への保存に失敗しました';
-    notionProgressSet('保存できたタブはありません。タブはそのまま残しています。');
+    els.notionProgressTitle.textContent = cancelled ? `Notion への${act}を中止しました` : `Notion への${act}に失敗しました`;
+    notionProgressSet(`${act}できたタブはありません。タブはそのまま残しています。`);
     els.btnNotionCloseTabs.hidden = true;
     els.btnNotionKeepTabs.textContent = '閉じる';
     els.btnNotionKeepTabs.onclick = notionProgressClose;
@@ -3722,7 +3824,7 @@ function notionFinish({ results, cancelled, remaining }) {
   }
 
   els.notionProgressTitle.textContent = cancelled
-    ? 'Notion への保存を中止しました' : 'Notion への保存が完了しました';
+    ? `Notion への${act}を中止しました` : `Notion への${act}が完了しました`;
 
   const label = ok.length === 1 ? `「${ok[0].session.title}」` : `${ok.length}個のタブ`;
   const notes = [];
@@ -3739,14 +3841,14 @@ function notionFinish({ results, cancelled, remaining }) {
     els.btnNotionCloseTabs.hidden = true;
     els.btnNotionKeepTabs.textContent = '閉じる';
     els.btnNotionKeepTabs.onclick = notionProgressClose;
-    notionProgressSet(`${label}を保存して閉じました。${note}`);
+    notionProgressSet(`${label}を${act}して閉じました。${note}`);
     els.btnNotionKeepTabs.focus();
     return;
   }
 
   els.btnNotionCloseTabs.hidden = false;
   els.btnNotionKeepTabs.textContent = '残す';
-  notionProgressSet(`${label}を保存しました。タブを閉じますか？（閉じるとアプリ内の内容は削除されます）${note}`);
+  notionProgressSet(`${label}を${act}しました。タブを閉じますか？（閉じるとアプリ内の内容は削除されます）${note}`);
 
   els.btnNotionCloseTabs.onclick = () => {
     notionProgressClose();
@@ -7670,6 +7772,10 @@ if (els.btnNotionUpload) {
   els.btnNotionPickerOk.addEventListener('click', () => closeNotionPicker(true));
   // 保存先を変えたら、その DB の日付プロパティを取り直す
   els.notionPickerSelect.addEventListener('change', loadNotionPickerSchema);
+  // v0.23.0: 新規作成 ⇄ 追記 の切り替え
+  if (els.notionPickerNote) {
+    els.notionPickerNote.addEventListener('change', updateNotionPickerMode);
+  }
   els.btnNotionCancel.addEventListener('click', requestNotionCancel);
 }
 els.btnLoadJson.addEventListener('click', () => els.fileLoad.click());
