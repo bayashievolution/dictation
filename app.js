@@ -2635,12 +2635,6 @@ async function runDiarization() {
   // v0.21.1: 待つ。ここで消えるかどうかを、この場で利用者に言うため
   // （黙って消すと、次に押したときに「録音がありません」だけが出て理由が分からない）
   const swept = await sweepStoredAudio();
-sweepStoredImages();   // v0.22.0: どのメモからも参照されていない画像を片付ける
-applyClaudeBridgeSetting();   // v0.24.0: 保存されている設定を claude-bridge.js に渡す
-
-if (els.btnClaudeBridgeTest) {
-  els.btnClaudeBridgeTest.addEventListener('click', () => { testClaudeBridge(); });
-}
   refreshAudioUsage();
 
   setStatus('idle', `話者判別が完了（話者${roster.length}人）`);
@@ -9064,6 +9058,15 @@ if (els.btnClearAudio) {
 
 initSessions();
 renderDictBar();   // v0.20.0
+// v0.22.0: どのメモからも参照されていない画像を片付ける
+sweepStoredImages();
+// v0.24.0: 保存されている Claude 連携の設定を claude-bridge.js に渡す。
+// **起動のたびに必ずやる。** claude-bridge.js 側の旗は false から始まるので、
+// ここを通さないと、設定画面で入れてあっても連携が切れたままになる
+applyClaudeBridgeSetting();
+if (els.btnClaudeBridgeTest) {
+  els.btnClaudeBridgeTest.addEventListener('click', () => { testClaudeBridge(); });
+}
 // v0.19.0: 期限切れの音声を掃除する。「タブを閉じたら消す」はクラッシュや
 // 強制リロードでは走らないので、消し忘れを防ぐ本体はこちら
 sweepStoredAudio();
