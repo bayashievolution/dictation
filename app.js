@@ -609,9 +609,72 @@ function autoScroll(force = false) {
   }
 }
 
+/**
+ * 要素から文字を取り出す。**表示されていてもいなくても同じ結果になる** (v0.24.3)
+ *
+ * ■ なぜ自分で書くのか
+ *
+ * `innerText` は**画面に出ている見た目**を返すので、要素が描画されていない
+ * （タブが閉じている、`display:none`、document に繋がっていない）と
+ * `textContent` に落ちる。`textContent` には改行が無いので、
+ * **全行が一つに繋がって出てくる**。
+ *
+ * 実測した（実機の Chromium）:
+ *   メモタブを開いている   → "第3回 評価誺\nルーブリック要確認\n来週までに提出"
+ *   質問タブを開いている   → "第3回 評価誺ルーブリック要確認来週までに提出"
+ *
+ * 質問するときに開いているのは必ず質問タブなので、
+ * **質問ペインに渡すメモと要約はこれまですっと一塊で渡っていた**。
+ * 他のセッションから読む `htmlToPlain()` も、document に繋がっていない
+ * div を使っているので同じだった。
+ *
+ * 行が潰れると単に読みにくいだけでなく、箇条書きの項目同士が繋がって
+ * （「評価誺ルーブリック要確認」）**言っていない語ができてしまう**。
+ *
+ * ■ なぜこの範囲にとどめたか
+ *
+ * インデントやチェックの入/切は表現しない。`innerText` でも落ちていて
+ * 質問ペインはそれで動いてきたので、ここでは**改行を戻すだけ**にする。
+ */
+const PLAIN_LINE_TAGS = new Set([
+  'div', 'p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'blockquote', 'pre', 'label', 'tr', 'hr', 'table', 'ul', 'ol',
+  'section', 'article', 'figcaption', 'dd', 'dt',
+]);
+
+function elementToPlainText(el) {
+  if (!el) return '';
+  const out = [];
+  // ブロックの切れ目は「区切り」なので重ならせない。
+  // 連続した li の間に空行が入ると、表示中の innerText と食い違うし、
+  // 送るトークンも無駄に増える。
+  // ただし <br> は書き手が明示的に入れた改行（Shift+Enter）なので、
+  // これだけは重なってよい。空の <div><br></div> が空行になるのはこのため。
+  const sep = () => { if (out.length && out[out.length - 1] !== '\n') out.push('\n'); };
+  const walk = (node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3) { out.push(child.data); continue; }   // TEXT_NODE
+      if (child.nodeType !== 1) continue;
+      const tag = (child.tagName || '').toLowerCase();
+      if (tag === 'br') { out.push('\n'); continue; }
+      if (tag === 'img' || tag === 'input') continue;   // 文字を持たないもの
+      const breaks = PLAIN_LINE_TAGS.has(tag);
+      if (breaks) sep();
+      walk(child);
+      if (breaks) sep();
+    }
+  };
+  walk(el);
+  return out.join('')
+    .replace(/[ \t]+\n/g, '\n')      // 行末の空白
+    .replace(/\n{3,}/g, '\n\n')       // 空行は1つまで
+    .trim();
+}
+
 function getConfirmedText() {
-  // innerText で全体のプレーンテキストを取る（ペースト直書きにも対応）
-  const plain = els.confirmed.innerText.replace(/\u00A0/g, ' ').trim();
+  // 全体のプレーンテキストを取る（ペースト直書きにも対応）
+  // v0.24.3: innerText はタブを閉じていると改行を落とすので自分で取る
+  const plain = elementToPlainText(els.confirmed).replace(/\u00A0/g, ' ').trim();
   if (!plain) return '';
 
   const paragraphs = els.confirmed.querySelectorAll('.paragraph');
@@ -630,11 +693,11 @@ function getConfirmedText() {
     .map(p => {
       const parts = [];
       for (const child of p.children) {
-        const t = (child.innerText || '').trim();
+        const t = elementToPlainText(child);
         if (!t) continue;                                  // 段落間のすき間 div 等
         parts.push(child.tagName === 'H2' ? `## ${t}` : t);
       }
-      return parts.length ? parts.join('\n\n') : p.innerText.trim();
+      return parts.length ? parts.join('\n\n') : elementToPlainText(p);
     })
     .filter(Boolean)
     .join('\n\n');
@@ -645,11 +708,11 @@ function getConfirmedText() {
 }
 
 function getMemoText() {
-  return els.memo.innerText.trim();
+  return elementToPlainText(els.memo);
 }
 
 function getSummaryText() {
-  return els.summary.innerText.trim();
+  return elementToPlainText(els.summary);
 }
 
 function hasAnyContent() {
@@ -5376,7 +5439,8 @@ function htmlToPlain(html) {
   if (!html) return '';
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
-  return (tmp.innerText || tmp.textContent || '').trim();
+  // document に繋がっていない div なので innerText は常に改行を落とす (v0.24.3)
+  return elementToPlainText(tmp);
 }
 
 async function autoGenerateTitle({ silent = true, force = false, sessionId = null } = {}) {
@@ -5440,7 +5504,21 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
   const transcript = (targetId === state.activeId)
     ? getConfirmedText()
     : htmlToPlain(session.transcript);
+  // メモも要約の素材にする (v0.24.3)
+  //
+  // やっさんの確認「要約の中にノートの内容は反映されるんだっけ」。
+  // されていなかった。質問ペインは最初から 3種（要約・メモ・文字起こし）を
+  // 渡していたのに、要約だけが文字起こしとタイトルしか見ていなかった。
+  //
+  // 設定で切れる形にしないのは、メモは自分で書いたものだけで切りたい場面が無いから。
+  // 粒度（詳細・バランス・概要）の横にトグルが増えると、v0.21.4 の
+  // 「自動的に閉じる」と同じで**押したかどうか分からなくなる**種類のスイッチになる。
+  const memo = (targetId === state.activeId)
+    ? getMemoText()
+    : htmlToPlain(session.memo);
   if (!transcript) {
+    // メモだけで要約するのは別の機能なのでここではやらない。
+    // 文言を変えると「メモがあればいける」と読めるので、そのままにする
     if (!silent) alert('文字起こしが空です。要約を生成できません。');
     return;
   }
@@ -5465,6 +5543,7 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
     const summary = await summarizeWithGemini({
       apiKey: state.settings.apiKey,
       transcript,
+      memo,
       title: session?.title,
       detail: state.settings.summaryDetail || 'medium',
     });

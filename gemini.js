@@ -59,9 +59,12 @@ function buildContextBlock(ctx) {
 }
 
 /** 「聞こえていないことを書かない」を毎回はっきり伝える */
-function buildNoInventionRule() {
+function buildNoInventionRule({ source = '音声' } = {}) {
+  // source: 「何に無い内容を足すな」の「何」。文字起こしの経路は音声そのもの。
+  // 要約は v0.24.3 でメモも素材になったので、そこだけ「資料」になる。
+  // ここで「音声」と言い続けると「メモにしか無いことは落とせ」と読めてしまう。
   return [
-    '- 音声に無い内容は絶対に足さない。文脈や参考情報から推測して補完しない',
+    `- ${source}に無い内容は絶対に足さない。文脈や参考情報から推測して補完しない`,
     '- 聞き取れない箇所は [不明瞭] と書く。それらしい言葉で埋めない',
   ].join('\n');
 }
@@ -471,17 +474,53 @@ const SUMMARY_PROMPTS = {
  * なので禁止を足すのではなく、**数の要求を外した上で、入力が短いことは
  * 異常ではないと教える**（v0.17.1 で「この音声は断片です」と教えたのと同じ手）。
  */
-function buildNoPaddingRule() {
+function buildNoPaddingRule({ hasMemo = false } = {}) {
   return [
     '',
-    '■ 最重要：文字起こしにある内容だけを書く',
+    hasMemo ? '■ 最重要：文字起こしとメモにある内容だけを書く'
+            : '■ 最重要：文字起こしにある内容だけを書く',
     '- 文字起こしは短いことも、内容が乏しいこともある。**それが正常な入力です。**',
     '  （テストの録音、数十秒のメモ、雑談だけ、ということも普通にある）',
     '- **項目数や行数を満たすために、話されていないことを書かない。**',
     '  用意した見出しに書ける内容が無いなら、その見出しごと省く',
     '- 短い録音なら、短い要約で終えてよい。1〜2行の要約でも正しい出力です',
     '- 話されていないのに「会議で決まった」「今後の予定」などを補わない',
-    buildNoInventionRule(),
+    buildNoInventionRule({ source: hasMemo ? '資料' : '音声' }),
+  ].join('\n');
+}
+
+/**
+ * メモを要約の素材に加えるときの扱い方 (v0.24.3)
+ *
+ * やっさんの確認「要約の中にノートの内容は反映されるんだっけ」→
+ * されていなかったので入れた。講義中のメモには
+ * 「あとで調べる」「ここが試験に出る」のような
+ * **音声に出ていない情報**が入るから。
+ *
+ * 気をつけることが2つある。
+ *
+ * 1. **短いほうに引っ張られる。** メモは箇条書きの断片で、
+ *    文字起こし全文に比べて圧倒的に短い。そのまま並べると
+ *    目立つほうが骨格になる恐れがあるので、役割を明記する。
+ * 2. **断片を埋めたくなる。** v0.18.7 で踏んだ穴と同じ構造で、
+ *    「・ルーブリック要確認」の4文字から文節を作られては困る。
+ *    書かれていない部分を想像で埋めないと明示する。
+ *
+ * 引用も止める。メモは発言ではないので、「〜」でくくると
+ * 言っていないことを言ったことにしてしまう。
+ */
+function buildMemoRule() {
+  return [
+    '',
+    '■ メモの扱い',
+    '- 【文字起こし】が本体、【メモ】は書き手が録音中に手で書いた補足です',
+    '- メモには音声に出ていないことが入る（あとで調べる、ここが重要、',
+    '  固有名詞の正しい表記など）。**音声に無いからといって捨てない**',
+    '- ただしメモは文字起こしより**ずっと短い**。短いほうに全体を引っ張られないこと。',
+    '  要約の骨格は文字起こしで作り、メモはそこに足りない点を補う形で混せる',
+    '- メモは文になっていない断片が多い。**書かれていない部分を想像で埋めない**。',
+    '  断片のまま書くか、文字起こしの裏付けがあるときだけ文にする',
+    '- メモは発言ではないので、「〜」で引用しない（引用は実際に話された言葉だけ）',
   ].join('\n');
 }
 
@@ -490,15 +529,21 @@ function buildNoPaddingRule() {
  * @param {object} args
  * @param {string} args.apiKey
  * @param {string} args.transcript - 要約対象の全文
+ * @param {string} [args.memo] - メモ（v0.24.3。空なら以前と全く同じプロンプトになる）
  * @param {string} [args.title] - セッションタイトル（文脈補助）
  * @returns {Promise<string>} Markdown形式の要約
  */
-async function summarizeWithGemini({ apiKey, transcript, title, detail }) {
+async function summarizeWithGemini({ apiKey, transcript, memo, title, detail }) {
   if (!apiKey) throw new Error('Gemini API キーが設定されていません');
   if (!transcript || !transcript.trim()) throw new Error('要約対象のテキストがありません');
 
+  // メモが空のときは何も添えない。v0.24.2 までと完全に同じプロンプトにして、
+  // 「メモを入れたせいで要約が変わった」がメモを書いたときだけに限られるようにする
   const level = SUMMARY_PROMPTS[detail] ? detail : 'medium';
-  const instruction = SUMMARY_PROMPTS[level] + buildNoPaddingRule();
+  const memoText = (memo || '').trim();
+  const hasMemo = !!memoText;
+  const instruction = SUMMARY_PROMPTS[level] + buildNoPaddingRule({ hasMemo })
+                    + (hasMemo ? buildMemoRule() : '');
 
   // 実際の長さを添える。「短い」と言葉で言うより、数字のほうが効く
   const len = transcript.trim().length;
@@ -506,6 +551,9 @@ async function summarizeWithGemini({ apiKey, transcript, title, detail }) {
     title ? `【セッションタイトル】${title}` : '',
     `【文字起こし全文】（${len}字。短ければ短いなりの要約にすること）`,
     transcript,
+    // 文字起こしの**あと**に置く。先に短いメモを読ませるとそれが骨格になりやすい
+    hasMemo ? `【メモ】（${memoText.length}字。書き手の補足。本体は上の文字起こし）` : '',
+    hasMemo ? memoText : '',
   ].filter(Boolean).join('\n\n');
 
   // シンプルさに応じて温度と最大トークンを調整
