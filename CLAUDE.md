@@ -61,6 +61,20 @@ sh tests/run.sh
 走らなくなる（node_modules は `.gitignore` に入っている）。
 DOM がどうしても要るなら、そのテストの冒頭に `npm i jsdom` が要る旨を書く。
 
+### ブラウザでしか分からないことは、ブラウザに当てる
+
+`tests/browser/` は playwright と Chromium が要るので `tests/run.sh` では走らない
+（ファイル名を `tests/t-*.js` にしていない）。走らせかたは各ファイルの冒頭に書いてある。
+
+**貼り付け・キー入力・contenteditable の挙動は、推測すると外す。**
+v0.24.2 の「コピペ以降 ・ が箇条書きにならない」は、Chrome がクリップボードの
+`text/html` を `<div><p>行</p><p>行</p></div>` という入れ子で挿入することが原因だった。
+この入れ子の作られ方は仕様書に無く、`text/plain` だけのときや `<ul>` のときは形が違って
+壊れない。**本物の Ctrl+V を送るまで分からなかった。**
+
+この環境には Chromium と playwright が入っている（`NODE_PATH=/opt/node22/lib/node_modules`）。
+`node serve.js` で配って本物のキーを送れるので、DOM の話は実機で確かめる。
+
 ### scratchpad に置いてはいけない（2026-10-05 に痛い目を見た）
 
 v0.16〜v0.22 で積み上げた **19本のテストを丸ごと失った**。

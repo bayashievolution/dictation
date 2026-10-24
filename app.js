@@ -8170,6 +8170,71 @@ els.summary.addEventListener('input', onEdit);
 
 /* ───────── Memo Notion風 Markdown エディタ ───────── */
 
+/**
+ * メモの「行」にあたるブロック要素のタグ。
+ * ul / ol は行ではなく入れ物なので入れない（行は li のほう）。
+ */
+const MEMO_BLOCK_TAGS = new Set([
+  'div', 'p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'blockquote', 'pre', 'label', 'td', 'th', 'dd', 'dt', 'figcaption',
+]);
+
+/**
+ * キャレットのいるノードから「行」のブロックを探す。(v0.24.2)
+ *
+ * ■ なぜ直したか
+ *
+ * 以前は #memo の**直下の子**まで遡っていた。手で打っている間は
+ * 「1行 = #memo 直下の div」なので一致していたが、クリップボードの
+ * text/html を貼ると Chrome は
+ *   <div><p>行</p><p>行</p><p>行</p></div>
+ * という入れ子を作る。すると外側の div が返り、その textContent に
+ * 貼り付けた全文が入るので、^・ や ^# の判定が二度と当たらなくなる。
+ * Enter を押しても新しい p が同じ div の中にできるだけなので、
+ * 以降ずっと直らない。やっさん報告
+ * 「途中コピペ　それ以降の手動での・が箇条書きの・にならなくなる」はこれ。
+ *
+ * 推測ではなく、実機の Chromium に本物の Ctrl+V を送って再現させた。
+ * text/plain だけの貼り付けと <ul> の貼り付けでは壊れない（入れ子の
+ * 作られ方が違う）ので、「コピペすると必ず」ではなく
+ * 「text/html が付いているとき」が条件。
+ *
+ * ■ なぜ「内側のブロック」を返すのか
+ *
+ * 入れ子がなければ最初に見つかるブロックが直下の子そのものなので、
+ * 貼り付けを挟まない従来の操作では戻り値が変わらない。
+ * ブロックが1つも見つからないとき（<span> だけで包まれている等）だけ、
+ * 従来どおり直下の子を返して取りこぼさないようにする。
+ */
+function memoBlockFromNode(node, root) {
+  if (!node || !root) return null;
+  // TEXT_NODE。テストで DOM を用意しないので数値で見る
+  if (node.nodeType === 3) node = node.parentNode;
+  let topChild = null;
+  while (node && node !== root) {
+    if (node.nodeType === 1 && MEMO_BLOCK_TAGS.has((node.tagName || '').toLowerCase())) return node;
+    if (node.parentNode === root) topChild = node;
+    node = node.parentNode;
+  }
+  return topChild;
+}
+
+/**
+ * すでに箇条書きの中で打たれた行頭の記号を外す。(v0.24.2)
+ *
+ * li の中で「・みかん」と打つと、li のマーカーと文字の ・ が二重に出る
+ * （上の修理とは別口で、貼り付けなしでも2行目から起きていた）。
+ * やっさんは行頭に ・ を打って箇条書きを作るので、2行目以降も同じ打ち方に
+ * なる。打たれた ・ は「箇条書きにしたい」という意思表示で、すでに li なら
+ * 用は済んでいる。だから記号だけ飲み込む。
+ *
+ * 記号だけで content が空のときは返さない（打ちかけを消さないため）。
+ */
+function memoStripListMarker(text) {
+  const m = String(text == null ? '' : text).match(/^(?:・\s?|[-*]\s)(.+)$/);
+  return m ? m[1] : null;
+}
+
 function memoGetCurrentBlock() {
   const sel = window.getSelection();
   if (!sel.rangeCount) return null;
@@ -8205,12 +8270,8 @@ function memoGetCurrentBlock() {
     return div;
   }
 
-  // 通常ケース: 直下の element まで遡る
-  if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
-  while (node && node !== els.memo && node.parentNode !== els.memo) {
-    node = node.parentNode;
-  }
-  return (node && node !== els.memo) ? node : null;
+  // 通常ケース: 「行」のブロックまで遡る
+  return memoBlockFromNode(node, els.memo);
 }
 
 function memoFindTaskItem() {
@@ -8305,7 +8366,20 @@ function checkMemoMarkdown() {
   const block = memoGetCurrentBlock();
   if (!block) return;
   const tag = (block.tagName || '').toLowerCase();
-  if (['h1','h2','h3','li','blockquote','hr','label'].includes(tag)) return;
+  // すでに箇条書きの中。行頭に打たれた ・ / - は飲み込む (v0.24.2)
+  if (tag === 'li') {
+    // 子要素がある li は触らない。textContent への代入で
+    // 画像や <br> を消してしまうから
+    if (!block.children.length) {
+      const stripped = memoStripListMarker(block.textContent || '');
+      if (stripped !== null) {
+        block.textContent = stripped;
+        memoPlaceCaretAtEnd(block);
+      }
+    }
+    return;
+  }
+  if (['h1','h2','h3','blockquote','hr','label'].includes(tag)) return;
   const text = block.textContent || '';
 
   // --- 区切り線 (- 単独や -- 入力中に箇条書きに化けないよう最初に判定)
