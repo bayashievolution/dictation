@@ -547,6 +547,29 @@ function applyAiButtonState() {
 }
 
 /* ───────── UI helpers ───────── */
+
+/**
+ * 録音中に右上へ出す文言 (v0.24.1)
+ *
+ * Gemini モードでは「録音中」ではなく **「聞き取り中」** と出す（やっさん指摘）。
+ *
+ * 「録音中」は**録音が残っていると読める**。実際には既定で保持しておらず、
+ * 聞き取って文字にしているだけなので、言葉のほうが実態に合っていなかった。
+ * 録音の保持は設定で明示的にオンにしたときだけ起きる。
+ *
+ * 文言を1か所にまとめてあるのは、状態を戻す処理が画面のあちこちに
+ * 散らばっているため。直接書くと、片方だけ直って食い違っていく。
+ */
+function recordingLabel() {
+  return state.settings.inputMode === 'gemini-audio' ? '聞き取り中' : '録音中';
+}
+
+/** 録音の状態に応じて右上を戻す。エラー表示などのあとに使う */
+function restoreStatus() {
+  setStatus(state.isRecording ? 'listening' : 'idle',
+            state.isRecording ? recordingLabel() : '停止');
+}
+
 function setStatus(mode, label) {
   els.status.className = `status ${mode}`;
   els.status.textContent = label;
@@ -1011,7 +1034,7 @@ async function retryPendingRefinements({ showFeedback = true } = {}) {
   if (showFeedback && failed > 0) {
     setStatus('error', `${failed}件の整形は失敗（後でまた再試行可）`);
     setTimeout(() => {
-      if (state.isRecording) setStatus('listening', '録音中');
+      if (state.isRecording) setStatus('listening', recordingLabel());
       else setStatus('idle', '停止');
     }, 4000);
   }
@@ -1126,8 +1149,7 @@ async function refineWholeTranscript({ showFeedback = true } = {}) {
     persist();
     if (showFeedback) {
       setStatus('error', '全体整形失敗: ' + (e.message || '').slice(0, 60));
-      setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
-                                  state.isRecording ? '録音中' : '停止'), 4000);
+      setTimeout(() => restoreStatus(), 4000);
     }
   }
 }
@@ -1362,7 +1384,9 @@ function buildRecognition() {
   rec.continuous = true;
   rec.interimResults = true;
 
-  rec.onstart = () => setStatus('listening', '録音中');
+  // Web Speech モードの本体。recordingLabel() はこのモードでは「録音中」を返すが、
+  // 直書きしないのは、モードが増えたときに取り残されないようにするため
+  rec.onstart = () => setStatus('listening', recordingLabel());
 
   rec.onresult = (event) => {
     // v0.13.31 完全分離型：
@@ -2872,7 +2896,7 @@ async function startGeminiAudioRecording() {
   setRecordingUI(true);
   startContextExtractTimer();   // v0.16.1
   startLiveDisplay();           // v0.17.0
-  setStatus('listening', '録音中 (Gemini)');
+  setStatus('listening', recordingLabel());
   resetLongSilenceTimer();
 
   // チャンク区切り（v0.18.0: 無音位置で切る。判断は decideChunkCut）
@@ -4908,8 +4932,7 @@ function doPaneUndo(paneId) {
   const idx = _topForSession(s.undo, state.activeId);
   if (idx < 0) {
     setStatus('idle', '戻せる操作がありません');
-    setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
-                                state.isRecording ? '録音中' : '停止'), 1500);
+    setTimeout(() => restoreStatus(), 1500);
     return;
   }
   // 現在状態をRedoに退避
@@ -4929,8 +4952,7 @@ function doPaneUndo(paneId) {
   const paneLabel = PANE_META[paneId]?.label || paneId;
   diagLog.info(`Undo実行: ${paneId} / ${last.op}`);
   setStatus('idle', `[${paneLabel}] 戻しました: ${last.op}`);
-  setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
-                              state.isRecording ? '録音中' : '停止'), 2000);
+  setTimeout(() => restoreStatus(), 2000);
 }
 
 function doPaneRedo(paneId) {
@@ -4939,8 +4961,7 @@ function doPaneRedo(paneId) {
   const idx = _topForSession(s.redo, state.activeId);
   if (idx < 0) {
     setStatus('idle', 'やり直せる操作がありません');
-    setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
-                                state.isRecording ? '録音中' : '停止'), 1500);
+    setTimeout(() => restoreStatus(), 1500);
     return;
   }
   const current = _paneSnapshot(paneId, s.redo[idx].op);
@@ -4959,8 +4980,7 @@ function doPaneRedo(paneId) {
   const paneLabel = PANE_META[paneId]?.label || paneId;
   diagLog.info(`Redo実行: ${paneId} / ${next.op}`);
   setStatus('idle', `[${paneLabel}] やり直しました: ${next.op}`);
-  setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
-                              state.isRecording ? '録音中' : '停止'), 2000);
+  setTimeout(() => restoreStatus(), 2000);
 }
 
 function updatePaneUndoRedoButtons() {
@@ -5474,7 +5494,7 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
       els.summary.classList.remove('generating');
       if (els.btnSummaryCombo) els.btnSummaryCombo.classList.remove('firing');
     }
-    setStatus(state.isRecording ? 'listening' : 'idle', state.isRecording ? '録音中' : '停止');
+    restoreStatus();
   }
 }
 
@@ -6845,8 +6865,7 @@ async function handleMemoPaste(e) {
     const msg = describePasteReject(decision);
     setStatus('error', msg);
     diagLog.info('メモ: ' + msg);
-    setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
-                               state.isRecording ? '録音中' : '停止'), 5000);
+    setTimeout(() => restoreStatus(), 5000);
     return;
   }
 
