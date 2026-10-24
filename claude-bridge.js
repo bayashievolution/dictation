@@ -156,6 +156,41 @@ async function claudeBridgeRun(prompt, { url = CLAUDE_BRIDGE_URL, signal } = {})
 }
 
 /** 中継が生きているか。claude は起動しないので速い */
+/**
+ * Gemini に戻したとき、画面に出す文言 (v0.24.6)
+ *
+ * ■ なぜ直したか
+ *
+ * これまでは理由によらず
+ * 「Claude に繋がらないので Gemini で処理しました」の一種類だった。
+ * だが実際には「中継は動いているが claude 側で失敗」もある。
+ * start.bat が動いているのに「繋がらない」と出るのは**嘘**で、
+ * 直しようが無くなる（やっさんが実際にこれで詰まった）。
+ *
+ * ■ なぜ理由をそのまま貼らないか
+ *
+ * 状態表示は `max-width: 360px` で、超えると末尾が…で切れる（実測）。
+ * サーバーが返す理由をそのまま繋ぐと**胝心な末尾から消える**ので、
+ * 数えられる原因については短い言い切りに置き換える。
+ * 生の理由は診断ログに残るので失われない。
+ */
+function claudeBridgeFallbackMessage(error) {
+  const e = String(error == null ? '' : error);
+  if (e.includes('繋がりません')) {
+    return '中継に繋がらないので Gemini で処理（start.bat を起動）';
+  }
+  if (/claude を実行できません|ENOENT|not found|見つかりません/i.test(e)) {
+    return 'claude を実行できないので Gemini で処理しました';
+  }
+  if (e.includes('返事がありませんでした')) {
+    return 'Claude が時間内に返さないので Gemini で処理';
+  }
+  if (e.includes('長すぎます')) {
+    return '長すぎて Claude に送れないので Gemini で処理';
+  }
+  return 'Claude で処理できなかったので Gemini で処理しました';
+}
+
 async function claudeBridgeHealth({ url = CLAUDE_BRIDGE_URL } = {}) {
   try {
     const res = await fetch(url + '/health');

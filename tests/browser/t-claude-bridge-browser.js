@@ -113,6 +113,32 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
     await ctx.close();
   }
 
+  console.log('\n■ Gemini に戻したときの文言が、状態表示に収まるか');
+  // 状態表示は max-width: 360px で、超えると**末尾から**…で切れる。
+  // 「start.bat を起動」のような**どうすればいいか**が末尾にあるので、
+  // 切れると一番大事なところから消える。文字数では測れないのでここで見る
+  {
+    const { ctx, page } = await open(browser);
+    const REASONS = [
+      ['サーバーが動いていない', 'Claude Code の中継に繋がりません（start.bat でサーバーを起動してください）'],
+      ['claude が入っていない', 'claude を実行できませんでした'],
+      ['時間切れ', '180秒待っても返事がありませんでした'],
+      ['長すぎる', '長すぎます（250000字 / 上限200000字）'],
+      ['知らないエラー', '終了コード 1'],
+      ['理由が空', ''],
+    ];
+    for (const [label, err] of REASONS) {
+      const r = await page.evaluate((e) => {
+        const msg = claudeBridgeFallbackMessage(e);
+        setStatus('error', msg);
+        const el = els.status;
+        return { msg, 切れ: el.scrollWidth > el.clientWidth + 1, 幅: Math.round(el.scrollWidth) };
+      }, err);
+      eq(`${label}（${r.幅}px）: ${r.msg}`, r.切れ, false);
+    }
+    await ctx.close();
+  }
+
   await browser.close();
   console.log(fail === 0 ? '\nすべて通過' : `\n失敗 ${fail} 件`);
   process.exit(fail === 0 ? 0 : 1);

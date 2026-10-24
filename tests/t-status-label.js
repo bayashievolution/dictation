@@ -29,7 +29,7 @@ const eq = (label, got, want) => {
 
 console.log('■ 文言');
 ctx.state.settings.inputMode = 'gemini-audio';
-eq('Gemini モードは「聞き取り中」', ctx.recordingLabel(), '聞き取り中');
+eq('Gemini モードは「聞き取り中 (Gemini)」', ctx.recordingLabel(), '聞き取り中 (Gemini)');
 ctx.state.settings.inputMode = 'web-speech';
 eq('Web Speech モードは「録音中」', ctx.recordingLabel(), '録音中');
 ctx.state.settings.inputMode = undefined;
@@ -39,7 +39,7 @@ console.log('\n■ 状態を戻すとき（エラー表示のあとなど）');
 ctx.state.settings.inputMode = 'gemini-audio';
 ctx.state.isRecording = true;
 ctx.restoreStatus();
-eq('Gemini・録音中', shown, { mode: 'listening', label: '聞き取り中' });
+eq('Gemini・聞き取り中', shown, { mode: 'listening', label: '聞き取り中 (Gemini)' });
 ctx.state.isRecording = false;
 ctx.restoreStatus();
 eq('Gemini・停止中', shown, { mode: 'idle', label: '停止' });

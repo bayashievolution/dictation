@@ -102,5 +102,51 @@ eq('コードブロックが1つだけの回答は壊さない',
 eq('空でも落ちない', unfence(''), '');
 eq('undefined でも落ちない', unfence(undefined), '');
 
+
+/* ───────── v0.24.6: Gemini に戻したときの文言 ─────────
+ *
+ * 理由によらず「繋がらない」と出していたのを言い分ける。
+ * start.bat は動いているのに「繋がらない」と言われると、直しようが分からない
+ * （やっさんが実際にここで詰まった）。 */
+vm.runInContext(grab(src, 'claudeBridgeFallbackMessage'), ctx);
+console.log('\n■ Gemini に戻したときの文言（理由を言い分ける）');
+{
+  const m = (e) => ctx.claudeBridgeFallbackMessage(e);
+  const is = (label, got, want) => {
+    const ok = got === want;
+    console.log(`${ok ? '✓' : '✕'} ${label}: ${JSON.stringify(got)}`);
+    if (!ok) { console.log(`    期待 ${JSON.stringify(want)}`); fail++; }
+  };
+  is('サーバーが動いていない',
+     m('Claude Code の中継に繋がりません（start.bat でサーバーを起動してください）'),
+     '中継に繋がらないので Gemini で処理（start.bat を起動）');
+  is('claude が入っていない', m('claude を実行できませんでした'),
+     'claude を実行できないので Gemini で処理しました');
+  is('spawn ENOENT でも同じ扱い', m('spawn claude ENOENT'),
+     'claude を実行できないので Gemini で処理しました');
+  is('時間切れ', m('180秒待っても返事がありませんでした'),
+     'Claude が時間内に返さないので Gemini で処理');
+  is('長すぎる', m('長すぎます（250000字 / 上限200000字）'),
+     '長すぎて Claude に送れないので Gemini で処理');
+  is('知らないエラー', m('終了コード 1'),
+     'Claude で処理できなかったので Gemini で処理しました');
+  is('空', m(''), 'Claude で処理できなかったので Gemini で処理しました');
+  is('null', m(null), 'Claude で処理できなかったので Gemini で処理しました');
+
+  // 文言が状態表示に収まるか（max-width: 360px）は**実測しないと分からない**。
+  // 文字数では測れない（半角は細いので、36字でも 327px で収まる）。
+  // 切れていないことの検査は tests/browser/t-claude-bridge-browser.js にある。
+  const all = ['Claude Code の中継に繋がりません（start.bat でサーバーを起動してください）',
+               'claude を実行できませんでした', '180秒待っても返事がありませんでした',
+               '長すぎます（1字 / 上限2字）', '終了コード 1', ''];
+  // どの文言も「Gemini で処理」したことは必ず言う（黙って戻さない）
+  for (const e of all) {
+    const t = m(e);
+    const ok = t.includes('Gemini で処理');
+    console.log(`${ok ? '✓' : '✕'} Gemini に戻したと必ず言う: ${t}`);
+    if (!ok) fail++;
+  }
+}
+
 console.log(fail ? `\n${fail}件 失敗` : '\nすべて通過');
 process.exit(fail ? 1 : 0);

@@ -564,7 +564,13 @@ function applyAiButtonState() {
  * 散らばっているため。直接書くと、片方だけ直って食い違っていく。
  */
 function recordingLabel() {
-  return state.settings.inputMode === 'gemini-audio' ? '聞き取り中' : '録音中';
+  // v0.24.1 の意図: 「録音中」だと機械が回っているだけに見える。
+  // 裏で AI が「耳」で聞いていることを言葉に出したかった（やっさん）。
+  //
+  // v0.24.6: そのとき `(Gemini)` まで消してしまっていたが、
+  // これは**どちらのモードで動いているかの印**なので残す。
+  // 変えるべきだったのは前半だけ（やっさん指摘）。
+  return state.settings.inputMode === 'gemini-audio' ? '聞き取り中 (Gemini)' : '録音中';
 }
 
 /** 録音の状態に応じて右上を戻す。エラー表示などのあとに使う */

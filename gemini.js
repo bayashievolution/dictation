@@ -266,7 +266,14 @@ async function _tryClaudeBridge(body, feature) {
   if (window.diagLog) {
     window.diagLog.info(`Claude Code に回せなかったので Gemini で処理します（${feature}）: ${r.error}`);
   }
-  if (window.setStatus) window.setStatus('error', 'Claude に繋がらないので Gemini で処理しました');
+  // v0.24.6: 理由によって言い分ける。中継が動いていて claude 側で失敗したときまで
+  // 「繋がらない」と言うのは嘘で、start.bat を見に行っても直らない
+  if (window.setStatus) {
+    const msg = typeof claudeBridgeFallbackMessage === 'function'
+      ? claudeBridgeFallbackMessage(r.error)
+      : 'Claude で処理できなかったので Gemini で処理しました';
+    window.setStatus('error', msg);
+  }
   return null;
 }
 
