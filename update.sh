@@ -19,7 +19,12 @@
 # DICT_DIR で対象を差し替えられるようにしてある（tests/t-update-sh.js）。
 
 main() {
-  DIR="${DICT_DIR:-$HOME/dictation}"
+  # 置き場所を書き固めない (v0.24.13)。
+  # このスクリプトはリポジトリの中にあるので、
+  # **自分が入っているフォルダを更新する**のが正しい。
+  # （以前は $HOME/dictation 固定だったので、フォルダを移すと壊れた）
+  SELF_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
+  DIR="${DICT_DIR:-${SELF_DIR:-$HOME/dictation}}"
   BRANCH='claude/dictation-app-status-ra7l70'   # main には入っていない。変わったらここも変える
 
   echo "=== ばっさんディクテーション アプデ ==="
