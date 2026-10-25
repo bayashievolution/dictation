@@ -54,7 +54,7 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
   console.log('■ 「接続を確認」を押したときに文言が変わるか');
   {
     const { ctx, page } = await open(browser);
-    eq('押す前は「未確認」', await status(page), '未確認');
+    eq('押す前は「未確認」', (await status(page)).startsWith('未確認'), true);
     await page.evaluate(() => { document.getElementById('btn-settings').click(); });
     await page.waitForTimeout(300);
     await page.evaluate(() => { document.getElementById('btn-claude-bridge-test').click(); });
@@ -176,13 +176,20 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
   console.log('\n■ 設定でオンにしたその場でログインを見る (v0.24.9)');
   // やっさんの指摘「設定の時点でログインしてないと動かないようにしたほうがいい」。
   // オンにできてしまうと、次に録音を止めて要約を回して初めて失敗する
+  //
+  // v0.24.10: 戻すのは**使えないとはっきり分かっているときだけ**。
+  // やっさん報告「オフにしたらオンにできない　トグルが動かないよう」——
+  // 古い serve.js が走っているだけでもチェックを戻していたので、
+  // **何も壊れていないのに永久にオンにできない**状態になっていた
   const TOGGLE = [
-    ['ログインしていない', { ok: true, invocation: 'claude', auth: { ok: true, loggedIn: false } },
+    ['ログインしていない（戻す）', { ok: true, invocation: 'claude', auth: { ok: true, loggedIn: false } },
      false, 'login.bat'],
     ['ログイン済み', { ok: true, invocation: 'claude', auth: { ok: true, loggedIn: true } },
      true, '使えます'],
-    ['状態を読めない', { ok: true, auth: { ok: false, error: 'spawn claude ENOENT' } },
-     false, '確かめられません'],
+    ['古い serve.js（戻さない）', { ok: true, invocation: 'claude' },
+     true, 'start.bat を一度閉じて'],
+    ['claude を確かめられない（戻さない）', { ok: true, auth: { ok: false, error: 'spawn claude ENOENT' } },
+     true, '確かめられません'],
   ];
   for (const [label, body, wantChecked, wantText] of TOGGLE) {
     const { ctx, page } = await open(browser);
@@ -191,11 +198,9 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
     }));
     await page.evaluate(() => { document.getElementById('btn-settings').click(); });
     await page.waitForTimeout(250);
-    await page.evaluate(() => {
-      const b = document.getElementById('input-claude-bridge');
-      b.checked = true;
-      b.dispatchEvent(new Event('change'));
-    });
+    // dispatchEvent ではなく**本物のクリック**で操作する。
+    // やっさんが踏んだのは実際に指で押したときの振る舞い
+    await page.click('#input-claude-bridge');
     await page.waitForTimeout(900);
     const r = await page.evaluate(() => ({
       checked: document.getElementById('input-claude-bridge').checked,
@@ -203,6 +208,13 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
     }));
     eq(`${label} → チェック`, r.checked, wantChecked);
     eq(`${label} → 理由を出す`, r.text.includes(wantText), true);
+    // オフ→オンをもう一度やって、同じ結果になるか（関じ込められないか）
+    await page.click('#input-claude-bridge');
+    await page.waitForTimeout(300);
+    await page.click('#input-claude-bridge');
+    await page.waitForTimeout(900);
+    eq(`${label} → オフ→オンし直せる`,
+       await page.evaluate(() => document.getElementById('input-claude-bridge').checked), wantChecked);
     await ctx.close();
   }
 

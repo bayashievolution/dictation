@@ -3657,18 +3657,32 @@ async function testClaudeBridge() {
 async function verifyClaudeBridgeToggle() {
   const box = els.inputClaudeBridge;
   if (!box || !box.checked) return;
-  box.disabled = true;
-  try {
-    const r = await testClaudeBridge();
-    if (!r.ok) {
-      box.checked = false;   // 使えないものをオンにしたままにしない
-      if (els.claudeBridgeStatus) {
-        els.claudeBridgeStatus.textContent =
-          r.text + (r.needsLogin ? '（サインイン後にもう一度オンにしてください）' : '（直してからもう一度オンにしてください）');
-      }
+  const r = await testClaudeBridge();
+  // 途中で自分でオフに戻していたら、古い結果で上書きしない
+  if (!box.checked) return;
+  if (r.ok) return;
+
+  // **「確かめられない」で閉じ込めない** (v0.24.10)
+  //
+  // やっさん報告「オフにしたらオンにできない　トグルが動かないよう」。
+  // 古い serve.js が走っているだけのときまでチェックを戻していたので、
+  // **何も壊れていないのに永久にオンにできない**状態になっていた。
+  //
+  // 戻すのは**使えないとはっきり分かっているときだけ**にする。
+  // 分からないときはオンのまま残して、何が起きているかだけ言う。
+  // （実際に失敗すれば Gemini に落ちるので、使えなくても壊れはしない）
+  if (r.unknown) {
+    if (els.claudeBridgeStatus) {
+      els.claudeBridgeStatus.textContent = r.text + '（オンのままにしてあります）';
     }
-  } finally {
-    box.disabled = false;
+    return;
+  }
+
+  box.checked = false;   // 使えないと分かっているものをオンにしたままにしない
+  if (els.claudeBridgeStatus) {
+    els.claudeBridgeStatus.textContent = r.text
+      + (r.needsLogin ? '（サインイン後にもう一度オンにしてください）'
+                      : '（直してからもう一度オンにしてください）');
   }
 }
 

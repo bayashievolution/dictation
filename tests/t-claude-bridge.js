@@ -178,18 +178,22 @@ console.log('\n■ 「接続を確認」の文言（ログインまで見る）'
     if (!ok) { console.log(`    期待 ${JSON.stringify(want)}`); fail++; }
   };
   is('中継が落ちている', h({ ok: false }),
-     { ok: false, needsLogin: false, text: '中継に繋がりません。start.bat でサーバーを起動してください' });
+     { ok: false, needsLogin: false, unknown: false, text: '中継に繋がりません。start.bat でサーバーを起動してください' });
   is('何も返ってこない', h(null),
-     { ok: false, needsLogin: false, text: '中継に繋がりません。start.bat でサーバーを起動してください' });
+     { ok: false, needsLogin: false, unknown: false, text: '中継に繋がりません。start.bat でサーバーを起動してください' });
   is('ログイン済み', h({ ok: true, invocation: 'claude', auth: { ok: true, loggedIn: true } }),
-     { ok: true, needsLogin: false, text: '使えます（ログイン済み / claude）' });
+     { ok: true, needsLogin: false, unknown: false, text: '使えます（ログイン済み / claude）' });
   is('ログインしていない', h({ ok: true, invocation: 'claude', auth: { ok: true, loggedIn: false } }),
-     { ok: false, needsLogin: true, text: 'Claude にログインしていません。login.bat でサインインしてください' });
-  // ここが肝。**分からないときに「使えます」と言わない**
+     { ok: false, needsLogin: true, unknown: false, text: 'Claude にログインしていません。login.bat でサインインしてください' });
+  // ここが肝。**分からないときに「使えます」と言わない**。
+  // ただし unknown を立てて、呼び出し側が「壊れている」と扱わないようにする
   is('ログイン状態を読めなかった', h({ ok: true, auth: { ok: false, error: 'spawn claude ENOENT' } }),
-     { ok: false, needsLogin: false, text: 'claude を確かめられません: spawn claude ENOENT' });
-  is('auth が無い（古いサーバー）', h({ ok: true, invocation: 'claude' }),
-     { ok: false, needsLogin: false, text: 'claude を確かめられません: 理由不明' });
+     { ok: false, needsLogin: false, unknown: true, text: 'claude を確かめられません: spawn claude ENOENT' });
+  // やっさんが実際に踏んだやつ。update.bat でファイルは新しくなるが、
+  // 走っている node は入れ替わらない。「理由不明」では直しようがない
+  is('auth が無い（古い serve.js が走ったまま）', h({ ok: true, invocation: 'claude' }),
+     { ok: false, needsLogin: false, unknown: true,
+       text: 'サーバーが古いままです。start.bat を一度閉じて起動し直してください' });
 }
 
 console.log('\n■ 待っても直らない失敗かどうか');

@@ -241,20 +241,29 @@ function claudeBridgeFallbackMessage(error) {
 function claudeBridgeHealthMessage(health) {
   const h = health || {};
   if (!h.ok) {
-    return { ok: false, needsLogin: false,
+    return { ok: false, needsLogin: false, unknown: false,
              text: '中継に繋がりません。start.bat でサーバーを起動してください' };
   }
   const a = h.auth || {};
   if (a.ok && a.loggedIn === true) {
-    return { ok: true, needsLogin: false,
+    return { ok: true, needsLogin: false, unknown: false,
              text: `使えます（ログイン済み${h.invocation ? ' / ' + h.invocation : ''}）` };
   }
   if (a.ok && a.loggedIn === false) {
-    return { ok: false, needsLogin: true,
+    return { ok: false, needsLogin: true, unknown: false,
              text: 'Claude にログインしていません。login.bat でサインインしてください' };
   }
-  // ログイン状態が読めなかった。**使えるとは言わない**
-  return { ok: false, needsLogin: false,
+  // 応答に auth が無い = 古い serve.js が動いたまま (v0.24.10)
+  //
+  // **これを「理由不明」と出してしまっていた。**
+  // update.bat でファイルは新しくなるが、走っている node は入れ替わらない。
+  // start.bat を閉じて起動し直す必要がある。分かっているのだからそう言う
+  if (!h.auth) {
+    return { ok: false, needsLogin: false, unknown: true,
+             text: 'サーバーが古いままです。start.bat を一度閉じて起動し直してください' };
+  }
+  // ログイン状態が読めなかった。**使えるとは言わないが、壊れているとも言えない**
+  return { ok: false, needsLogin: false, unknown: true,
            text: 'claude を確かめられません: ' + String(a.error || '理由不明').slice(0, 60) };
 }
 
