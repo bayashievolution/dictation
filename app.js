@@ -7402,6 +7402,82 @@ function onFloatingImageDown(e) {
   void host;
 }
 
+/** これより小さい動きはクリックとみなす（手の震えで画像が1文字ずれないように） */
+const IMG_DRAG_THRESHOLD = 4;
+
+/**
+ * 「行内」の画像をドラッグで文中の別の位置へ移す (v0.24.14)
+ *
+ * ■ 標準のドラッグに任せていたのをやめた理由
+ *
+ * やっさん報告「画像をドラッグすると Chrome のタブで画像が開かれる」。
+ * 標準のドラッグには `text/uri-list` で画像の blob: URL が乗る（実機の Chromium で
+ * dragstart の dataTransfer.types を見て確認）。編集できる場所の外に落ちると
+ * Chrome はそれをリンクとして開く。サイドパネルはその場で遷移できないので
+ * 新しいタブになる。開いた blob: はメモと無関係の一時 URL で、そこから戻る意味も無い。
+ *
+ * ■ 置く位置は「離した場所のいちばん近い文字の間」
+ *
+ * `caretRangeFromPoint` は、クリックしたときにカーソルが立つ位置と同じものを返す。
+ * 動かしている間もそこにカーソルを立てるので、どこに入るかが見える。
+ */
+function onInlineImageDown(e) {
+  const img = _selectedImg;
+  if (!img || img.dataset.float === '1' || e.button !== 0) return;
+  // 標準のドラッグ（＝URL を運ぶドラッグ）を始めさせない
+  e.preventDefault();
+  const startX = e.clientX, startY = e.clientY;
+  let dragging = false;
+
+  const caretAt = (x, y) => {
+    const r = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
+    // メモの外、または画像そのものの中は置き場所にしない
+    if (!r || !els.memo.contains(r.startContainer) || r.startContainer === img) return null;
+    return r;
+  };
+
+  const move = (ev) => {
+    if (!dragging) {
+      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < IMG_DRAG_THRESHOLD) return;
+      dragging = true;
+      img.classList.add('memo-img-dragging');
+    }
+    const r = caretAt(ev.clientX, ev.clientY);
+    if (r) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+  };
+  const up = (ev) => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    img.classList.remove('memo-img-dragging');
+    if (!dragging) return;   // ただのクリック。枠を出しただけで終わり
+    const r = caretAt(ev.clientX, ev.clientY);
+    if (!r) { positionImageBox(); return; }   // メモの外で離したら動かさない
+    try {
+      r.insertNode(img);
+      r.setStartAfter(img);
+      r.collapse(true);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch (err) {
+      // 自分のすぐ隣に落としたときなどに位置の計算が合わないことがある。動かさないだけにする
+      console.warn('[memo image] move skipped:', err.message || err);
+      positionImageBox();
+      return;
+    }
+    positionImageBox();
+    pushUndo('画像の移動', 'pane-memo');
+    snapshotActiveToSession();
+    persistSessions();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
 /* ───────── 右クリックのメニュー ───────── */
 
 function closeImageMenu() {
@@ -8925,8 +9001,16 @@ els.memo.addEventListener('pointerdown', (e) => {
   const img = e.target && e.target.tagName === 'IMG' ? e.target : null;
   if (!img) { clearImageSelection(); return; }
   selectMemoImage(img);
-  // 「前面」の画像はドラッグで動かす。行内のものは標準のドラッグに任せる
+  // 「前面」は座標で、「行内」は文字の間を選んで動かす。
+  // v0.24.13 までは行内を標準のドラッグに任せていて、画像がタブで開いていた
   if (img.dataset.float === '1') onFloatingImageDown(e);
+  else onInlineImageDown(e);
+});
+
+// pointerdown の preventDefault で標準のドラッグは始まらないが、
+// 念のためここでも止める（URL を運ぶドラッグが1度でも始まるとタブで開かれる）
+els.memo.addEventListener('dragstart', (e) => {
+  if (e.target && e.target.tagName === 'IMG') e.preventDefault();
 });
 
 els.memo.addEventListener('contextmenu', (e) => {

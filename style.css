@@ -3227,6 +3227,13 @@ body.chat-active .dict-menu { bottom: 114px; }
   max-width: none;                   /* 置いた場所と大きさをそのまま保つ */
 }
 
+/* 行内の画像を動かしている間 (v0.24.14)。どこに入るかはカーソルで見せ、
+ * 画像は「いま運んでいる」と分かるように薄くする */
+#memo img.memo-img-dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+
 /* ───────── 状態表示のお知らせ (v0.24.8) ─────────
  *
  * v0.24.7 で Dynamic Island 風のアニメーションを入れたが、やっさんの判断で外した:
