@@ -180,6 +180,13 @@ function claudeBridgeFallbackMessage(error) {
   if (e.includes('繋がりません')) {
     return '中継に繋がらないので Gemini で処理（start.bat を起動）';
   }
+  // 実際に起きたやつ (v0.24.8)。診断ログに残っていた生の文言:
+  //   Failed to authenticate: OAuth session expired and could not be refreshed
+  // `claude -p` は非対話なので、ここでログインを促すことができない。
+  // 放っておいても治らない種類なので、**何をすればいいか**を言う
+  if (/authenticat|OAuth|session expired|ログイン|credential|unauthorized|401/i.test(e)) {
+    return 'Claude のログインが切れているので Gemini で処理';
+  }
   if (/claude を実行できません|ENOENT|not found|見つかりません/i.test(e)) {
     return 'claude を実行できないので Gemini で処理しました';
   }

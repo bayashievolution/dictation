@@ -3227,37 +3227,15 @@ body.chat-active .dict-menu { bottom: 114px; }
   max-width: none;                   /* 置いた場所と大きさをそのまま保つ */
 }
 
-/* ───────── 状態表示を Dynamic Island 風にする (v0.24.7) ─────────
+/* ───────── 状態表示のお知らせ (v0.24.8) ─────────
  *
- * やっさんの要望:
- * > 形が iphone のダイナミックアイランドに似てるから
- * > ダイナミックアイランドみたいなアニメーションで出て、しばらくしたら
- * > アニメーションして消えるようにしよう
- * > ログを画面にずっとだすのはちょっとね　押したらエラーの詳細が出るとか
+ * v0.24.7 で Dynamic Island 風のアニメーションを入れたが、やっさんの判断で外した:
+ * > やっぱアニメーションはやめとこう　エラーメッセージだけアニメーションするというのも
+ * > なんかちょっとね　他の停止とか　録音中みたいに　アニメーションなしで大丈夫
  *
- * ■ 何に当てるか
- *
- * 「待機中」「聞き取り中 (Gemini)」のような**状態**は出たままでよい。
- * 動かすのは「〜に失敗しました」のような**お知らせ**だけ。
- * 録音中にずっと跳ねていたら気が散る。
- *
- * ■ 幅を直接アニメーションしない理由
- *
- * 幅は中身の文字で決まる（auto）ので transition が効かない。
- * Dynamic Island の「ぬるっと膨らむ」感じは scale のオーバーシュートで作る。
- * 本物も実体は拡大と角丸の変化なので、これで十分近い。
+ * **動くのがエラーのときだけだと、かえって浮く。** 停止・録音中と同じ出かたに揃える。
+ * 残したのは「しばらくしたら消える」と「押したら詳細が出る」の2つ（本題はこちら）。
  */
-@keyframes status-pop-in {
-  0%   { transform: scale(0.76) translateY(-4px); opacity: 0; }
-  55%  { transform: scale(1.05) translateY(0);    opacity: 1; }
-  100% { transform: scale(1)    translateY(0);    opacity: 1; }
-}
-@keyframes status-pop-out {
-  0%   { transform: scale(1)    translateY(0);    opacity: 1; }
-  100% { transform: scale(0.76) translateY(-4px); opacity: 0; }
-}
-.status.is-entering { animation: status-pop-in 380ms cubic-bezier(0.2, 0.9, 0.25, 1.2); }
-.status.is-leaving  { animation: status-pop-out 220ms var(--ease-snap) forwards; }
 
 /* 詳細があるときだけ押せる。押せることが見た目で分かるようにする */
 .status.has-detail {
@@ -3274,13 +3252,12 @@ body.chat-active .dict-menu { bottom: 114px; }
   font-size: 13px;
   line-height: 1;
   opacity: 0.75;
-  transition: transform 0.2s var(--ease-snap);
 }
 .status.has-detail.is-open::after { transform: translateY(-50%) rotate(-90deg); }
 
 .titlebar-right { position: relative; }
 
-/* 押したときに開く詳細。島が展開する見立て */
+/* 押したときに開く詳細 */
 .status-detail {
   position: absolute;
   top: calc(100% + 6px);
@@ -3300,12 +3277,6 @@ body.chat-active .dict-menu { bottom: 114px; }
   white-space: pre-wrap;
   word-break: break-word;
   text-align: left;
-  transform-origin: top right;
-  animation: status-detail-in 220ms cubic-bezier(0.2, 0.9, 0.25, 1.1);
-}
-@keyframes status-detail-in {
-  0%   { transform: scale(0.9) translateY(-6px); opacity: 0; }
-  100% { transform: scale(1)   translateY(0);    opacity: 1; }
 }
 .status-detail-hint {
   margin-top: 8px;
@@ -3313,11 +3284,4 @@ body.chat-active .dict-menu { bottom: 114px; }
   border-top: 1px solid var(--border, rgba(255,255,255,0.14));
   opacity: 0.75;
   font-size: 11px;
-}
-
-/* 動きを減らす設定にしている人には動かさない。消える動作自体は残す */
-@media (prefers-reduced-motion: reduce) {
-  .status.is-entering,
-  .status.is-leaving,
-  .status-detail { animation: none; }
 }

@@ -120,6 +120,11 @@ console.log('\n■ Gemini に戻したときの文言（理由を言い分ける
   is('サーバーが動いていない',
      m('Claude Code の中継に繋がりません（start.bat でサーバーを起動してください）'),
      '中継に繋がらないので Gemini で処理（start.bat を起動）');
+  // 実際に起きたやつ。診断ログに残っていた生の文言そのまま
+  is('ログイン切れ', m('Failed to authenticate: OAuth session expired and could not be refreshed'),
+     'Claude のログインが切れているので Gemini で処理');
+  is('401 でも同じ扱い', m('Request failed with status 401'),
+     'Claude のログインが切れているので Gemini で処理');
   is('claude が入っていない', m('claude を実行できませんでした'),
      'claude を実行できないので Gemini で処理しました');
   is('spawn ENOENT でも同じ扱い', m('spawn claude ENOENT'),
@@ -143,6 +148,7 @@ console.log('\n■ Gemini に戻したときの文言（理由を言い分ける
   // 文字数では測れない（半角は細いので、36字でも 327px で収まる）。
   // 切れていないことの検査は tests/browser/t-claude-bridge-browser.js にある。
   const all = ['Claude Code の中継に繋がりません（start.bat でサーバーを起動してください）',
+               'Failed to authenticate: OAuth session expired and could not be refreshed',
                'claude を実行できませんでした', '180秒待っても返事がありませんでした',
                '長すぎます（1字 / 上限2字）', '終了コード 1', ''];
   // どの文言も「Gemini で処理」したことは必ず言う（黙って戻さない）

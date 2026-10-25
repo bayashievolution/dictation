@@ -272,7 +272,14 @@ async function _tryClaudeBridge(body, feature) {
   const msg = typeof claudeBridgeFallbackMessage === 'function'
     ? claudeBridgeFallbackMessage(r.error)
     : 'Claude で処理できなかったので Gemini で処理しました';
-  const detail = `Claude Code に回せませんでした（${feature}）\n\n${r.error}`;
+  // ログイン切れは放っておいて治らないので、詳細に直し方を添える (v0.24.8)
+  const fix = /authenticat|OAuth|session expired|unauthorized|401/i.test(String(r.error || ''))
+    ? '\n\n── 直し方 ──\n'
+      + 'dictation フォルダの login.bat をダブルクリックして、ブラウザでサインインしてください。\n'
+      + '（ターミナルなら claude auth login）\n'
+      + 'そのあと「接続を確認」を押すと戸っているか分かります。'
+    : '';
+  const detail = `Claude Code に回せませんでした（${feature}）\n\n${r.error}${fix}`;
   if (window.statusNotice) window.statusNotice('error', msg, { detail });
   else if (window.setStatus) window.setStatus('error', msg, detail);
   return null;

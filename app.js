@@ -593,9 +593,13 @@ function setStatus(mode, label, detail) {
  *
  * やっさんの要望:
  * > このメッセージ長くてずっと出てるので、そのへんの表示にもこだわりたい
- * > 形が iphone のダイナミックアイランドに似てるから ダイナミックアイランドみたいな
- * > アニメーションで出て、しばらくしたら アニメーションして消えるようにしよう
  * > ログを画面にずっとだすのはちょっとね　押したらエラーの詳細が出るとか
+ *
+ * v0.24.7 ではこれに合わせて Dynamic Island 風の動きも付けたが、v0.24.8 で外した:
+ * > やっぱアニメーションはやめとこう　エラーメッセージだけアニメーションするというのも
+ * > なんかちょっとね　他の停止とか　録音中みたいに　アニメーションなしで大丈夫
+ *
+ * **動くのがエラーのときだけだと、かえって浮く。**
  *
  * ■ 状態とお知らせを分ける
  *
@@ -615,22 +619,23 @@ let statusNoticeTimer = null;
 let statusNoticeDetail = '';
 let statusDetailEl = null;
 
-/** アニメーションを頭から流し直す。class を外して付け直すだけでは再生されない */
-function replayStatusAnimation(cls) {
-  if (!els.status) return;
-  els.status.classList.remove('is-entering', 'is-leaving');
-  void els.status.offsetWidth;   // reflow を挟まないとブラウザが変化に気づかない
-  els.status.classList.add(cls);
-}
-
 function statusNotice(mode, label, { detail = '', ms = STATUS_NOTICE_MS } = {}) {
   if (!els.status) return;
+  // 同じお知らせが立て続けに来たら、出し直さずに時間だけ延ばす (v0.24.8)
+  //
+  // やっさん報告「claude のエラーが2回出る　１回目でて自動で閉じてまた出る」。
+  // 録音を止めると**要約とタイトルの2つ**を続けて回すので、
+  // 中継が失敗していると同じ文言が2回来る（それぞれ本当に起きた失敗）。
+  // 二度言っても情報は増えないので、同じ文言なら出したままにする。
+  // （回数を知りたいときは診断ログに全件残っている）
+  const same = statusNoticeTimer && els.status.textContent === label;
   clearTimeout(statusNoticeTimer);
-  closeStatusDetail();
-  statusNoticeDetail = String(detail || '');
-  setStatus(mode, label, statusNoticeDetail ? label + '（押すと詳細）' : label);
-  els.status.classList.toggle('has-detail', !!statusNoticeDetail);
-  replayStatusAnimation('is-entering');
+  if (!same) {
+    closeStatusDetail();
+    statusNoticeDetail = String(detail || '');
+    setStatus(mode, label, statusNoticeDetail ? label + '（押すと詳細）' : label);
+    els.status.classList.toggle('has-detail', !!statusNoticeDetail);
+  }
   statusNoticeTimer = setTimeout(dismissStatusNotice, Math.max(500, ms));
 }
 
@@ -641,14 +646,9 @@ function dismissStatusNotice() {
   if (!els.status) return;
   // 詳細を開いて読んでいる最中に消さない
   if (statusDetailEl) return;
-  replayStatusAnimation('is-leaving');
-  setTimeout(() => {
-    if (!els.status) return;
-    els.status.classList.remove('is-leaving', 'has-detail');
-    statusNoticeDetail = '';
-    restoreStatus();
-    replayStatusAnimation('is-entering');
-  }, 220);
+  els.status.classList.remove('has-detail');
+  statusNoticeDetail = '';
+  restoreStatus();
 }
 
 function closeStatusDetail() {
