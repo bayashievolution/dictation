@@ -60,7 +60,10 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
     await page.evaluate(() => { document.getElementById('btn-claude-bridge-test').click(); });
     await page.waitForTimeout(1200);
     const t = await status(page);
-    eq('中継が動いていると出る', /中継は動いています/.test(t), true);
+    // v0.24.9: 中継が生きているだけでは「使えます」と言わない。
+    // ログインしていることまで確かめてから言う
+    eq('使えると出る', /使えます/.test(t), true);
+    eq('ログイン済みだと言う', /ログイン済み/.test(t), true);
     eq('色が付く（is-ok）',
        await page.evaluate(() => document.getElementById('claude-bridge-status').className.includes('is-ok')), true);
     await ctx.close();
@@ -167,6 +170,70 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
          setStatus('idle', '停止');
          return els.status.title;
        }), '停止');
+    await ctx.close();
+  }
+
+  console.log('\n■ 設定でオンにしたその場でログインを見る (v0.24.9)');
+  // やっさんの指摘「設定の時点でログインしてないと動かないようにしたほうがいい」。
+  // オンにできてしまうと、次に録音を止めて要約を回して初めて失敗する
+  const TOGGLE = [
+    ['ログインしていない', { ok: true, invocation: 'claude', auth: { ok: true, loggedIn: false } },
+     false, 'login.bat'],
+    ['ログイン済み', { ok: true, invocation: 'claude', auth: { ok: true, loggedIn: true } },
+     true, '使えます'],
+    ['状態を読めない', { ok: true, auth: { ok: false, error: 'spawn claude ENOENT' } },
+     false, '確かめられません'],
+  ];
+  for (const [label, body, wantChecked, wantText] of TOGGLE) {
+    const { ctx, page } = await open(browser);
+    await page.route('**/api/claude/health', (r) => r.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify(body),
+    }));
+    await page.evaluate(() => { document.getElementById('btn-settings').click(); });
+    await page.waitForTimeout(250);
+    await page.evaluate(() => {
+      const b = document.getElementById('input-claude-bridge');
+      b.checked = true;
+      b.dispatchEvent(new Event('change'));
+    });
+    await page.waitForTimeout(900);
+    const r = await page.evaluate(() => ({
+      checked: document.getElementById('input-claude-bridge').checked,
+      text: document.getElementById('claude-bridge-status').textContent,
+    }));
+    eq(`${label} → チェック`, r.checked, wantChecked);
+    eq(`${label} → 理由を出す`, r.text.includes(wantText), true);
+    await ctx.close();
+  }
+
+  console.log('\n■ ログイン切れのあと、確実に失敗する呼び出しを繰り返さない (v0.24.9)');
+  // やっさん報告「これ2回連続で出るのがなんか気になる」。
+  // 録音を止めると要約とタイトルを続けて回すので、2回目も必ず失敗していた
+  {
+    const { ctx, page } = await open(browser, { useClaudeBridge: true });
+    let posts = 0;
+    await page.route('**/api/claude', (r) => {
+      posts++;
+      return r.fulfill({
+        status: 502, contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'Failed to authenticate: OAuth session expired and could not be refreshed' }),
+      });
+    });
+    const body = { contents: [{ role: 'user', parts: [{ text: '要約して' }] }] };
+    const r1 = await page.evaluate((b) => _tryClaudeBridge(b, 'summary'), body);
+    const r2 = await page.evaluate((b) => _tryClaudeBridge(b, 'title'), body);
+    eq('1回目は Gemini に落ちる', r1, null);
+    eq('2回目も Gemini に落ちる', r2, null);
+    eq('中継を叩くのは1回だけ', posts, 1);
+    eq('駄目な理由を覚えている',
+       await page.evaluate(() => claudeBridgeBrokenReason().includes('OAuth')), true);
+    // ただし**黙っては戻さない**。画面には出ている
+    eq('2回目も画面には出す',
+       await page.evaluate(() => els.status.textContent.includes('ログインが切れている')), true);
+    // 設定を入れ直したらもう一度試す
+    await page.evaluate(() => claudeBridgeSetEnabled(true));
+    eq('入れ直したら覚えを消す',
+       await page.evaluate(() => claudeBridgeBrokenReason()), '');
     await ctx.close();
   }
 

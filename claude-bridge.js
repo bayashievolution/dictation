@@ -45,8 +45,33 @@ const CLAUDE_BRIDGE_FEATURES = new Set([
 
 let _claudeBridgeEnabled = false;
 
-function claudeBridgeSetEnabled(on) { _claudeBridgeEnabled = !!on; }
+/**
+ * 放っておいても治らない失敗を覚えておく (v0.24.9)
+ *
+ * やっさん報告「これ2回連続で出るのがなんか気になる」。
+ * 録音を止めると要約とタイトルを続けて回すので、ログインが切れていると
+ * **確実に失敗する呼び出しをもう一度やっていた**。ログが2行になるだけでなく、
+ * その分だけ余計に待たされる。
+ *
+ * ログイン切れは待っても直らないので、一度踏んだらそのセッションでは試さない。
+ * 「接続を確認」が通るか、設定を入れ直したら解除する。
+ * 通信が切れただけ（start.bat を忘れていた等）はあとで治るので覚えない。
+ */
+let _claudeBridgeBrokenReason = '';
+
+function claudeBridgeSetEnabled(on) {
+  _claudeBridgeEnabled = !!on;
+  _claudeBridgeBrokenReason = '';   // 入れ直したらもう一度試す
+}
 function claudeBridgeIsEnabled() { return _claudeBridgeEnabled; }
+function claudeBridgeMarkBroken(reason) { _claudeBridgeBrokenReason = String(reason || ''); }
+function claudeBridgeClearBroken() { _claudeBridgeBrokenReason = ''; }
+function claudeBridgeBrokenReason() { return _claudeBridgeBrokenReason; }
+
+/** その失敗は待っても直らない種類か (v0.24.9) */
+function claudeBridgeIsFatal(error) {
+  return /authenticat|OAuth|session expired|unauthorized|401|ログイン/i.test(String(error || ''));
+}
 
 /* ───────── 純関数（テストできる形で置く） ───────── */
 
@@ -202,6 +227,35 @@ function claudeBridgeFallbackMessage(error) {
   // 状態表示は「今何が起きているか」を一目で言う場所で、
   // stderr を流す場所ではない。詳細は押したときだけ出す。
   return 'Claude で処理できなかったので Gemini で処理しました';
+}
+
+/**
+ * 「接続を確認」の結果を文言にする (v0.24.9)
+ *
+ * 以前は「中継は動いています」だけを緱で出していたので、
+ * **ログインが切れていても「動いています」と出ていた**。
+ * それで要約を回して初めて失敗するので、確かめた意味が無かった。
+ *
+ * @returns {{ok:boolean, text:string, needsLogin:boolean}}
+ */
+function claudeBridgeHealthMessage(health) {
+  const h = health || {};
+  if (!h.ok) {
+    return { ok: false, needsLogin: false,
+             text: '中継に繋がりません。start.bat でサーバーを起動してください' };
+  }
+  const a = h.auth || {};
+  if (a.ok && a.loggedIn === true) {
+    return { ok: true, needsLogin: false,
+             text: `使えます（ログイン済み${h.invocation ? ' / ' + h.invocation : ''}）` };
+  }
+  if (a.ok && a.loggedIn === false) {
+    return { ok: false, needsLogin: true,
+             text: 'Claude にログインしていません。login.bat でサインインしてください' };
+  }
+  // ログイン状態が読めなかった。**使えるとは言わない**
+  return { ok: false, needsLogin: false,
+           text: 'claude を確かめられません: ' + String(a.error || '理由不明').slice(0, 60) };
 }
 
 async function claudeBridgeHealth({ url = CLAUDE_BRIDGE_URL } = {}) {

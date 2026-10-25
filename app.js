@@ -3621,20 +3621,54 @@ function applyClaudeBridgeSetting() {
  * **claude 本体は起動しない。** 起動すると8〜10秒待たされるので、
  * サーバーが居るかどうかだけを聞く。
  */
+/**
+ * 中継とログインを確かめる (v0.24.9 でログインまで見るようにした)
+ *
+ * やっさんの指摘「で失敗して、どこでログインしたらいいか分からない」。
+ * 以前は「中継は動いています」を緱で出すだけで、**ログインが切れていても
+ * 「動いています」と出ていた**。確かめた意味が無い。
+ *
+ * @returns {Promise<{ok:boolean, needsLogin:boolean}>}
+ */
 async function testClaudeBridge() {
   const el = els.claudeBridgeStatus;
-  if (!el) return;
+  if (!el) return { ok: false, needsLogin: false };
   el.className = 'field-hint';
   el.textContent = '確認中…';
-  const r = await claudeBridgeHealth();
-  if (r && r.ok) {
-    el.className = 'field-hint is-ok';
-    el.textContent = r.invocation
-      ? `中継は動いています（claude の呼び方: ${r.invocation}）`
-      : '中継は動いています（claude はまだ一度も呼んでいません）';
-  } else {
-    el.className = 'field-hint is-ng';
-    el.textContent = '中継に繋がりません。start.bat でサーバーを起動してください';
+  const health = await claudeBridgeHealth();
+  const r = claudeBridgeHealthMessage(health);
+  el.className = 'field-hint ' + (r.ok ? 'is-ok' : 'is-ng');
+  el.textContent = r.text;
+  // 通ったら「もう駄目」の覚えを消す。直した直後に使えないと困る
+  if (r.ok && typeof claudeBridgeClearBroken === 'function') claudeBridgeClearBroken();
+  return r;
+}
+
+/**
+ * 連携をオンにしたときにその場で確かめる (v0.24.9)
+ *
+ * やっさんの要望:
+ * > 設定の時点でログインしてないと動かないようにしたほうがいいと思う
+ *
+ * オンにできてしまうと、次に録音を止めて要約を回して初めて失敗する。
+ * その場で分かるのが一番安いので、**チェックを入れた瞬間に見る**。
+ * 使えなければチェックを戻す（動かないものをオンにしておかない）。
+ */
+async function verifyClaudeBridgeToggle() {
+  const box = els.inputClaudeBridge;
+  if (!box || !box.checked) return;
+  box.disabled = true;
+  try {
+    const r = await testClaudeBridge();
+    if (!r.ok) {
+      box.checked = false;   // 使えないものをオンにしたままにしない
+      if (els.claudeBridgeStatus) {
+        els.claudeBridgeStatus.textContent =
+          r.text + (r.needsLogin ? '（サインイン後にもう一度オンにしてください）' : '（直してからもう一度オンにしてください）');
+      }
+    }
+  } finally {
+    box.disabled = false;
   }
 }
 
@@ -9179,6 +9213,10 @@ sweepStoredImages();
 applyClaudeBridgeSetting();
 if (els.btnClaudeBridgeTest) {
   els.btnClaudeBridgeTest.addEventListener('click', () => { testClaudeBridge(); });
+}
+// v0.24.9: オンにしたその場でログインを見る
+if (els.inputClaudeBridge) {
+  els.inputClaudeBridge.addEventListener('change', () => { verifyClaudeBridgeToggle(); });
 }
 // v0.19.0: 期限切れの音声を掃除する。「タブを閉じたら消す」はクラッシュや
 // 強制リロードでは走らないので、消し忘れを防ぐ本体はこちら

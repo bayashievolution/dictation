@@ -51,6 +51,7 @@ const CLAUDE_CANDIDATES = [
   { cmd: 'wsl', args: ['claude', '-p'] },
 ];
 let claudeInvocation = null;   // 成功した呼び方
+const CLAUDE_AUTH_TIMEOUT_MS = 25000;   // auth status はすぐ返るので短め (v0.24.9)
 
 /**
  * claude を1回呼ぶ。プロンプトは標準入力で渡す
@@ -98,6 +99,79 @@ function runClaudeOnce({ cmd, args }, prompt) {
 
     try { child.stdin.end(prompt); } catch (e) { /* close で拾う */ }
   });
+}
+
+/**
+ * ログインしているかを見る (v0.24.9)
+ *
+ * やっさんの指摘:
+ * > で失敗して、どこでログインしたらいいか分からない
+ * > 設定の時点でログインしてないと動かないようにしたほうがいい
+ *
+ * `claude auth status --json` は非対話ですぐ返る。返りは
+ *   { "loggedIn": true, "authMethod": "oauth_token", ... }
+ * 実際に切れているときは要約を頑張って回してから 8〜10 秒待って失敗するので、
+ * **設定を入れる時点で見る**のが正しい。
+ */
+function checkClaudeAuthOnce({ cmd, args }) {
+  return new Promise((resolve) => {
+    // args は ['-p'] または ['claude','-p']。-p を外して auth status に差し替える
+    const full = [...args.filter((a) => a !== '-p'), 'auth', 'status', '--json'];
+    let child;
+    try {
+      child = spawn(cmd, full, { stdio: ['ignore', 'pipe', 'pipe'], cwd: os.tmpdir() });
+    } catch (e) {
+      resolve({ ok: false, error: e.message, spawnFailed: true });
+      return;
+    }
+    let out = '', err = '', done = false;
+    const finish = (r) => { if (!done) { done = true; resolve(r); } };
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch {}
+      finish({ ok: false, error: 'ログイン状態を確かめられませんでした（時間切れ）' });
+    }, CLAUDE_AUTH_TIMEOUT_MS);
+    child.on('error', (e) => {
+      clearTimeout(timer);
+      finish({ ok: false, error: e.message, spawnFailed: e.code === 'ENOENT' });
+    });
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      let data = null;
+      try { data = JSON.parse(out.trim()); } catch { /* 下で拾う */ }
+      if (data && typeof data.loggedIn === 'boolean') {
+        finish({ ok: true, loggedIn: data.loggedIn, authMethod: data.authMethod || null });
+        return;
+      }
+      // JSON でない→ 古い claude か、呼び方が違う。断定しない
+      finish({
+        ok: false,
+        error: (err.trim() || out.trim() || `終了コード ${code}`).slice(0, 300),
+      });
+    });
+  });
+}
+
+/** 覚えた呼び方を使い、無ければ順に試す（ログイン確認版） */
+async function checkClaudeAuth() {
+  const order = claudeInvocation ? [claudeInvocation] : CLAUDE_CANDIDATES;
+  let last = null;
+  for (const inv of order) {
+    const r = await checkClaudeAuthOnce(inv);
+    if (r.ok) {
+      // ここで呼び方が分かるので覚えておく。
+      // 本番の要約を回す前に決まるので、最初の1回が遅くならない
+      if (!claudeInvocation) {
+        claudeInvocation = inv;
+        console.log(`  [claude] 呼び方が決まりました: ${inv.cmd} ${inv.args.join(' ')}`);
+      }
+      return r;
+    }
+    last = r;
+    if (!r.spawnFailed) break;   // 見つからない以外は呼び方の問題ではない
+  }
+  return last || { ok: false, error: 'claude を実行できませんでした' };
 }
 
 /** 覚えた呼び方を使い、無ければ順に試す */
@@ -163,7 +237,15 @@ async function handleClaudeApi(req, res, urlPath) {
 
   // 生きているかだけを聞く。**claude は起動しない**（8秒かかるので）
   if (urlPath === '/api/claude/health') {
-    sendJson(res, 200, { ok: true, invocation: claudeInvocation ? claudeInvocation.cmd : null });
+    // v0.24.9: 生きているかだけでなく**ログインしているか**も返す。
+    // 前は「中継は動いています」とだけ出ていたので、ログインが切れていても
+    // 緱色で「動いています」と出てしまっていた（やっさんがこれで詰まった）
+    const auth = await checkClaudeAuth();
+    sendJson(res, 200, {
+      ok: true,
+      invocation: claudeInvocation ? claudeInvocation.cmd : null,
+      auth,
+    });
     return true;
   }
 

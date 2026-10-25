@@ -258,6 +258,22 @@ async function _tryClaudeBridge(body, feature) {
   const prompt = claudeBridgePromptFromBody(body);
   if (!prompt) return null;
 
+  // v0.24.9: もう駄目だと分かっているときは呼びに行かない。
+  // 録音を止めると要約とタイトルを続けて回すので、ログイン切れだと
+  // **確実に失敗する呼び出しをもう一度**やっていた。ただし**黙っては戻さない**。
+  const broken = typeof claudeBridgeBrokenReason === 'function' ? claudeBridgeBrokenReason() : '';
+  if (broken) {
+    if (window.statusNotice) {
+      window.statusNotice('error', claudeBridgeFallbackMessage(broken), {
+        detail: `Claude Code を使えない状態が続いています\n\n${broken}\n\n`
+          + '── 直し方 ──\n'
+          + 'dictation フォルダの login.bat をダブルクリックしてサインインし、\n'
+          + '設定の「接続を確認」を押してください。',
+      });
+    }
+    return null;
+  }
+
   const r = await claudeBridgeRun(prompt);
   if (r.ok && r.text) {
     if (window.diagLog) window.diagLog.info(`Claude Code で処理しました（${feature} / ${r.seconds}秒）`);
@@ -265,6 +281,11 @@ async function _tryClaudeBridge(body, feature) {
   }
   if (window.diagLog) {
     window.diagLog.info(`Claude Code に回せなかったので Gemini で処理します（${feature}）: ${r.error}`);
+  }
+  // 待っても直らない種類（ログイン切れ等）は覚えて、次から呼ばない (v0.24.9)
+  if (typeof claudeBridgeIsFatal === 'function' && claudeBridgeIsFatal(r.error)
+      && typeof claudeBridgeMarkBroken === 'function') {
+    claudeBridgeMarkBroken(r.error);
   }
   // v0.24.6: 理由によって言い分ける。中継が動いていて claude 側で失敗したときまで
   // 「繋がらない」と言うのは嘘で、start.bat を見に行っても直らない

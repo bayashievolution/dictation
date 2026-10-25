@@ -160,5 +160,52 @@ console.log('\n■ Gemini に戻したときの文言（理由を言い分ける
   }
 }
 
+/* ───────── v0.24.9: ログインまで見る ─────────
+ *
+ * やっさんの指摘:
+ * > で失敗して、どこでログインしたらいいか分からない
+ * > 設定の時点でログインしてないと動かないようにしたほうがいいと思う
+ *
+ * 以前の「接続を確認」は中継が生きているかしか見ておらず、
+ * **ログインが切れていても緑で「動いています」と出していた**。 */
+vm.runInContext([grab(src, 'claudeBridgeHealthMessage'), grab(src, 'claudeBridgeIsFatal')].join('\n'), ctx);
+console.log('\n■ 「接続を確認」の文言（ログインまで見る）');
+{
+  const h = (x) => ctx.claudeBridgeHealthMessage(x);
+  const is = (label, got, want) => {
+    const ok = JSON.stringify(got) === JSON.stringify(want);
+    console.log(`${ok ? '✓' : '✕'} ${label}: ${JSON.stringify(got)}`);
+    if (!ok) { console.log(`    期待 ${JSON.stringify(want)}`); fail++; }
+  };
+  is('中継が落ちている', h({ ok: false }),
+     { ok: false, needsLogin: false, text: '中継に繋がりません。start.bat でサーバーを起動してください' });
+  is('何も返ってこない', h(null),
+     { ok: false, needsLogin: false, text: '中継に繋がりません。start.bat でサーバーを起動してください' });
+  is('ログイン済み', h({ ok: true, invocation: 'claude', auth: { ok: true, loggedIn: true } }),
+     { ok: true, needsLogin: false, text: '使えます（ログイン済み / claude）' });
+  is('ログインしていない', h({ ok: true, invocation: 'claude', auth: { ok: true, loggedIn: false } }),
+     { ok: false, needsLogin: true, text: 'Claude にログインしていません。login.bat でサインインしてください' });
+  // ここが肝。**分からないときに「使えます」と言わない**
+  is('ログイン状態を読めなかった', h({ ok: true, auth: { ok: false, error: 'spawn claude ENOENT' } }),
+     { ok: false, needsLogin: false, text: 'claude を確かめられません: spawn claude ENOENT' });
+  is('auth が無い（古いサーバー）', h({ ok: true, invocation: 'claude' }),
+     { ok: false, needsLogin: false, text: 'claude を確かめられません: 理由不明' });
+}
+
+console.log('\n■ 待っても直らない失敗かどうか');
+{
+  const f = (e) => ctx.claudeBridgeIsFatal(e);
+  const yes = (label, e) => { const ok = f(e) === true; console.log(`${ok ? '✓' : '✕'} ${label}`); if (!ok) fail++; };
+  const no  = (label, e) => { const ok = f(e) === false; console.log(`${ok ? '✓' : '✕'} ${label}`); if (!ok) fail++; };
+  yes('OAuth 期限切れ', 'Failed to authenticate: OAuth session expired and could not be refreshed');
+  yes('401', 'Request failed with status 401');
+  yes('unauthorized', 'Unauthorized');
+  no('中継に繋がらない（start.bat を立てれば直る）', 'Claude Code の中継に繋がりません（start.bat でサーバーを起動してください）');
+  no('時間切れ（次は通るかもしれない）', '180秒待っても返事がありませんでした');
+  no('長すぎる（内容次第）', '長すぎます（250000字 / 上限200000字）');
+  no('空', '');
+}
+
+
 console.log(fail ? `\n${fail}件 失敗` : '\nすべて通過');
 process.exit(fail ? 1 : 0);
