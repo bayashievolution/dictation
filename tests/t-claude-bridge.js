@@ -183,6 +183,11 @@ console.log('\n■ 「接続を確認」の文言（ログインまで見る）'
      { ok: false, needsLogin: false, unknown: false, text: '中継に繋がりません。start.bat でサーバーを起動してください' });
   is('ログイン済み', h({ ok: true, invocation: 'claude', auth: { ok: true, loggedIn: true } }),
      { ok: true, needsLogin: false, unknown: false, text: '使えます（ログイン済み / claude）' });
+  // サーバーの版を出す。拡張のカードの数字と比べられるように (v0.24.11)
+  is('版も返ってきたとき',
+     h({ ok: true, invocation: 'claude', version: '0.24.11', auth: { ok: true, loggedIn: true } }),
+     { ok: true, needsLogin: false, unknown: false,
+       text: '使えます（ログイン済み / claude / サーバー 0.24.11）' });
   is('ログインしていない', h({ ok: true, invocation: 'claude', auth: { ok: true, loggedIn: false } }),
      { ok: false, needsLogin: true, unknown: false, text: 'Claude にログインしていません。login.bat でサインインしてください' });
   // ここが肝。**分からないときに「使えます」と言わない**。

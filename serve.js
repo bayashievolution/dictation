@@ -54,6 +54,22 @@ let claudeInvocation = null;   // 成功した呼び方
 const CLAUDE_AUTH_TIMEOUT_MS = 25000;   // auth status はすぐ返るので短め (v0.24.9)
 
 /**
+ * いま動いているサーバーの版 (v0.24.11)
+ *
+ * **ファイルの版ではなく、走っているプロセスの版**。
+ * update.bat はファイルを入れ替えるが、走っている node は入れ替わらない。
+ * やっさんが実際にここで詰まった（最小化された古い窓が生きていた）ので、
+ * 起動時に出し、health でも返す。
+ */
+function readVersion() {
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
+    return m.version || '?';
+  } catch { return '?'; }
+}
+const SERVER_VERSION = readVersion();
+
+/**
  * claude を1回呼ぶ。プロンプトは標準入力で渡す
  * @returns {Promise<{ok:boolean, text?:string, error?:string, code?:number}>}
  */
@@ -235,7 +251,10 @@ async function handleClaudeApi(req, res, urlPath) {
     return true;
   }
 
-  // 生きているかだけを聞く。**claude は起動しない**（8秒かかるので）
+  // 使える状態かを聞く。
+  // v0.24.9 までは claude を起動しない軽い確認だったが、それだと
+  // ログインが切れていても「動いています」と言ってしまう。
+  // `claude auth status` は要約（8〜10秒）と違ってすぐ返るので、そこまで見る
   if (urlPath === '/api/claude/health') {
     // v0.24.9: 生きているかだけでなく**ログインしているか**も返す。
     // 前は「中継は動いています」とだけ出ていたので、ログインが切れていても
@@ -244,6 +263,7 @@ async function handleClaudeApi(req, res, urlPath) {
     sendJson(res, 200, {
       ok: true,
       invocation: claudeInvocation ? claudeInvocation.cmd : null,
+      version: SERVER_VERSION,
       auth,
     });
     return true;
@@ -319,6 +339,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   const url = `http://localhost:${PORT}/`;
+  console.log(`  版: ${SERVER_VERSION}`);
   console.log('');
   console.log(`  dictation サーバー起動: ${url}`);
   console.log('  Chrome が自動で開きます。手動で開く場合は上のURLへ。');

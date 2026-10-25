@@ -246,8 +246,11 @@ function claudeBridgeHealthMessage(health) {
   }
   const a = h.auth || {};
   if (a.ok && a.loggedIn === true) {
+    // サーバーの版も出す (v0.24.11)。拡張のカードの数字と見比べれば、
+    // 「ファイルは新しいがサーバーが古い」をその場で見分けられる
+    const parts = [h.invocation, h.version ? 'サーバー ' + h.version : ''].filter(Boolean);
     return { ok: true, needsLogin: false, unknown: false,
-             text: `使えます（ログイン済み${h.invocation ? ' / ' + h.invocation : ''}）` };
+             text: `使えます（ログイン済み${parts.length ? ' / ' + parts.join(' / ') : ''}）` };
   }
   if (a.ok && a.loggedIn === false) {
     return { ok: false, needsLogin: true, unknown: false,
