@@ -472,6 +472,7 @@ const els = {
   inputClaudeBridge: document.getElementById('input-claude-bridge'),          // v0.24.0
   claudeBridgeStatus: document.getElementById('claude-bridge-status'),        // v0.24.0
   btnClaudeBridgeTest: document.getElementById('btn-claude-bridge-test'),     // v0.24.0
+  btnSaveBridgeFiles: document.getElementById('btn-save-bridge-files'),      // v0.24.12
   audioUsageText: document.getElementById('audio-usage-text'),
   btnClearAudio: document.getElementById('btn-clear-audio'),
   inputGeminiLiveDisplay: document.getElementById('input-gemini-live-display'),
@@ -3645,6 +3646,63 @@ async function testClaudeBridge() {
 }
 
 /**
+ * 中継に必要なファイルを保存する (v0.24.12)
+ *
+ * やっさんの要望:
+ * > start.bat とか login.bat とかはアプリの中に組み込めないの？
+ * > ゆくゆく公開することを考えると、含んでいてほしいかな
+ *
+ * ■ できないことをはっきりさせる
+ *
+ * **拡張からパソコンのプログラムを起動することはできない。**
+ * Chrome 拡張にはその手段が無い（ネイティブメッセージングを使えば起動できるが、
+ * それ自体にレジストリ登録という手作業が要るので、手間が減らない）。
+ * だから「ボタンを押したら中継が立ち上がる」は作れない。**そこは嗘をつかない。**
+ *
+ * ■ 代わりにできること
+ *
+ * 「リポジトリを clone している人しか使えない」状態は消せる。
+ * 必要な3つをアプリから出せば、拡張だけ入れた人でも揃う。
+ * （.bat は %~dp0 で自分の隣の serve.js を見るので、置く場所を問わない）
+ */
+const BRIDGE_FILES = ['serve.js', 'start.bat', 'login.bat'];
+
+async function saveBridgeFiles() {
+  const btn = els.btnSaveBridgeFiles;
+  const say = (msg, ng) => {
+    if (!els.claudeBridgeStatus) return;
+    els.claudeBridgeStatus.className = 'field-hint' + (ng ? ' is-ng' : '');
+    els.claudeBridgeStatus.textContent = msg;
+  };
+  if (btn) btn.disabled = true;
+  try {
+    const saved = [];
+    for (const name of BRIDGE_FILES) {
+      const res = await fetch(name);
+      if (!res.ok) throw new Error(`${name} を読めませんでした (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // すぐ revoke すると保存が間に合わないことがある
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      saved.push(name);
+      await new Promise((r) => setTimeout(r, 300));   // 立て続けに出すとブラウザが落とす
+    }
+    // ここは素のテキスト。** を書くとそのまま出る
+    say(`${saved.join(' / ')} を保存しました。同じフォルダに置いて start.bat を実行してください`);
+  } catch (e) {
+    say('保存できませんでした: ' + (e.message || e), true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/**
  * 連携をオンにしたときにその場で確かめる (v0.24.9)
  *
  * やっさんの要望:
@@ -5693,7 +5751,8 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
     els.summaryEmpty.hidden = true;
     if (els.btnSummaryCombo) els.btnSummaryCombo.classList.add('firing');
   }
-  setStatus('listening', '要約生成中');
+  // v0.24.12: どちらの AI で回しているかを出す（やっさんの要望）
+  setStatus('listening', `要約生成中（${typeof aiEngineName === 'function' ? aiEngineName('summary') : 'Gemini'}）`);
   try {
     const summary = await summarizeWithGemini({
       apiKey: state.settings.apiKey,
@@ -9231,6 +9290,9 @@ if (els.btnClaudeBridgeTest) {
 // v0.24.9: オンにしたその場でログインを見る
 if (els.inputClaudeBridge) {
   els.inputClaudeBridge.addEventListener('change', () => { verifyClaudeBridgeToggle(); });
+}
+if (els.btnSaveBridgeFiles) {
+  els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });
 }
 // v0.19.0: 期限切れの音声を掃除する。「タブを閉じたら消す」はクラッシュや
 // 強制リロードでは走らないので、消し忘れを防ぐ本体はこちら

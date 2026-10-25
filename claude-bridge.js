@@ -83,8 +83,20 @@ function claudeBridgeIsFatal(error) {
  */
 function claudeBridgeShouldUse({ enabled, feature, body }) {
   if (!enabled) return false;
-  if (!CLAUDE_BRIDGE_FEATURES.has(feature)) return false;
+  if (!claudeBridgeFeatureAllowed(feature)) return false;
   return claudeBridgeBodyIsTextOnly(body);
+}
+
+/**
+ * その機能は Claude に回してよいか（body を見ない判定）(v0.24.12)
+ *
+ * 画面に「要約生成中（Claude）」と出すため、**body を作る前に**
+ * どちらに回るかを知りたい。機能名だけならその時点で分かる。
+ * 実際に回すかは claudeBridgeShouldUse() が body まで見て決めるので、
+ * こちらを分岐に使わない（音声が黙って飛ぶのを防ぐ二重の判定を崩さない）。
+ */
+function claudeBridgeFeatureAllowed(feature) {
+  return CLAUDE_BRIDGE_FEATURES.has(feature);
 }
 
 /**

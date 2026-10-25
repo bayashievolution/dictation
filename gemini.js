@@ -251,6 +251,29 @@ function _stripThinkingArtifacts(text) {
  *
  * @returns {Promise<string|null>} 文字列なら Claude の結果。null なら Gemini へ
  */
+/**
+ * その処理がいまどちらに回るか (v0.24.12)
+ *
+ * やっさんの要望:
+ * > 右上に出るやつを、要約生成中（Claude）とか要約生成中（Gemini）とか
+ * > 出るとさらにいいね
+ *
+ * **分からないときは Gemini と言う。** 外して「Claude」と出すより、
+ * 外して「Gemini」と出すほうが安全側（実際には落ち先が Gemini なので）。
+ */
+function aiEngineForFeature(feature) {
+  if (typeof claudeBridgeIsEnabled !== 'function' || !claudeBridgeIsEnabled()) return 'gemini';
+  if (typeof claudeBridgeFeatureAllowed !== 'function' || !claudeBridgeFeatureAllowed(feature)) return 'gemini';
+  // もう駄目だと分かっているときは呼びに行かないので Gemini
+  if (typeof claudeBridgeBrokenReason === 'function' && claudeBridgeBrokenReason()) return 'gemini';
+  return 'claude';
+}
+
+/** 画面に出す名前。Claude / Gemini */
+function aiEngineName(feature) {
+  return aiEngineForFeature(feature) === 'claude' ? 'Claude' : 'Gemini';
+}
+
 async function _tryClaudeBridge(body, feature) {
   if (typeof claudeBridgeShouldUse !== 'function') return null;   // 読み込まれていない
   if (!claudeBridgeShouldUse({ enabled: claudeBridgeIsEnabled(), feature, body })) return null;

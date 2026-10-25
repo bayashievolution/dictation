@@ -249,6 +249,50 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
     await ctx.close();
   }
 
+  console.log('\n■ 中継用ファイルをアプリから出せるか (v0.24.12)');
+  // やっさんの要望「start.bat とか login.bat とかはアプリの中に組み込めないの？
+  // ゆくゆく公開することを考えると、含んでいてほしいかな」。
+  // 拡張からプログラムは起動できないが、**ファイルを渡すことはできる**
+  {
+    const ctx = await browser.newContext({ acceptDownloads: true });
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => { console.log('✕ ページで例外: ' + e.message); fail++; });
+    const got = [];
+    page.on('download', (d) => got.push(d.suggestedFilename()));
+    await page.goto(URL);
+    await page.waitForTimeout(800);
+    await page.evaluate(() => { document.getElementById('btn-settings').click(); });
+    await page.waitForTimeout(250);
+    await page.evaluate(() => { document.getElementById('btn-save-bridge-files').click(); });
+    await page.waitForTimeout(3000);
+    eq('3つとも保存される', got.sort(), ['login.bat', 'serve.js', 'start.bat']);
+    eq('同じフォルダに置くことを言う',
+       (await status(page)).includes('同じフォルダ'), true);
+    eq('記号がそのまま出ていない', (await status(page)).includes('**'), false);
+    await ctx.close();
+  }
+
+  console.log('\n■ 設定の並び (v0.24.12)');
+  // やっさんの要望「設定メニューの Claude code 連携メニューは、
+  // 録音停止時に AI 要約・・・の下に移動してほしい」
+  {
+    const { ctx, page } = await open(browser);
+    const order = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('.field-group-title')).map((h) => h.textContent.trim()));
+    const gemini = order.indexOf('Gemini API');
+    const claude = order.indexOf('Claude Code 連携');
+    eq('Claude 連携は Gemini API のあと', claude > gemini && gemini >= 0, true);
+    eq('録音停止時の要約設定よりあとにある',
+       await page.evaluate(() => {
+         const box = document.getElementById('input-auto-summarize');
+         const head = Array.from(document.querySelectorAll('.field-group-title'))
+           .find((h) => h.textContent.trim() === 'Claude Code 連携');
+         // 文書順で box のあとに head があるか
+         return !!(box.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING);
+       }), true);
+    await ctx.close();
+  }
+
   await browser.close();
   console.log(fail === 0 ? '\nすべて通過' : `\n失敗 ${fail} 件`);
   process.exit(fail === 0 ? 0 : 1);

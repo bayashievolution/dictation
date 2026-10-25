@@ -17,6 +17,14 @@ for /f "tokens=5" %%p in ('netstat -ano ^| findstr /c:":8765" ^| findstr /c:"LIS
   taskkill /PID %%p /F >nul 2>nul
 )
 
-start "dictation server" /MIN cmd /c "node \\wsl.localhost\Ubuntu\home\bayashi\dictation\serve.js & pause"
+REM パスを書き固めない (v0.24.12)。%~dp0 = この .bat が置いてある場所。
+REM serve.js は必ず隣にあるので、どこに置いても、誰の PC でも動く。
+REM （以前は \\wsl.localhost\Ubuntu\home\bayashi\... と書いてあったので、
+REM   このフォルダを移しただけで動かなくなっていた）
+set "SERVEJS=%~dp0serve.js"
+
+REM /k にしてあるのは、node が落ちたときに理由を読めるようにするため。
+REM 窓を閉じればサーバーも止まる（これまでと同じ）
+start "dictation server" /MIN cmd /k node "%SERVEJS%"
 timeout /t 2 /nobreak >nul
 exit

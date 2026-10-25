@@ -17,6 +17,7 @@ const ctx = { console, Set, Array, String, JSON };
 vm.createContext(ctx);
 const consts = /const CLAUDE_BRIDGE_FEATURES = new Set\(\[[\s\S]*?\]\);/.exec(src)[0];
 vm.runInContext([consts, grab(src, 'claudeBridgeShouldUse'),
+  grab(src, 'claudeBridgeFeatureAllowed'),
   grab(src, 'claudeBridgeBodyIsTextOnly'), grab(src, 'claudeBridgePromptFromBody'),
   grab(src, 'claudeBridgeUnfence'),
   '\nglobalThis.__feats = Array.from(CLAUDE_BRIDGE_FEATURES);'].join('\n'), ctx);
@@ -213,6 +214,43 @@ console.log('\n■ 待っても直らない失敗かどうか');
   no('時間切れ（次は通るかもしれない）', '180秒待っても返事がありませんでした');
   no('長すぎる（内容次第）', '長すぎます（250000字 / 上限200000字）');
   no('空', '');
+}
+
+/* ───────── v0.24.12: いまどちらの AI で回しているか ─────────
+ *
+ * やっさんの要望:
+ * > 右上に出るやつを、要約生成中（Claude）とか要約生成中（Gemini）とか出るとさらにいいね
+ *
+ * **外して「Claude」と出すより、外して「Gemini」と出すほうが安全側**。
+ * 落ち先は必ず Gemini なので、言い過ぎないほうを既定にする。 */
+{
+  const gem = fs.readFileSync((process.env.SRC || __dirname + '/../') + 'gemini.js', 'utf8');
+  vm.runInContext([grab(src, 'claudeBridgeSetEnabled'), grab(src, 'claudeBridgeIsEnabled'),
+                   grab(src, 'claudeBridgeMarkBroken'), grab(src, 'claudeBridgeClearBroken'),
+                   grab(src, 'claudeBridgeBrokenReason'),
+                   'let _claudeBridgeEnabled = false; let _claudeBridgeBrokenReason = "";',
+                   grab(gem, 'aiEngineForFeature'), grab(gem, 'aiEngineName')].join('\n'), ctx);
+  const name = (f) => ctx.aiEngineName(f);
+  const is = (label, got, want) => {
+    const ok = got === want;
+    console.log(`${ok ? '✓' : '✕'} ${label}: ${got}`);
+    if (!ok) { console.log(`    期待 ${want}`); fail++; }
+  };
+  console.log('\n■ いまどちらの AI で回すか');
+  ctx.claudeBridgeSetEnabled(false);
+  is('連携オフなら Gemini', name('summary'), 'Gemini');
+  ctx.claudeBridgeSetEnabled(true);
+  is('連携オンなら Claude', name('summary'), 'Claude');
+  is('質問も Claude', name('chat'), 'Claude');
+  is('タイトルも Claude', name('title'), 'Claude');
+  // 録音中のチャンク整形は 8〜10 秒かかって間に合わないので回さない。そう言う
+  is('チャンク整形は対象外なので Gemini', name('chunk-refine'), 'Gemini');
+  is('話者判別は対象外なので Gemini', name('diarize'), 'Gemini');
+  // ログイン切れを踏んだあとは呼びに行かないので、Claude とは言わない
+  ctx.claudeBridgeMarkBroken('OAuth session expired');
+  is('もう駄目だと分かっていれば Gemini', name('summary'), 'Gemini');
+  ctx.claudeBridgeClearBroken();
+  is('直れば Claude に戻る', name('summary'), 'Claude');
 }
 
 
