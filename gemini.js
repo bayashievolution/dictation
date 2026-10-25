@@ -268,12 +268,13 @@ async function _tryClaudeBridge(body, feature) {
   }
   // v0.24.6: 理由によって言い分ける。中継が動いていて claude 側で失敗したときまで
   // 「繋がらない」と言うのは嘘で、start.bat を見に行っても直らない
-  if (window.setStatus) {
-    const msg = typeof claudeBridgeFallbackMessage === 'function'
-      ? claudeBridgeFallbackMessage(r.error)
-      : 'Claude で処理できなかったので Gemini で処理しました';
-    window.setStatus('error', msg);
-  }
+  // v0.24.7: 出しっぱなしにしない。しばらくしたら消え、詳細は押したときだけ出す
+  const msg = typeof claudeBridgeFallbackMessage === 'function'
+    ? claudeBridgeFallbackMessage(r.error)
+    : 'Claude で処理できなかったので Gemini で処理しました';
+  const detail = `Claude Code に回せませんでした（${feature}）\n\n${r.error}`;
+  if (window.statusNotice) window.statusNotice('error', msg, { detail });
+  else if (window.setStatus) window.setStatus('error', msg, detail);
   return null;
 }
 

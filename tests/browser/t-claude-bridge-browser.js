@@ -124,7 +124,7 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
       ['claude が入っていない', 'claude を実行できませんでした'],
       ['時間切れ', '180秒待っても返事がありませんでした'],
       ['長すぎる', '長すぎます（250000字 / 上限200000字）'],
-      ['知らないエラー', '終了コード 1'],
+      ['知らないエラー（短い）', '終了コード 1'],
       ['理由が空', ''],
     ];
     for (const [label, err] of REASONS) {
@@ -136,6 +136,37 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
       }, err);
       eq(`${label}（${r.幅}px）: ${r.msg}`, r.切れ, false);
     }
+    await ctx.close();
+  }
+
+  console.log('\n■ 生の理由を画面に流さない (v0.24.7)');
+  // 一度は理由をそのまま文言に入れたが、やっさんから
+  // 「ログを画面にずっと出すのはちょっとね　押したらエラーの詳細が出るとか」。
+  // 文言は短く、詳細は押したときだけ。
+  {
+    const { ctx, page } = await open(browser);
+    const LONG = 'Error: Invalid API key \u00b7 Please run /login\n    at Object.<anonymous> (/usr/lib/cli.js:1:2345)';
+    const r = await page.evaluate((e) => {
+      const msg = claudeBridgeFallbackMessage(e);
+      const el = els.status;
+      setStatus('error', msg);
+      return { msg, 切れ: el.scrollWidth > el.clientWidth + 1 };
+    }, LONG);
+    eq('生の理由を文言に入れない', r.msg.includes('Invalid API key'), false);
+    eq('パスや行番号を出さない', /cli\.js|at Object/.test(r.msg), false);
+    eq('切れない長さに収まる', r.切れ, false);
+    eq('Gemini に戻したことは言う', r.msg.includes('Gemini で処理'), true);
+    await ctx.close();
+  }
+
+  console.log('\n■ detail を渡さなければ今までどおり（41か所の呼び出しを変えていない）');
+  {
+    const { ctx, page } = await open(browser);
+    eq('title は label と同じになる',
+       await page.evaluate(() => {
+         setStatus('idle', '停止');
+         return els.status.title;
+       }), '停止');
     await ctx.close();
   }
 

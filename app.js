@@ -579,11 +579,118 @@ function restoreStatus() {
             state.isRecording ? recordingLabel() : '停止');
 }
 
-function setStatus(mode, label) {
+function setStatus(mode, label, detail) {
   els.status.className = `status ${mode}`;
   els.status.textContent = label;
-  els.status.title = label;
+  // detail: 画面には入りきらない全文 (v0.24.7)。
+  // 状態表示は max-width: 360px で末尾から切れるので、
+  // 長い理由（claude の stderr など）はホバーで読めるようにする。
+  // 省略すれば今までどおり label がそのまま title に入る
+  els.status.title = detail || label;
 }
+
+/* ───────── 状態表示の「お知らせ」 (v0.24.7) ─────────
+ *
+ * やっさんの要望:
+ * > このメッセージ長くてずっと出てるので、そのへんの表示にもこだわりたい
+ * > 形が iphone のダイナミックアイランドに似てるから ダイナミックアイランドみたいな
+ * > アニメーションで出て、しばらくしたら アニメーションして消えるようにしよう
+ * > ログを画面にずっとだすのはちょっとね　押したらエラーの詳細が出るとか
+ *
+ * ■ 状態とお知らせを分ける
+ *
+ * `setStatus()` は**状態**（待機中／聞き取り中）。出たままでよい。
+ * `statusNotice()` は**お知らせ**（〜に失敗しました）。出て、しばらくして消える。
+ * 今まではお知らせも setStatus で出していたので、戻す処理を書き忘れた場所が
+ * 消えずに残っていた（Claude から Gemini に戻したときの表示がそれ）。
+ *
+ * ■ 詳細を画面に流さない
+ *
+ * stderr のような長い文字は、状態表示に貼ると末尾から切れるうえ、
+ * 読み終わったあとも居座る。押したときだけ開く。
+ * 全文は設定→診断ログにも残るので、消えても失われない。
+ */
+const STATUS_NOTICE_MS = 6000;
+let statusNoticeTimer = null;
+let statusNoticeDetail = '';
+let statusDetailEl = null;
+
+/** アニメーションを頭から流し直す。class を外して付け直すだけでは再生されない */
+function replayStatusAnimation(cls) {
+  if (!els.status) return;
+  els.status.classList.remove('is-entering', 'is-leaving');
+  void els.status.offsetWidth;   // reflow を挟まないとブラウザが変化に気づかない
+  els.status.classList.add(cls);
+}
+
+function statusNotice(mode, label, { detail = '', ms = STATUS_NOTICE_MS } = {}) {
+  if (!els.status) return;
+  clearTimeout(statusNoticeTimer);
+  closeStatusDetail();
+  statusNoticeDetail = String(detail || '');
+  setStatus(mode, label, statusNoticeDetail ? label + '（押すと詳細）' : label);
+  els.status.classList.toggle('has-detail', !!statusNoticeDetail);
+  replayStatusAnimation('is-entering');
+  statusNoticeTimer = setTimeout(dismissStatusNotice, Math.max(500, ms));
+}
+
+/** お知らせを畳んで、いまの状態に戻す */
+function dismissStatusNotice() {
+  clearTimeout(statusNoticeTimer);
+  statusNoticeTimer = null;
+  if (!els.status) return;
+  // 詳細を開いて読んでいる最中に消さない
+  if (statusDetailEl) return;
+  replayStatusAnimation('is-leaving');
+  setTimeout(() => {
+    if (!els.status) return;
+    els.status.classList.remove('is-leaving', 'has-detail');
+    statusNoticeDetail = '';
+    restoreStatus();
+    replayStatusAnimation('is-entering');
+  }, 220);
+}
+
+function closeStatusDetail() {
+  if (statusDetailEl) { statusDetailEl.remove(); statusDetailEl = null; }
+  if (els.status) els.status.classList.remove('is-open');
+}
+
+function openStatusDetail() {
+  if (!statusNoticeDetail || !els.status) return;
+  clearTimeout(statusNoticeTimer);   // 読んでいる間は消さない
+  statusNoticeTimer = null;
+  const box = document.createElement('div');
+  box.className = 'status-detail';
+  box.textContent = statusNoticeDetail;
+  const hint = document.createElement('div');
+  hint.className = 'status-detail-hint';
+  hint.textContent = 'この内容は 設定 → 診断ログ にも残っています';
+  box.appendChild(hint);
+  (els.status.parentNode || document.body).appendChild(box);
+  statusDetailEl = box;
+  els.status.classList.add('is-open');
+}
+
+function toggleStatusDetail() {
+  if (statusDetailEl) { closeStatusDetail(); dismissStatusNotice(); }
+  else openStatusDetail();
+}
+
+if (els.status) {
+  els.status.addEventListener('click', () => {
+    if (statusNoticeDetail) toggleStatusDetail();
+  });
+}
+// 外を押したら閉じる。閉じたらそのままお知らせも引っ込める
+document.addEventListener('click', (e) => {
+  if (!statusDetailEl) return;
+  if (e.target === els.status || els.status.contains(e.target)) return;
+  if (statusDetailEl.contains(e.target)) return;
+  closeStatusDetail();
+  dismissStatusNotice();
+});
+window.statusNotice = statusNotice;   // gemini.js から呼ぶ
 
 function setRecordingUI(isRec) {
   els.btnToggle.classList.toggle('recording', isRec);

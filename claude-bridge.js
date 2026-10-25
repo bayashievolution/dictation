@@ -176,6 +176,7 @@ async function claudeBridgeRun(prompt, { url = CLAUDE_BRIDGE_URL, signal } = {})
  */
 function claudeBridgeFallbackMessage(error) {
   const e = String(error == null ? '' : error);
+  if (!e.trim()) return 'Claude で処理できなかったので Gemini で処理しました';
   if (e.includes('繋がりません')) {
     return '中継に繋がらないので Gemini で処理（start.bat を起動）';
   }
@@ -188,6 +189,11 @@ function claudeBridgeFallbackMessage(error) {
   if (e.includes('長すぎます')) {
     return '長すぎて Claude に送れないので Gemini で処理';
   }
+  // 分類できないとき。**生の理由をここに貼らない** (v0.24.7)。
+  // 一度は貼ってみたが、やっさんから
+  // 「ログを画面にずっと出すのはちょっとね　押したらエラーの詳細が出るとか」。
+  // 状態表示は「今何が起きているか」を一目で言う場所で、
+  // stderr を流す場所ではない。詳細は押したときだけ出す。
   return 'Claude で処理できなかったので Gemini で処理しました';
 }
 
