@@ -9040,9 +9040,41 @@ function handleMemoKeydown(e) {
       // 入れ子のリストは文字に潰さず、出した行のすぐ下にリストのまま残す
       const nested = Array.from(li.children).filter(c => c.tagName === 'UL' || c.tagName === 'OL');
       memoMoveInlineChildren(li, div);
-      list.parentNode.insertBefore(div, list);
-      for (const n of nested) list.parentNode.insertBefore(n, list);
+      /* v0.24.16: 押した行の**その場所で**・だけを消す。
+       *
+       * 以前は何番目の項目でも `list` の前に出していた。先頭の項目なら合っているが、
+       * 最後の項目で押すと行がリストの頭へ飛ぶ。入れ子では「親」と「1番目の子」の
+       * 間に空行が入ったように見えていた（やっさん報告「一番最後の子のところで
+       * バックスペースを押すと、親と一番上の子の間に1行空行が入る。本当は一番最後の
+       * 子の・が消えてほしい」）。
+       *
+       * 途中の項目なら、そこでリストを2つに分けて間に置く（Enter で空の項目を抜ける
+       * ときと同じ分け方）。入れ子のリストの項目なら、字下げは子の位置に揃える
+       * （・だけが消えて、行は動かないように見せるため）。 */
+      const after = [];
+      for (let n = li.nextElementSibling; n; n = n.nextElementSibling) after.push(n);
+      const isFirst = !li.previousElementSibling;
+      if (list.parentNode && list.parentNode.tagName === 'LI') {
+        const pad = parseFloat(getComputedStyle(list).paddingLeft) || 0;
+        if (pad) div.style.paddingLeft = Math.round(pad) + 'px';
+      }
       li.remove();
+      if (isFirst) {
+        list.parentNode.insertBefore(div, list);
+      } else {
+        list.parentNode.insertBefore(div, list.nextSibling);
+        if (after.length) {
+          const listTag = list.tagName.toLowerCase();
+          const rest = document.createElement(listTag);
+          for (const el of after) rest.appendChild(el);
+          if (listTag === 'ol') {
+            rest.start = (parseInt(list.getAttribute('start'), 10) || 1) + list.children.length;
+          }
+          div.parentNode.insertBefore(rest, div.nextSibling);
+        }
+      }
+      let anchor = div;
+      for (const n of nested) { anchor.parentNode.insertBefore(n, anchor.nextSibling); anchor = n; }
       if (list.children.length === 0) list.remove();
       memoPlaceCaretAtStart(div);
       return;
