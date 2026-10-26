@@ -5097,11 +5097,52 @@ const paneLastStable = {
   'pane-summary': '',
 };
 const paneTypingTimers = {};
+/** ペインごとの「打ちかけを確定させる」関数。bindPaneTypingUndo が入れる */
+const paneTypingFlush = {};
+
+/**
+ * メモをプログラムから書き換える**直前**に呼ぶ (v0.24.15)
+ *
+ * v0.24.14 までは画像の操作が `pushUndo` を**書き換えた後**に呼んでいた。
+ * `pushUndo` は「いまの状態」を積むので、積まれるのは操作後の状態になり、
+ * 1回戻しても何も変わらない。さらに打ちかけの文字（2秒待ちの途中）が
+ * 確定していないと、次に積まれるのは打ち始める前の状態なので、
+ * もう1回戻すと**貼る前に打っていた文字までまとめて消える**
+ * （やっさん報告「元に戻そうとしたら、画像を入れる前の文字が消えてしまって」）。
+ *
+ * 順番: 打ちかけを確定 → 操作前の状態を積む → （呼び出し側が書き換える）→ memoUndoCommit
+ */
+function memoUndoCheckpoint(opLabel) {
+  if (paneTypingFlush['pane-memo']) paneTypingFlush['pane-memo']('編集');
+  pushUndo(opLabel, 'pane-memo');
+}
+
+/** 書き換えた**後**に呼ぶ。打鍵の基準を今の中身に合わせ、保存する */
+function memoUndoCommit() {
+  paneLastStable['pane-memo'] = paneHtml('pane-memo');
+  snapshotActiveToSession();
+  persistSessions();
+}
+
+/**
+ * 取り消し用に記録するペインの中身 (v0.24.15)
+ *
+ * メモの画像の src は blob: の一時 URL で、タブを切り替えたり戻したりするたびに
+ * `releaseMemoObjectUrls()` で解放される。v0.24.14 までは打鍵の取り消しが
+ * src ごと記録していたので、**戻すと死んだ URL が入って画像が壊れていた**。
+ * 保存（snapshotActiveToSession）と同じく id だけ残して記録し、戻したあとに差し込み直す。
+ */
+function paneHtml(paneId) {
+  if (paneId === 'pane-memo') return els.memo ? stripManagedImageSrc(els.memo.innerHTML) : '';
+  if (paneId === 'pane-transcript') return els.confirmed ? els.confirmed.innerHTML : '';
+  if (paneId === 'pane-summary') return els.summary ? els.summary.innerHTML : '';
+  return '';
+}
 
 function syncPaneBaselineFromDOM() {
-  if (els.confirmed) paneLastStable['pane-transcript'] = els.confirmed.innerHTML;
-  if (els.memo)      paneLastStable['pane-memo']       = els.memo.innerHTML;
-  if (els.summary)   paneLastStable['pane-summary']    = els.summary.innerHTML;
+  if (els.confirmed) paneLastStable['pane-transcript'] = paneHtml('pane-transcript');
+  if (els.memo)      paneLastStable['pane-memo']       = paneHtml('pane-memo');
+  if (els.summary)   paneLastStable['pane-summary']    = paneHtml('pane-summary');
 }
 
 function bindPaneTypingUndo() {
@@ -5131,7 +5172,7 @@ function bindPaneTypingUndo() {
   for (const { paneId, el } of targets) {
     if (!el || el.__typingUndoWired) continue;
     el.__typingUndoWired = true;
-    paneLastStable[paneId] = el.innerHTML;
+    paneLastStable[paneId] = paneHtml(paneId);
 
     // 現在のバーストを Undo スタックに確定させて baseline を更新するヘルパ
     const flushBurst = (opLabel = '編集') => {
@@ -5139,11 +5180,12 @@ function bindPaneTypingUndo() {
         clearTimeout(paneTypingTimers[paneId]);
         paneTypingTimers[paneId] = null;
       }
-      const current = el.innerHTML;
+      const current = paneHtml(paneId);
       if (current === paneLastStable[paneId]) return;
       pushUndoSnapshot(paneId, opLabel, paneLastStable[paneId]);
       paneLastStable[paneId] = current;
     };
+    paneTypingFlush[paneId] = flushBurst;
 
     el.addEventListener('input', (e) => {
       // 入力された文字列（IME 確定時も含む）
@@ -5176,7 +5218,13 @@ function bindPaneTypingUndo() {
       if (e.key === 'Enter' && !e.isComposing) {
         flushBurst('行編集');
         requestAnimationFrame(() => {
-          paneLastStable[paneId] = el.innerHTML;
+          // v0.24.15: 改行の直前の状態も積む。以前は基準を上書きするだけだったので、
+          // 戻すと改行の前に打っていた分を飛ばして、さらに前まで戻っていた
+          const now = paneHtml(paneId);
+          if (now !== paneLastStable[paneId]) {
+            pushUndoSnapshot(paneId, '改行', paneLastStable[paneId]);
+          }
+          paneLastStable[paneId] = now;
         });
       }
     });
@@ -7180,6 +7228,7 @@ async function handleMemoPaste(e) {
   const img = await storePastedImage(file);
   if (!img) return;
 
+  memoUndoCheckpoint('画像を貼り付け');
   if (range) {
     range.deleteContents();
     range.insertNode(img);
@@ -7190,9 +7239,7 @@ async function handleMemoPaste(e) {
   } else {
     els.memo.appendChild(img);
   }
-  pushUndo('画像を貼り付け', 'pane-memo');
-  snapshotActiveToSession();
-  persistSessions();
+  memoUndoCommit();
 }
 
 /**
@@ -7303,6 +7350,19 @@ function memoImageBox() {
   return document.getElementById('img-handles');
 }
 
+/**
+ * 画面の拡大率（設定の「表示倍率」）(v0.24.15)
+ *
+ * `applyAppZoom` は html に CSS の zoom をかけている。このとき
+ * `getBoundingClientRect()` と `clientX` は**拡大後**の見た目の px で返り、
+ * `style.left` などに書く値は**拡大前**の px として解釈される（実機の Chromium で
+ * 測った: 90% で 120px の画像の rect が 108px）。両者を混ぜると、
+ * 枠や移動量が倍率の分だけずれる。v0.24.14 までは 100% 以外で枠がずれていた。
+ */
+function appZoomFactor() {
+  return parseFloat(document.documentElement.style.zoom) || 1;
+}
+
 /** 選択枠を画像に合わせる。画像が消えていたら枠も消す */
 function positionImageBox() {
   const box = memoImageBox();
@@ -7310,12 +7370,13 @@ function positionImageBox() {
   const img = _selectedImg;
   if (!img || !img.isConnected || !els.memo.contains(img)) { clearImageSelection(); return; }
   const host = els.memo.parentElement;          // .pane-body（position: relative）
+  const z = appZoomFactor();
   const r = img.getBoundingClientRect();
   const h = host.getBoundingClientRect();
-  box.style.left   = `${r.left - h.left + host.scrollLeft}px`;
-  box.style.top    = `${r.top  - h.top  + host.scrollTop}px`;
-  box.style.width  = `${r.width}px`;
-  box.style.height = `${r.height}px`;
+  box.style.left   = `${(r.left - h.left) / z + host.scrollLeft}px`;
+  box.style.top    = `${(r.top  - h.top)  / z + host.scrollTop}px`;
+  box.style.width  = `${r.width  / z}px`;
+  box.style.height = `${r.height / z}px`;
   box.hidden = false;
 }
 
@@ -7354,12 +7415,14 @@ function onImageHandleDown(e) {
   e.preventDefault();
   e.stopPropagation();
   const img = _selectedImg;
+  const z = appZoomFactor();
   const startX = e.clientX;
-  const startWidth = img.getBoundingClientRect().width;
+  const startWidth = img.getBoundingClientRect().width / z;
+  memoUndoCheckpoint('画像のサイズ変更');
 
   const move = (ev) => {
     img.style.width = resizeImageWidth({
-      startWidth, dx: ev.clientX - startX, corner,
+      startWidth, dx: (ev.clientX - startX) / z, corner,
     }) + 'px';
     img.style.height = 'auto';   // 縦横比を保つ
     positionImageBox();
@@ -7367,9 +7430,7 @@ function onImageHandleDown(e) {
   const up = () => {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
-    pushUndo('画像のサイズ変更', 'pane-memo');
-    snapshotActiveToSession();
-    persistSessions();
+    memoUndoCommit();
   };
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
@@ -7380,26 +7441,25 @@ function onFloatingImageDown(e) {
   const img = _selectedImg;
   if (!img || img.dataset.float !== '1') return;
   e.preventDefault();
-  const host = els.memo.parentElement;
+  const z = appZoomFactor();
   const startX = e.clientX, startY = e.clientY;
   const startLeft = parseFloat(img.style.left) || 0;
   const startTop  = parseFloat(img.style.top)  || 0;
+  let moved = false;
 
   const move = (ev) => {
-    img.style.left = `${startLeft + (ev.clientX - startX)}px`;
-    img.style.top  = `${startTop  + (ev.clientY - startY)}px`;
+    if (!moved) { memoUndoCheckpoint('画像の移動'); moved = true; }
+    img.style.left = `${startLeft + (ev.clientX - startX) / z}px`;
+    img.style.top  = `${startTop  + (ev.clientY - startY) / z}px`;
     positionImageBox();
   };
   const up = () => {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
-    pushUndo('画像の移動', 'pane-memo');
-    snapshotActiveToSession();
-    persistSessions();
+    if (moved) memoUndoCommit();
   };
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
-  void host;
 }
 
 /** これより小さい動きはクリックとみなす（手の震えで画像が1文字ずれないように） */
@@ -7456,6 +7516,7 @@ function onInlineImageDown(e) {
     if (!dragging) return;   // ただのクリック。枠を出しただけで終わり
     const r = caretAt(ev.clientX, ev.clientY);
     if (!r) { positionImageBox(); return; }   // メモの外で離したら動かさない
+    memoUndoCheckpoint('画像の移動');
     try {
       r.insertNode(img);
       r.setStartAfter(img);
@@ -7467,12 +7528,11 @@ function onInlineImageDown(e) {
       // 自分のすぐ隣に落としたときなどに位置の計算が合わないことがある。動かさないだけにする
       console.warn('[memo image] move skipped:', err.message || err);
       positionImageBox();
+      memoUndoCommit();   // 何も変わっていなければ、積んだ「戻す」は同じ中身になるだけ
       return;
     }
     positionImageBox();
-    pushUndo('画像の移動', 'pane-memo');
-    snapshotActiveToSession();
-    persistSessions();
+    memoUndoCommit();
   };
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
@@ -7512,10 +7572,9 @@ function openImageMenu(img, x, y) {
     b.textContent = label;
     b.addEventListener('click', () => {
       closeImageMenu();
+      memoUndoCheckpoint('画像の操作（' + label + '）');
       fn();
-      pushUndo('画像の操作', 'pane-memo');
-      snapshotActiveToSession();
-      persistSessions();
+      memoUndoCommit();
       positionImageBox();
     });
     menu.appendChild(b);
@@ -7543,12 +7602,13 @@ function setImageFloat(img, floating) {
     return;
   }
   const host = els.memo.parentElement;
+  const z = appZoomFactor();
   const r = img.getBoundingClientRect();
   const h = host.getBoundingClientRect();
   img.dataset.float = '1';
   img.style.position = 'absolute';
-  img.style.left = `${Math.round(r.left - h.left + host.scrollLeft)}px`;
-  img.style.top  = `${Math.round(r.top  - h.top  + host.scrollTop)}px`;
+  img.style.left = `${Math.round((r.left - h.left) / z + host.scrollLeft)}px`;
+  img.style.top  = `${Math.round((r.top  - h.top)  / z + host.scrollTop)}px`;
   img.style.zIndex = String(computeZIndex(collectImageZIndexes(), 'front'));
 }
 
@@ -8665,6 +8725,33 @@ function memoFindAncestor(tagName) {
   return null;
 }
 
+/**
+ * 文字も画像も無い行か (v0.24.15)
+ *
+ * v0.24.14 までは `textContent.trim() === ''` で見ていた。画像は文字を持たないので、
+ * **画像だけの箇条書きで Enter を押すと「空の行」扱いで画像ごと消えていた**
+ * （やっさん報告「画像の右にカーソルを移動して改行したら画像が消えた」）。
+ */
+function memoIsBlank(el) {
+  if (!el) return true;
+  if ((el.textContent || '').trim() !== '') return false;
+  return !el.querySelector('img, hr, table');
+}
+
+/**
+ * 行の形を変えるとき、中身を**要素ごと**移す (v0.24.15)
+ *
+ * 以前は `div.textContent = li.textContent` で作り直していたので、画像・太字・
+ * リンクが行の形を変えた瞬間に落ちていた。入れ子のリストは移さない（呼び出し側で扱う）。
+ */
+function memoMoveInlineChildren(from, to) {
+  for (const n of Array.from(from.childNodes)) {
+    if (n.nodeType === 1 && (n.tagName === 'UL' || n.tagName === 'OL')) continue;
+    to.appendChild(n);
+  }
+  if (memoIsBlank(to) && !to.querySelector('br')) to.innerHTML = '<br>';
+}
+
 function memoPlaceCaretAtEnd(el) {
   const range = document.createRange();
   range.selectNodeContents(el);
@@ -8820,7 +8907,7 @@ els.memo.addEventListener('input', (e) => {
   checkMemoMarkdown();
 });
 
-els.memo.addEventListener('keydown', (e) => {
+function handleMemoKeydown(e) {
   // Tab / Shift+Tab
   if (e.key === 'Tab') {
     const li = memoFindAncestor('LI');
@@ -8871,7 +8958,7 @@ els.memo.addEventListener('keydown', (e) => {
     if (label) {
       e.preventDefault();
       const span = label.querySelector('span');
-      const isEmpty = !span || span.textContent.trim() === '';
+      const isEmpty = !span || memoIsBlank(span);
       const newBlock = document.createElement('div');
       newBlock.innerHTML = '<br>';
       label.parentNode.insertBefore(newBlock, label.nextSibling);
@@ -8891,7 +8978,7 @@ els.memo.addEventListener('keydown', (e) => {
     //   末尾で押した  → 従来どおりリストを抜けて、その下に空行
     //   途中で押した  → その位置でリストを分割し、間に空行を挟む（以降の行が下がる）
     const li = memoFindAncestor('LI');
-    if (li && li.textContent.trim() === '') {
+    if (li && memoIsBlank(li)) {
       e.preventDefault();
       const list = li.parentNode;
       const listTag = list.tagName.toLowerCase();
@@ -8938,8 +9025,7 @@ els.memo.addEventListener('keydown', (e) => {
     if (['h1','h2','h3','blockquote'].includes(tag)) {
       e.preventDefault();
       const div = document.createElement('div');
-      div.textContent = block.textContent;
-      if (!div.textContent) div.innerHTML = '<br>';
+      memoMoveInlineChildren(block, div);
       block.replaceWith(div);
       memoPlaceCaretAtStart(div);
       return;
@@ -8951,9 +9037,11 @@ els.memo.addEventListener('keydown', (e) => {
       const li = block;
       const list = li.parentNode;
       const div = document.createElement('div');
-      div.textContent = li.textContent;
-      if (!div.textContent) div.innerHTML = '<br>';
+      // 入れ子のリストは文字に潰さず、出した行のすぐ下にリストのまま残す
+      const nested = Array.from(li.children).filter(c => c.tagName === 'UL' || c.tagName === 'OL');
+      memoMoveInlineChildren(li, div);
       list.parentNode.insertBefore(div, list);
+      for (const n of nested) list.parentNode.insertBefore(n, list);
       li.remove();
       if (list.children.length === 0) list.remove();
       memoPlaceCaretAtStart(div);
@@ -8965,8 +9053,8 @@ els.memo.addEventListener('keydown', (e) => {
       e.preventDefault();
       const span = block.querySelector('span');
       const div = document.createElement('div');
-      div.textContent = span ? span.textContent : '';
-      if (!div.textContent) div.innerHTML = '<br>';
+      if (span) memoMoveInlineChildren(span, div);
+      else div.innerHTML = '<br>';
       block.replaceWith(div);
       memoPlaceCaretAtStart(div);
       return;
@@ -8980,6 +9068,54 @@ els.memo.addEventListener('keydown', (e) => {
       return;
     }
   }
+}
+
+/**
+ * メモのキー操作の入口 (v0.24.15)
+ *
+ * ■ Ctrl+Z / Ctrl+Y をアプリの「戻す／やり直す」に回す
+ *
+ * メモの中で押した Ctrl+Z は、これまでブラウザ自身の取り消しに任せていた。
+ * ブラウザの取り消しは**スクリプトが書き換えた分を知らない**（画像の貼り付け、
+ * ・ からの箇条書き化、Enter / Backspace の特別処理）。そのため関係ない文字が
+ * 消えたり、やり直すと見たことのない途中の形が出たりする（実機の Chromium で再現:
+ * 画像を貼って Enter → Ctrl+Z を3回押しても戻らず、Ctrl+Y で「・あ」が出てきた）。
+ * やっさん報告「元に戻そうとしたら…文字が消えて、やり直そうとしたらやり直し機能が無くて」。
+ *
+ * ■ 特別処理で書き換えたら、その前の状態を積む
+ *
+ * 打鍵の取り消し（bindPaneTypingUndo）のリスナーはこれより**後**に登録されるので、
+ * 走る時点では書き換えが終わっていて、書き換え前の状態を取りこぼしていた。
+ */
+els.memo.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.isComposing) {
+    const k = (e.key || '').toLowerCase();
+    const redo = k === 'y' || (k === 'z' && e.shiftKey);
+    const undo = k === 'z' && !e.shiftKey;
+    if (undo || redo) {
+      e.preventDefault();
+      if (paneTypingFlush['pane-memo']) paneTypingFlush['pane-memo']('編集');
+      const was = els.memo.innerHTML;
+      if (undo) doPaneUndo('pane-memo'); else doPaneRedo('pane-memo');
+      // 中身を入れ替えるとカーソルが消えるので、メモの末尾に戻して打ち続けられるようにする。
+      // 何も戻らなかったときは、カーソルを動かさない
+      if (els.memo.innerHTML !== was) {
+        els.memo.focus();
+        memoPlaceCaretAtEnd(els.memo);
+      }
+      return;
+    }
+  }
+
+  const before = paneHtml('pane-memo');
+  handleMemoKeydown(e);
+  if (!e.defaultPrevented || paneHtml('pane-memo') === before) return;
+  // 特別処理が書き換えた。打ちかけ → 書き換え前 の順に積む
+  if (paneLastStable['pane-memo'] !== before) {
+    pushUndoSnapshot('pane-memo', '編集', paneLastStable['pane-memo']);
+  }
+  pushUndoSnapshot('pane-memo', e.key === 'Enter' ? '改行' : '行の形を変更', before);
+  memoUndoCommit();
 });
 
 // チェックボックスクリックで .done 切替
@@ -9023,6 +9159,8 @@ els.memo.addEventListener('contextmenu', (e) => {
 
 // 枠がずれないよう、動きうるものに追随させる
 els.paneMemoBody.addEventListener('scroll', positionImageBox);
+// v0.24.15: キーで画像を消したとき枠だけ残っていた。打鍵で行がずれたときも追う
+els.memo.addEventListener('input', () => { if (_selectedImg) positionImageBox(); });
 window.addEventListener('resize', positionImageBox);
 // メモの外を触ったら選択を解く（メニューの中は除く）
 document.addEventListener('pointerdown', (e) => {
