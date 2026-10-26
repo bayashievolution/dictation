@@ -3167,3 +3167,7 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 押した項目の**その場所で** ・ だけを消す。途中の項目なら、そこでリストを2つに分けて間に置く（Enter で空の項目を抜けるときと同じ分け方。番号付きは続きの番号から。番号を外した行は数えない）
   - 入れ子の項目なら、出した行に子の ul と同じ `padding-left` を付けて**字下げを子の位置に揃える**（・が消えて行は動かないように見せるため。測ると X と 子2 の文字の左端が一致）。子の ul の中に div を置く案は、ul の直下に li 以外を置く形になるので採らなかった
   - テスト: `tests/browser/t-memo-list-backspace-browser.js`（9件）。旧版（v0.24.15）に当てると6件落ちる（先頭の項目のケースだけは旧版でも通る ── 変えていない挙動の確認）
+- 2026-10-26 (v0.24.17): **質問ペインの吹き出しが、Claude で答えても「Gemini」と書いていた**。やっさんの確認「Claude 連携にすると Claude になる？ 吹き出しに Gemini って書いてある」→ **中身は Claude に回っていた**（v0.24.0 から）。名前だけが `m.role === 'user' ? 'あなた' : 'Gemini'` の決め打ちで、吹き出し・コピー・HTML保存・Notion の5か所に同じ行があった
+  - `_callGemini` に `onEngine` を足し、**実際に答えたほう**（Claude に回せず Gemini に戻ったら gemini）を知らせる。答えを積むときに `engine` を記録し、`chatSpeakerLabel()` で名前にする。「いま Claude に回る設定か」（`aiEngineName`）で出さなかったのは、失敗して戻ったときに嘘になるため。考え中の吹き出しだけは答えがまだ無いので見込み（`aiEngineName('chat')`）を出す
+  - **記録の無い古い答えは「AI」**。v0.24.0 以降の答えは Claude だった可能性があり、どちらとも言えない。保存済みの会話の名前も変わる（Gemini → AI）
+  - テスト: `tests/t-chat-engine.js`（10件・旧版で4件落ちる）、`tests/browser/t-chat-engine-browser.js`（3件・旧版で「中身は Claude の答えなのに名前は Gemini」で落ちる。Gemini と /api/claude は page.route で差し替え）

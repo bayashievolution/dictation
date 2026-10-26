@@ -329,10 +329,14 @@ async function _tryClaudeBridge(body, feature) {
   return null;
 }
 
-async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800, skipSanitize = false, feature = '' } = {}) {
+async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800, skipSanitize = false, feature = '', onEngine = null } = {}) {
   // v0.24.0: 後処理だけ、利用者自身の Claude Code に回せる
   const viaClaude = await _tryClaudeBridge(body, feature);
-  if (viaClaude !== null) return viaClaude;
+  // v0.24.17: **実際に答えたほう**を呼び出し側に知らせる。質問の吹き出しは
+  // これを記録して名前を出す（「いま Claude に回る設定か」で出すと、
+  // 失敗して Gemini に戻ったときに嘘になる）
+  if (viaClaude !== null) { if (onEngine) onEngine('claude'); return viaClaude; }
+  if (onEngine) onEngine('gemini');
 
   // 思考モードの出力混入を防ぐため、明示的に無効化。
   // thinkingBudget:0 だけだとまれに漏れるので includeThoughts:false も併用。
@@ -749,7 +753,7 @@ async function generateTitleWithGemini({ apiKey, summary, transcript }) {
  * 捏造の歯止め（資料に無い事実を足さない・引用は実際の言葉だけ）は残し、
  * 「分からない」の条件を**関連する発言が1つも無いとき**まで引き上げた。
  */
-async function chatWithGemini({ apiKey, contextSources, history, question }) {
+async function chatWithGemini({ apiKey, contextSources, history, question, onEngine = null }) {
   if (!apiKey) throw new Error('Gemini API キーが設定されていません');
   if (!question || !question.trim()) throw new Error('質問が空です');
 
@@ -806,7 +810,7 @@ async function chatWithGemini({ apiKey, contextSources, history, question }) {
     },
   };
 
-  const text = await _callGemini(body, apiKey, { feature: 'chat' });
+  const text = await _callGemini(body, apiKey, { feature: 'chat', onEngine });
   return text.trim();
 }
 

@@ -3452,7 +3452,7 @@ function getChatHtml() {
   const chat = getActiveSession()?.chat || [];
   if (chat.length === 0) return '';
   const parts = chat.filter(m => !m.thinking).map(m => {
-    const who = m.role === 'user' ? 'あなた' : 'Gemini';
+    const who = chatSpeakerLabel(m);
     const body = m.role === 'assistant' ? renderMarkdown(m.content)
                                         : `<div>${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>`;
     return `<div class="chat-block"><p><strong>${who}</strong>: ${body}</p></div>`;
@@ -3585,7 +3585,7 @@ function buildNotionToggles(session) {
       // 質問ペインは配列なので、Q/A を見出し無しの段落ペアとして組み立てる
       const chat = (session.chat || []).filter(m => !m.thinking && !m.error);
       for (const m of chat) {
-        const who = m.role === 'user' ? 'あなた' : 'Gemini';
+        const who = chatSpeakerLabel(m);
         blocks.push(notionBlock.paragraph(notionRichText(`${who}:`, { bold: true })));
         blocks.push(...notionBlocksFromText(m.content));
       }
@@ -4269,7 +4269,7 @@ function buildExportHtml(session) {
       const chat = (session.chat || []).filter(m => !m.thinking);
       if (chat.length === 0) continue;
       html = chat.map(m => {
-        const who = m.role === 'user' ? 'あなた' : 'Gemini';
+        const who = chatSpeakerLabel(m);
         const body = m.role === 'assistant' ? renderMarkdown(m.content)
                     : '<p>' + escapeHtml(m.content).replace(/\n/g, '<br>') + '</p>';
         return `<div class="chat-block ${m.role}"><div class="chat-who">${who}</div>${body}</div>`;
@@ -4520,7 +4520,7 @@ function buildAllSessionsExportHtml(sessions) {
         const chat = (session.chat || []).filter(m => !m.thinking);
         if (chat.length === 0) continue;
         innerHtml = chat.map(m => {
-          const who = m.role === 'user' ? 'あなた' : 'Gemini';
+          const who = chatSpeakerLabel(m);
           const body = m.role === 'assistant' ? renderMarkdown(m.content)
                       : '<p>' + escapeHtml(m.content).replace(/\n/g, '<br>') + '</p>';
           return `<div class="chat-block ${m.role}"><div class="chat-who">${who}</div>${body}</div>`;
@@ -5593,7 +5593,8 @@ function renderChatInto(container, emptyHint, scrollContainer) {
   for (const msg of chat) {
     const div = document.createElement('div');
     div.className = 'chat-msg ' + msg.role + (msg.thinking ? ' thinking' : '') + (msg.error ? ' error' : '');
-    const who = msg.role === 'user' ? 'あなた' : 'Gemini';
+    // 考え中は、いま回る先の見込みを出す（答えが返ったら実際に答えたほうに置き換わる）
+    const who = msg.thinking ? aiEngineName('chat') : chatSpeakerLabel(msg);
     const body = document.createElement('div');
     body.className = 'chat-msg-body';
     if (msg.thinking) {
@@ -5613,6 +5614,24 @@ function renderChatInto(container, emptyHint, scrollContainer) {
   if (scrollContainer) {
     requestAnimationFrame(() => { scrollContainer.scrollTop = scrollContainer.scrollHeight; });
   }
+}
+
+/**
+ * 質問ペインの吹き出しの名前 (v0.24.17)
+ *
+ * v0.24.16 までは答えの側を**いつも「Gemini」**と書いていた。v0.24.0 で質問を
+ * Claude に回せるようにしたのに、名前のほうを直していなかった
+ * （やっさんの確認「Claude 連携してるけど、吹き出しに Gemini って書いてある」）。
+ *
+ * 答えたときに記録した `engine` を使う。**記録の無い古い答えは「AI」**にする。
+ * v0.24.0 以降の答えは Claude だった可能性があり、どちらとも言えないため。
+ * 保存・コピー・Notion にもこの名前が載る。
+ */
+function chatSpeakerLabel(m) {
+  if (!m || m.role === 'user') return 'あなた';
+  if (m.engine === 'claude') return 'Claude';
+  if (m.engine === 'gemini') return 'Gemini';
+  return 'AI';
 }
 
 function renderChat() {
@@ -5649,8 +5668,10 @@ async function sendChatMessageFrom(inputEl, sendBtn) {
   renderChat();
   if (sendBtn) sendBtn.disabled = true;
 
+  let engine = '';
   try {
     const answer = await chatWithGemini({
+      onEngine: (e) => { engine = e; },
       apiKey: state.settings.apiKey,
       contextSources: {
         transcript: getConfirmedText(),
@@ -5661,7 +5682,7 @@ async function sendChatMessageFrom(inputEl, sendBtn) {
       question: text,
     });
     session.chat = session.chat.filter(m => m !== thinking);
-    session.chat.push({ role: 'assistant', content: answer, ts: Date.now() });
+    session.chat.push({ role: 'assistant', content: answer, ts: Date.now(), engine });
     persistSessions();
     updateActionButtons();
     renderChat();
