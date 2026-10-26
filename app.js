@@ -8773,6 +8773,37 @@ function memoMoveInlineChildren(from, to) {
   if (memoIsBlank(to) && !to.querySelector('br')) to.innerHTML = '<br>';
 }
 
+/** 項目の直下にある子リスト（最初の1つ）。無ければ null (v0.24.18) */
+function memoDirectChildList(li) {
+  return Array.from(li.children).find(c => c.tagName === 'UL' || c.tagName === 'OL') || null;
+}
+
+/** 子リストを除いた、項目そのものの中身が空か (v0.24.18) */
+function memoInlineIsBlank(li) {
+  const c = li.cloneNode(true);
+  for (const n of Array.from(c.children)) if (n.tagName === 'UL' || n.tagName === 'OL') n.remove();
+  return memoIsBlank(c);
+}
+
+/**
+ * カーソルが項目の文字の末尾（子リストの直前）にあるか (v0.24.18)
+ *
+ * カーソルから子リストの手前までに、文字も画像も無ければ末尾とみなす。
+ * 子リストより後ろ（子の中など）にいるときは false。
+ */
+function memoCaretAtInlineEnd(li, childList) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed) return false;
+  const caret = sel.getRangeAt(0);
+  if (childList.contains(caret.startContainer)) return false;
+  const r = document.createRange();
+  r.setStart(caret.startContainer, caret.startOffset);
+  r.setEndBefore(childList);
+  if (r.collapsed && r.compareBoundaryPoints(Range.START_TO_START, caret) !== 0) return false;
+  const frag = r.cloneContents();
+  return !(frag.textContent || '').trim() && !frag.querySelector('img');
+}
+
 function memoPlaceCaretAtEnd(el) {
   const range = document.createRange();
   range.selectNodeContents(el);
@@ -8988,6 +9019,26 @@ function handleMemoKeydown(e) {
       return;
     }
 
+    /* v0.24.18: 子を持つ項目の**文字の末尾**で Enter → 最初の子として新しい項目を作る。
+     *
+     * Chrome に任せると、新しい空の項目が親と同じ高さにでき、子のリストがそちらへ
+     * **引っ越す**（実機で確認: <li>あああ</li><li><br><ul>いいい…</ul></li>）。
+     * 見た目は「空の親の下に子がぶら下がる」形で、やっさんは「間違えた」と思って
+     * Backspace を押し、そこから崩れていった（報告: 「いいいの上に子の点を入れたくて、
+     * まちがえて あああ の右で改行すると、親の・ができる」）。
+     * 子を持つ行の末尾で改行したら最初の子になるのは Notion と同じで、
+     * この報告で本人がやりたかったことそのものでもある。 */
+    const parentLi = memoFindAncestor('LI');
+    const childList = parentLi && memoDirectChildList(parentLi);
+    if (childList && memoCaretAtInlineEnd(parentLi, childList)) {
+      e.preventDefault();
+      const newLi = document.createElement('li');
+      newLi.innerHTML = '<br>';
+      childList.insertBefore(newLi, childList.firstChild);
+      memoPlaceCaretAtStart(newLi);
+      return;
+    }
+
     // 空の li で Enter
     //
     // v0.15.1: 以前はどこで押しても「新しい空行をリスト全体の後ろに置く」という実装で、
@@ -9060,6 +9111,38 @@ function handleMemoKeydown(e) {
       const div = document.createElement('div');
       // 入れ子のリストは文字に潰さず、出した行のすぐ下にリストのまま残す
       const nested = Array.from(li.children).filter(c => c.tagName === 'UL' || c.tagName === 'OL');
+
+      /* v0.24.18: 子を持つ**空の**項目なら、項目ごと消して子を1つ上の項目に返す。
+       *
+       * 下の「・だけ消す」をこの形に当てると、子のリストが親と同じ高さに出てしまう
+       * （子が一段浅くなる）。空の項目に子がぶら下がっているのは、ほぼ必ず
+       * 「子を持つ行の途中で Enter を押した」結果なので、その逆をやるのが自然。 */
+      const prevLi = li.previousElementSibling;
+      if (nested.length && prevLi && prevLi.tagName === 'LI' && memoInlineIsBlank(li)) {
+        let caretBefore = null;
+        for (const n of nested) {
+          const last = prevLi.lastElementChild;
+          if (last && last.tagName === n.tagName) {
+            // 上の項目がすでに同じ種類の子リストを持っていれば、その末尾へ続ける
+            while (n.firstChild) last.appendChild(n.firstChild);
+            n.remove();
+            if (!caretBefore) caretBefore = last;
+          } else {
+            prevLi.appendChild(n);
+            if (!caretBefore) caretBefore = n;
+          }
+        }
+        li.remove();
+        // カーソルは上の項目の文字の末尾（子リストの直前）
+        const r = document.createRange();
+        r.setStartBefore(caretBefore);
+        r.collapse(true);
+        const sel2 = window.getSelection();
+        sel2.removeAllRanges();
+        sel2.addRange(r);
+        return;
+      }
+
       memoMoveInlineChildren(li, div);
       /* v0.24.16: 押した行の**その場所で**・だけを消す。
        *
@@ -9094,8 +9177,14 @@ function handleMemoKeydown(e) {
           div.parentNode.insertBefore(rest, div.nextSibling);
         }
       }
+      // 子のリストは出した行のすぐ下に置き、行と同じだけ字下げする
+      // （行の文字より一段深い位置のまま ── 子が浅くならないように）
       let anchor = div;
-      for (const n of nested) { anchor.parentNode.insertBefore(n, anchor.nextSibling); anchor = n; }
+      for (const n of nested) {
+        if (div.style.paddingLeft) n.style.marginLeft = div.style.paddingLeft;
+        anchor.parentNode.insertBefore(n, anchor.nextSibling);
+        anchor = n;
+      }
       if (list.children.length === 0) list.remove();
       memoPlaceCaretAtStart(div);
       return;

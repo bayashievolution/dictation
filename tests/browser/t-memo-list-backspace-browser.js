@@ -169,6 +169,120 @@ async function parentWithChildren(page, children = ['子1', '子2']) {
     await ctx.close();
   }
 
+  // ───── v0.24.18: 子を持つ項目 ─────
+  // やっさん報告: 「いいいの上に子の点を入れたくて、まちがえて あああ の右で改行すると
+  // 親の・ができる → その・を Backspace で消すと子たちが崩れる」
+
+  /** ・あああ / Tab で いいい, ううう を作る */
+  const parentAAA = async (page) => {
+    await page.keyboard.type('・あああ');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Tab');
+    await page.keyboard.type('いいい');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('ううう');
+  };
+  const caretAt = (page, text, atEnd) => page.evaluate(([t, end]) => {
+    const w = document.createTreeWalker(document.getElementById('memo'), NodeFilter.SHOW_TEXT);
+    for (let n; (n = w.nextNode());) if (n.data === t) {
+      const r = document.createRange(); r.setStart(n, end ? n.length : 0); r.collapse(true);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r); return true;
+    }
+    return false;
+  }, [text, atEnd]);
+
+  console.log('■ 子を持つ項目の文字の末尾で Enter → 最初の子ができる');
+  {
+    const { ctx, page } = await openMemo(browser);
+    await parentAAA(page);
+    await caretAt(page, 'あああ', true);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+    await page.keyboard.type('X');
+    eq('いいい の上に子として入る（親と同じ高さの空の ・ はできない）', await html(page),
+       '<ul><li>あああ<ul><li>X</li><li>いいい</li><li>ううう</li></ul></li></ul>');
+    eq('字下げは子の位置', await textX(page, 'X'), await textX(page, 'いいい'));
+    // やっさんが困った流れ: 戻すたびに ・ が重なってずれていった（v0.24.14 まではブラウザの取り消し）
+    // 打った X の分と、改行の分で2回
+    for (let i = 0; i < 2; i++) { await page.keyboard.press("Control+z"); await page.waitForTimeout(250); }
+    eq('Ctrl+Z 2回で作った直後の形に戻る（・が重ならない）', await html(page),
+       '<ul><li>あああ<ul><li>いいい</li><li>ううう</li></ul></li></ul>');
+    await ctx.close();
+  }
+
+  console.log('■ 子を持つ項目の文字の途中で Enter はブラウザに任せる（分けた後ろ半分が子を連れていく）');
+  {
+    const { ctx, page } = await openMemo(browser);
+    await parentAAA(page);
+    await page.evaluate(() => {
+      const w = document.createTreeWalker(document.getElementById('memo'), NodeFilter.SHOW_TEXT);
+      for (let n; (n = w.nextNode());) if (n.data === 'あああ') {
+        const r = document.createRange(); r.setStart(n, 1); r.collapse(true);
+        const s = getSelection(); s.removeAllRanges(); s.addRange(r); return;
+      }
+    });
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+    const h = await html(page);
+    eq('文字は消えない', ['あ', 'ああ', 'いいい', 'ううう'].every(t => h.indexOf(t) >= 0), true);
+    eq('子は子のまま（ul の中の ul）', /<ul><li>[^<]*<ul><li>いいい/.test(h) || /<li>ああ<ul><li>いいい/.test(h), true);
+    await ctx.close();
+  }
+
+  console.log('■ 子を持つ空の項目で Backspace → 子を上の項目に返す（v0.24.17 までの Enter でできた形）');
+  {
+    const { ctx, page } = await openMemo(browser);
+    // Chrome 任せの Enter が作っていた形をそのまま置く
+    await page.evaluate(() => {
+      const m = document.getElementById('memo');
+      m.innerHTML = '<ul><li>あああ</li><li><br><ul><li>いいい</li><li>ううう</li></ul></li></ul>';
+      const li = m.querySelectorAll('li')[1];
+      const r = document.createRange(); r.setStart(li, 0); r.collapse(true);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    });
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(150);
+    eq('元の形に戻る（子が浅くならない・消えない）', await html(page),
+       '<ul><li>あああ<ul><li>いいい</li><li>ううう</li></ul></li></ul>');
+    await page.keyboard.type('Y');
+    eq('カーソルは あああ の末尾', await html(page),
+       '<ul><li>あああY<ul><li>いいい</li><li>ううう</li></ul></li></ul>');
+    await ctx.close();
+  }
+
+  console.log('■ 上の項目がすでに子を持っていたら、その子リストの続きに返す');
+  {
+    const { ctx, page } = await openMemo(browser);
+    await page.evaluate(() => {
+      const m = document.getElementById('memo');
+      m.innerHTML = '<ul><li>あ<ul><li>い</li></ul></li><li><br><ul><li>う</li></ul></li></ul>';
+      const li = m.querySelectorAll(':scope > ul > li')[1];
+      const r = document.createRange(); r.setStart(li, 0); r.collapse(true);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    });
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(150);
+    eq('い と う が同じ子リストに並ぶ', await html(page), '<ul><li>あ<ul><li>い</li><li>う</li></ul></li></ul>');
+    await ctx.close();
+  }
+
+  console.log('■ 子を持つ（文字のある）入れ子の項目の頭で Backspace → ・だけ消え、孫は字下げを保つ');
+  {
+    const { ctx, page } = await openMemo(browser);
+    await page.evaluate(() => {
+      const m = document.getElementById('memo');
+      m.innerHTML = '<ul><li>親<ul><li>子1</li><li>子2<ul><li>孫</li></ul></li></ul></li></ul>';
+    });
+    const xBefore = await textX(page, '孫');
+    await caretAt(page, '子2', false);
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(150);
+    const h = await html(page);
+    eq('子2 は ・ の無い行になる', h.indexOf('<li>子2') < 0 && h.indexOf('>子2</div>') >= 0, true);
+    eq('孫の位置は動かない', await textX(page, '孫'), xBefore);
+    await ctx.close();
+  }
+
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\n✓ すべて通過');
   process.exit(fail ? 1 : 0);
