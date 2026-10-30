@@ -1554,12 +1554,47 @@ function updateSilenceCountdown() {
 
 /* ───────── Recognition ───────── */
 
+/**
+ * 音声認識がどこまで進んだかを数える (v0.24.20)
+ *
+ * やっさん報告「リアルタイム表示が動かない」→「Web Speech モードでも文字が出ない」。
+ * 診断ログには並走の「開始」だけがあり、エラーも文字も無かった。**黙って何も
+ * 返さない**状態で、どこで止まっているかが見えない。音声認識は
+ *   audiostart（音を取り始めた）→ soundstart（音を検知）→ speechstart（声と判断）→ result
+ * の順に進むので、それぞれ何回起きたかを録音停止時に1行で残す。
+ *   - audiostart が 0 … マイクを開けていない（許可・デバイス）
+ *   - soundstart が 0 … 開けたが無音しか来ない（別のマイク・ミュート・OS の許可）
+ *   - speechstart はあるが result が 0 … 声は届いているのに認識結果が返らない（Chrome / Google 側）
+ * on〜 は各所で上書きされるので addEventListener で横から数える。
+ */
+function attachSpeechTrace(rec) {
+  const t = { audiostart: 0, soundstart: 0, speechstart: 0, result: 0, nospeech: 0, end: 0, errors: {} };
+  for (const k of ['audiostart', 'soundstart', 'speechstart', 'result', 'end']) {
+    rec.addEventListener(k, () => { t[k]++; });
+  }
+  rec.addEventListener('error', (e) => {
+    if (e.error === 'no-speech') t.nospeech++;
+    else t.errors[e.error] = (t.errors[e.error] || 0) + 1;
+  });
+  rec.__trace = t;
+  return rec;
+}
+
+function logSpeechTrace(rec, label) {
+  const t = rec && rec.__trace;
+  if (!t) return;
+  const errs = Object.entries(t.errors).map(([k, v]) => `${k}×${v}`).join(' ');
+  diagLog.info(`${label}のまとめ: 音を取り始めた${t.audiostart}回 音を検知${t.soundstart}回 `
+    + `声と判断${t.speechstart}回 結果${t.result}回 / 無音で終了${t.nospeech}回 区切り${t.end}回`
+    + (errs ? ` / エラー ${errs}` : ''));
+}
+
 function buildRecognition() {
   if (!SpeechRecognition) {
     alert('このブラウザは Web Speech API に対応していません。Google Chrome で開いてください。');
     return null;
   }
-  const rec = new SpeechRecognition();
+  const rec = attachSpeechTrace(new SpeechRecognition());
   rec.lang = 'ja-JP';
   rec.continuous = true;
   rec.interimResults = true;
@@ -1807,6 +1842,7 @@ function stopRecording() {
     stopLiveDisplay();          // v0.17.0
     stopGeminiAudioRecording();
   } else {
+    logSpeechTrace(state.recognition, '音声認識（Web Speech）');   // v0.24.20
     // v0.13.14: 強制 commit タイマーを止めてから recognition を止める
     stopWebSpeechCommitTimer();
     // v0.13.31: 無音 stop タイマーも停止
@@ -3182,7 +3218,7 @@ function stopGeminiAudioRecording() {
 /** 表示専用の Web Speech を作る。文字起こしペインには書かない */
 function buildLiveDisplayRecognition() {
   if (!SpeechRecognition) return null;
-  const rec = new SpeechRecognition();
+  const rec = attachSpeechTrace(new SpeechRecognition());
   rec.lang = 'ja-JP';
   rec.continuous = true;
   rec.interimResults = true;
@@ -3362,6 +3398,7 @@ function stopLiveDisplay() {
   const rec = state.liveRecognition;
   state.liveRecognition = null;
   if (rec) {
+    logSpeechTrace(rec, 'リアルタイム表示');   // v0.24.20
     rec.onend = null;
     try { rec.stop(); } catch (_) {}
   }

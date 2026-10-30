@@ -29,15 +29,16 @@ const eq = (label, got, want) => {
   if (!ok) fail++;
 };
 
-async function record(browser, { useDevice = false, throwOnTrack = false } = {}) {
+async function record(browser, { useDevice = false, throwOnTrack = false, inputMode = 'gemini-audio' } = {}) {
   const ctx = await browser.newContext({ permissions: ['microphone'] });
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   await page.addInitScript((throwOnTrack) => {
     window.__starts = [];
     window.__recs = [];
-    class FakeRec {
-      constructor() { window.__recs.push(this); }
+    // EventTarget を継ぐのは、v0.24.20 から addEventListener で進み具合を数えるため
+    class FakeRec extends EventTarget {
+      constructor() { super(); window.__recs.push(this); }
       start(...a) {
         const t = a[0];
         window.__starts.push(a.length === 0 ? 'none'
@@ -56,7 +57,7 @@ async function record(browser, { useDevice = false, throwOnTrack = false } = {})
   }));
   await page.goto(URL);
   await page.evaluate((s) => localStorage.setItem('dictation:settings', JSON.stringify(s)),
-    { apiKey: 'AIza-test', inputMode: 'gemini-audio', geminiLiveDisplay: true, aiEnabled: false });
+    { apiKey: 'AIza-test', inputMode, geminiLiveDisplay: true, aiEnabled: false });
   await page.reload();
   await page.waitForTimeout(800);
   if (useDevice) {
@@ -151,6 +152,40 @@ const fire = (page, type, ev) => page.evaluate(([type, ev]) => {
     await page.evaluate(() => { for (let i = 0; i < 3; i++) maybeWarnLiveSilent(); });
     eq('並走から文字が来ていれば出さない', (await status(page)).indexOf('文字が来ていません'), -1);
     eq('並走の文字は画面に出ている', await page.evaluate(() => document.getElementById('interim').textContent), 'こん');
+    await ctx.close();
+  }
+
+  console.log('■ 録音を止めたら、音声認識がどこまで進んだかを1行残す（v0.24.20）');
+  {
+    // やっさんの実機: 並走は「開始」だけで、エラーも文字も無かった。どこで止まっているか見えない
+    const { ctx, page } = await record(browser);
+    await page.evaluate(() => {
+      const rec = window.__recs[window.__recs.length - 1];
+      rec.dispatchEvent(new Event('audiostart'));
+      rec.dispatchEvent(new Event('audiostart'));
+      rec.dispatchEvent(new Event('soundstart'));
+      const err = new Event('error'); err.error = 'no-speech'; rec.dispatchEvent(err);
+      const err2 = new Event('error'); err2.error = 'network'; rec.dispatchEvent(err2);
+    });
+    await page.evaluate(() => stopRecording());
+    await page.waitForTimeout(300);
+    const line = await page.evaluate(() => (diagLog.entries.map(e => e.msg).find(m => m.startsWith('リアルタイム表示のまとめ')) || ''));
+    eq('まとめの行が残る', line,
+       'リアルタイム表示のまとめ: 音を取り始めた2回 音を検知1回 声と判断0回 結果0回 / 無音で終了1回 区切り0回 / エラー network×1');
+    await ctx.close();
+  }
+
+  console.log('■ Web Speech モードでも同じまとめを残す');
+  {
+    const { ctx, page } = await record(browser, { inputMode: 'web-speech' });
+    await page.evaluate(() => {
+      const rec = window.__recs[window.__recs.length - 1];
+      rec.dispatchEvent(new Event('audiostart'));
+    });
+    await page.evaluate(() => stopRecording());
+    await page.waitForTimeout(300);
+    const line = await page.evaluate(() => (diagLog.entries.map(e => e.msg).find(m => m.startsWith('音声認識（Web Speech）のまとめ')) || ''));
+    eq('まとめの行が残る', line.startsWith('音声認識（Web Speech）のまとめ: 音を取り始めた1回 音を検知0回'), true);
     await ctx.close();
   }
 

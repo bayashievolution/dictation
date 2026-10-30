@@ -3183,3 +3183,6 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - **止まったことが分かるようにした。** v0.24.18 までは並走のエラーを console にしか出しておらず、手がかりが何も残らなかった。エラーは診断ログへ（同じものは3回まで。`network` などは失敗→再開を繰り返すため）。待っても直らない種類（not-allowed / service-not-allowed / audio-capture / language-not-supported）は画面に一言出して再開をやめる。開始時に「既定のマイク」か「選んだマイクを渡した」かを、最初の文字を受け取ったら「受け取りました」を診断ログに残す
   - **エラーが出ないまま黙っている場合**（既定のマイクが無音だと `no-speech` しか出ず、ふつうの沈黙と区別できない）のために、Gemini の文字起こしが3回出ても並走から1文字も来ていなければ、1回だけ「リアルタイム表示に文字が来ていません」と出す。詳細に `chrome://settings/content/microphone` で既定を同じマイクにする回避策を書いた
   - テスト: `tests/browser/t-live-display-browser.js`（13件）。Web Speech は偽物、マイクは Chromium の偽デバイス。**本物の Chrome がトラックを聞くかは見ていない**。旧版に当てると5件落ちたあと、無い関数を呼んで止まる
+- 2026-10-30: **リアルタイム表示が動かない件、仮想マイク説は外れ。** やっさんの確認: アプリのマイクも Chrome の既定（`chrome://settings/content/microphone`）も物理マイクにしても出ない。**Web Speech モードでも文字が出ない**ので、アプリの並走の作りではなく Chrome の音声認識そのものが文字を返していない。v0.24.19 の診断ログは「リアルタイム表示 (Web Speech 並走) を開始」の1行だけで、エラーも「最初の文字」も無かった ── **止まったのではなく、動いているのに何も返ってこない**
+- 2026-10-30 (v0.24.20): 上の「黙って何も返さない」の中身を見るため、**音声認識がどこまで進んだかを録音停止時に1行残す**（`attachSpeechTrace` / `logSpeechTrace`）。audiostart（音を取り始めた）→ soundstart（音を検知）→ speechstart（声と判断）→ result の回数と、no-speech・その他のエラーの回数。0 になった段で原因の側が分かる（マイクを開けない／無音しか来ない／声は届くのに結果が返らない）。並走と Web Speech モードの両方。on〜 は各所で上書きされるので addEventListener で横から数える
+  - テスト: `tests/browser/t-live-display-browser.js` に2件（並走・Web Speech モード）
