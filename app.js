@@ -3198,6 +3198,10 @@ function buildLiveDisplayRecognition() {
     // v0.18.4: 「いま声が出ているか」の記録。音量ではなく音声認識器の判断なので、
     // マイク側のゲイン調整で音量が平坦化されていても効く
     if (gotText) state.liveLastActivityAt = Date.now();
+    if (gotText && !state.liveGotAny) {
+      state.liveGotAny = true;
+      diagLog.info('リアルタイム表示: 最初の文字を受け取りました');
+    }
     // BG録音中は共有の #interim に書かない（表示中の別タブに漏れるため）
     if (isBgRecording()) els.interim.textContent = '';
     else els.interim.textContent = (state.liveFinals || '') + interim;
@@ -3205,24 +3209,129 @@ function buildLiveDisplayRecognition() {
 
   rec.onerror = (e) => {
     // 表示専用なので、失敗しても録音は続ける。Gemini 側が本体
-    if (e.error !== 'no-speech' && e.error !== 'aborted') {
-      console.warn('[live] Web Speech エラー（表示のみ・録音は継続）:', e.error);
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    console.warn('[live] Web Speech エラー（表示のみ・録音は継続）:', e.error);
+    /* v0.24.19: v0.24.18 までは console にしか出さず、止まっていても誰も気づけなかった
+     * （やっさん報告「リアルタイム文字表示が動いてない」→ 手がかりが何も残っていなかった）。
+     * 診断ログには毎回、画面には待っても直らない種類のときだけ1回出す。 */
+    // 失敗→再開を繰り返す種類（network など）でログが埋まらないよう、同じエラーは3回まで
+    const counts = state.liveErrorCounts || (state.liveErrorCounts = {});
+    counts[e.error] = (counts[e.error] || 0) + 1;
+    if (counts[e.error] <= 3) {
+      diagLog.info(`リアルタイム表示: エラー ${e.error}${state.liveUsingTrack ? '（指定マイクを渡して開始）' : ''}`
+        + (counts[e.error] === 3 ? '（同じエラーはこれ以降ログに出しません）' : ''));
+    }
+    if (state.liveUsingTrack && (e.error === 'audio-capture' || e.error === 'not-allowed')) {
+      // 指定マイクを渡す形が通らなかった。既定のマイクで聞き直す（次の onend で再開）
+      state.liveTrackRejected = true;
+      diagLog.info('リアルタイム表示: 指定マイクを渡せなかったので、Chrome の既定のマイクで聞き直します');
+      return;
+    }
+    if (LIVE_FATAL_ERRORS.has(e.error)) {
+      state.liveFatal = e.error;
+      statusNotice('error', 'リアルタイム表示が止まりました（録音と文字起こしは続いています）', {
+        detail: `Web Speech のエラー: ${e.error}\n\n${liveErrorHint(e.error)}`,
+      });
     }
   };
 
   rec.onend = () => {
-    // continuous でも切れることがあるので、録音中なら黙って再開する
-    if (state.isRecording && state.liveRecognition === rec) {
-      try { rec.start(); } catch (_) {}
+    // continuous でも切れることがあるので、録音中なら黙って再開する。
+    // ただし待っても直らないエラーのあとは再開しない（失敗→再開を延々と繰り返すため）
+    if (state.isRecording && state.liveRecognition === rec && !state.liveFatal) {
+      startLiveRecognition(rec);
     }
   };
   return rec;
+}
+
+/** 待っても直らない Web Speech のエラー。出たら再開をやめて、画面に一言出す */
+const LIVE_FATAL_ERRORS = new Set(['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported']);
+
+function liveErrorHint(code) {
+  switch (code) {
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'Chrome が音声認識を許可していません。マイクの許可を確かめてください。';
+    case 'audio-capture':
+      return 'Chrome の既定のマイクが見つからないか、使えません。';
+    case 'language-not-supported':
+      return 'この Chrome では日本語の音声認識が使えません。';
+    default:
+      return '';
+  }
+}
+
+/**
+ * 並走の音声認識を始める (v0.24.19)
+ *
+ * ■ 指定マイクを渡す
+ *
+ * Web Speech は従来**マイクを選べず、Chrome の既定のマイクを聞く**。設定でマイク
+ * （仮想マイクなど）を選んでいても、それは Gemini に送る録音にしか効かない。
+ * やっさんは Meet の講義を仮想マイクで録っていて、並走は既定のマイク（無音）を
+ * 聞いていたと見ている（**実機では未確認**）。
+ *
+ * 仕様には `start(MediaStreamTrack)` が足されていて、MDN にも載っているが、
+ * 普通の Chrome で使えるかは確かめられなかった。**対応していない Chrome では
+ * 余分な引数として無視される**だけなので、指定マイクがあるときは渡しておく。
+ * 渡したことで失敗したら（audio-capture など）、既定のマイクに戻して聞き直す。
+ * 既定のマイクのときは何も渡さない（これまでと同じ呼び方のまま）。
+ */
+function startLiveRecognition(rec) {
+  const track = (!state.liveTrackRejected && state.settings.audioDeviceId && state.audioStream)
+    ? state.audioStream.getAudioTracks()[0] : null;
+  state.liveUsingTrack = !!(track && track.readyState === 'live');
+  try {
+    if (state.liveUsingTrack) rec.start(track);
+    else rec.start();
+    return true;
+  } catch (e) {
+    if (state.liveUsingTrack) {
+      state.liveTrackRejected = true;
+      state.liveUsingTrack = false;
+      diagLog.info(`リアルタイム表示: 指定マイクを渡せませんでした（${e.name || e.message}）。既定のマイクで聞きます`);
+      try { rec.start(); return true; } catch (_) {}
+    }
+    return false;
+  }
+}
+
+/**
+ * 録音しているのに並走から文字が1つも来ないときに、1回だけ知らせる (v0.24.19)
+ *
+ * エラーが出ないまま黙っていることがある。既定のマイクが無音なら、Web Speech は
+ * 'no-speech' を出すだけで、それはふつうの沈黙と区別できない。Gemini のほうに
+ * 文字が出ているのに並走が黙っているなら、聞いている先が違う可能性が高い。
+ */
+function maybeWarnLiveSilent() {
+  if (!state.liveRecognition || state.liveGotAny || state.liveSilentWarned || state.liveFatal) return;
+  state.liveGeminiTextChunks = (state.liveGeminiTextChunks || 0) + 1;
+  if (state.liveGeminiTextChunks < 3) return;
+  state.liveSilentWarned = true;
+  diagLog.info('リアルタイム表示: Gemini には文字が出ているのに、並走からは1文字も来ていません');
+  statusNotice('error', 'リアルタイム表示に文字が来ていません（文字起こしは続いています）', {
+    detail: '並走している音声認識（Web Speech）は、Chrome の既定のマイクを聞きます。\n'
+      + (state.settings.audioDeviceId
+        ? '設定で別のマイク（仮想マイクなど）を選んでいるので、並走は別のマイクを聞いている可能性があります。\n\n'
+          + '── 試せること ──\n'
+          + 'Chrome のアドレス欄に chrome://settings/content/microphone を入れ、\n'
+          + 'いちばん上のマイクを、設定で選んでいるのと同じマイクに変えてから録音し直す。\n'
+          + '（ほかのサイトのマイクも変わることがあります）'
+        : '既定のマイクに声が届いているか確かめてください。'),
+  });
 }
 
 function startLiveDisplay() {
   if (state.settings.geminiLiveDisplay === false) return;
   stopLiveDisplay();
   state.liveFinals = '';
+  state.liveGotAny = false;
+  state.liveSilentWarned = false;
+  state.liveGeminiTextChunks = 0;
+  state.liveFatal = '';
+  state.liveTrackRejected = false;
+  state.liveErrorCounts = {};
   const rec = buildLiveDisplayRecognition();
   if (!rec) {
     diagLog.info('リアルタイム表示: この環境は Web Speech 非対応のためスキップ');
@@ -3238,11 +3347,13 @@ function startLiveDisplay() {
   // Web Speech が実際に何か聞き取るまでこの手段は使われない
   // （レベル検出器で「大きい側を知るまで判定しない」としたのと同じ原則）。
   state.liveLastActivityAt = 0;
-  try {
-    rec.start();
-    diagLog.info('リアルタイム表示 (Web Speech 並走) を開始');
-  } catch (e) {
-    console.warn('[live] 開始できませんでした（表示のみ・録音は継続）:', e.message);
+  if (startLiveRecognition(rec)) {
+    diagLog.info('リアルタイム表示 (Web Speech 並走) を開始'
+      + (state.liveUsingTrack ? '（設定で選んだマイクを渡しました。Chrome が対応していなければ既定のマイクを聞きます）'
+                              : '（Chrome の既定のマイク）'));
+  } else {
+    console.warn('[live] 開始できませんでした（表示のみ・録音は継続）');
+    diagLog.info('リアルタイム表示: 開始できませんでした');
     state.liveRecognition = null;
   }
 }
@@ -3305,6 +3416,7 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
       setParagraphContent(targetEl, text);
       if (state.isRecording) resetLongSilenceTimer();
       persist();
+      maybeWarnLiveSilent();   // v0.24.19
       // 遅延ミドル整形をチェック
       maybeConsolidateShortChunks();
     } else if (shouldDropEmptyChunk(provisionalText, edges)) {
