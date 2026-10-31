@@ -312,13 +312,36 @@ function notionListBlocks(listEl, depth = 0) {
  *   h1〜h3, p, div, ul>li, ol>li, div.task-item(チェックボックス), blockquote, hr, pre/code
  * それ以外のタグは段落として扱う。
  */
+/**
+ * 画像の代わりに置く印 (v0.22.0)
+ *
+ * **画像は Notion に送れない。** 画像ブロックは外部URLかアップロード済み
+ * ファイルしか受け付けず、メモに貼った画像は端末の中にしかない。
+ *
+ * 黙って落とすと「送ったつもりで消えている」ことに気づけないので、印を残す。
+ * メモの他の内容は今までどおり送れる。
+ */
+function notionImageNote() {
+  return notionBlock.paragraph(notionRichText(
+    '［画像はここにありましたが、Notion には送れません。HTML で保存すると残ります］',
+    { italic: true }));
+}
+
 function notionBlocksFromHtml(html) {
   if (!html || !html.trim()) return [];
   const doc = new DOMParser().parseFromString(`<div id="root">${html}</div>`, 'text/html');
   const root = doc.getElementById('root');
   const blocks = [];
 
+  // v0.22.0: 画像が <div> の中に入っていると、テキストとしては空になって
+  // 黙って落ちる。テキストにする直前に、含まれている画像のぶんの印を先に置く
+  const pushImageNotes = (node) => {
+    const imgs = node.querySelectorAll ? node.querySelectorAll('img') : [];
+    for (let i = 0; i < imgs.length; i++) blocks.push(notionImageNote());
+  };
+
   const pushText = (node, make) => {
+    pushImageNotes(node);
     const rich = notionRichTextFromNode(node);
     // 空行は落とす。メモエディタは空行を <div><br></div> で表現するので、
     // 中身が改行・空白だけのものも「空」とみなす（Notion 側に空段落を作らないため）。
@@ -335,6 +358,7 @@ function notionBlocksFromHtml(html) {
       case 'h3': case 'h4': case 'h5': case 'h6':
         pushText(el, r => notionBlock.heading(3, r)); return;
       case 'hr': blocks.push(notionBlock.divider()); return;
+      case 'img': blocks.push(notionImageNote()); return;
       case 'blockquote': pushText(el, notionBlock.quote); return;
       case 'pre': {
         const rich = notionRichText(el.textContent || '');
@@ -440,6 +464,22 @@ async function notionCreateNote({
   const pageId = page?.id;
   if (!pageId) throw new Error('Notion がページIDを返しませんでした');
 
+  await notionAppendToggles({ token, pageId, toggles, onProgress, retryNotFound: true });
+  return { id: pageId, url: page?.url || '' };
+}
+
+/**
+ * ペインごとのトグルをページの末尾に足す (v0.23.0 で切り出し)
+ *
+ * ここは**新規作成と既存ノートへの追記の両方**が使う。
+ * Notion では「作ったページに中身を入れる」と「既存ページに追記する」が
+ * 同じ操作（PATCH /blocks/{id}/children）なので、分ける理由が無い。
+ *
+ * @param {boolean} [args.retryNotFound] 作ったばかりのページに足すときだけ true。
+ *   Notion 側の反映が追いつかず一瞬 404 を返すことがある。
+ *   既存ページでの 404 は本当に「見つからない」なので、そちらは再試行しない
+ */
+async function notionAppendToggles({ token, pageId, toggles, onProgress, retryNotFound = false }) {
   const total = toggles.length;
   let done = 0;
   for (const t of toggles) {
@@ -448,7 +488,7 @@ async function notionCreateNote({
     const res = await notionRequest(`/blocks/${pageId}/children`, {
       token,
       method: 'PATCH',
-      retryNotFound: true,   // 作ったばかりのページ。404 は反映待ちの可能性が高い
+      retryNotFound,
       body: { children: [notionBlock.toggle(notionRichText(t.label), first)] },
     });
     const toggleId = res?.results?.[0]?.id;
@@ -462,8 +502,122 @@ async function notionCreateNote({
     done += 1;
     if (onProgress) onProgress(done, total);
   }
+}
 
-  return { id: pageId, url: page?.url || '' };
+/**
+ * 既存のノートに追記する (v0.23.0)
+ *
+ * > 既にあるノートがあるのなら、UI上で指定してそこに追記できないかな
+ *
+ * 新しいページを作らず、選ばれたページの末尾に足すだけ。
+ *
+ * ■ 区切りを必ず入れる
+ *
+ * 追記を重ねると「文字起こし」トグルが同じ見た目で何個も並び、
+ * **どこからが今回なのか分からなくなる**。なので毎回、
+ * 区切り線とタイトル（＋録音日時）の見出しを先に置く。
+ *
+ * ■ プロパティは触らない
+ *
+ * 既存ページのタイトルや日付列は**書き換えない**。
+ * 追記しに来ただけなのに、そのノートの名前が変わったら事故になる。
+ */
+async function notionAppendToNote({ token, pageId, pageUrl, title, toggles, dateTs, onProgress }) {
+  if (!pageId) throw new Error('追記先のノートが指定されていません');
+
+  const stamp = dateTs ? notionLocalIso(dateTs).slice(0, 16).replace('T', ' ') : '';
+  const label = stamp ? `${title || '無題'}（${stamp}）` : (title || '無題');
+  await notionRequest(`/blocks/${pageId}/children`, {
+    token,
+    method: 'PATCH',
+    body: { children: [notionBlock.divider(), notionBlock.heading(2, notionRichText(label))] },
+  });
+
+  await notionAppendToggles({ token, pageId, toggles, onProgress });
+  return { id: pageId, url: pageUrl || '' };
+}
+
+/* ───────── データベースの中のノート一覧 (v0.23.0) ───────── */
+
+/** 検索結果から、そのデータソースに属するページだけを取り出す（純関数） */
+function notionNotesFromResults(results, dataSourceId) {
+  const out = [];
+  for (const r of results || []) {
+    if (!r || r.object !== 'page') continue;
+    if (r.in_trash || r.archived) continue;
+    if (dataSourceId && notionPageParentId(r) !== dataSourceId) continue;
+    out.push({
+      id: r.id,
+      title: notionPageTitle(r) || '(無題)',
+      url: r.url || '',
+      editedAt: r.last_edited_time || '',
+    });
+  }
+  return out;
+}
+
+function notionPageParentId(page) {
+  const p = (page && page.parent) || {};
+  return p.data_source_id || p.database_id || '';
+}
+
+function notionPageTitle(page) {
+  const props = (page && page.properties) || {};
+  for (const conf of Object.values(props)) {
+    if (conf && conf.type === 'title') return notionPlainText(conf.title);
+  }
+  return '';
+}
+
+/**
+ * 保存先データベースの中にある既存ノートを新しい順に取る (v0.23.0)
+ *
+ * ■ 2段構えにしてある理由（正直に書く）
+ *
+ * 本命は `POST /data_sources/{id}/query`。データソースだけを引けるので速く、
+ * 並び順も指定できる。**ただしこの形を実測で確かめられていない。**
+ * 開発環境から api.notion.com に届かず、叩いて確認できなかった。
+ *
+ * なので違っていた場合（400/404）に、**すでに本番で動いている `/search`** に
+ * 落ちるようにしてある。こちらはワークスペース全体を引いてから
+ * 親で絞るので無駄が多いが、確実に動くことが分かっている。
+ *
+ * どちらを使ったかは console に出るので、実機で分かる。
+ */
+async function notionListNotesInDataSource(token, dataSourceId, { limit = 50 } = {}) {
+  try {
+    const data = await notionRequest(`/data_sources/${dataSourceId}/query`, {
+      token,
+      method: 'POST',
+      body: {
+        page_size: Math.min(100, limit),
+        sorts: [{ timestamp: 'created_time', direction: 'descending' }],
+      },
+    });
+    // この経路では既に絞れているので、親での絞り込みはしない
+    return notionNotesFromResults(data?.results, null).slice(0, limit);
+  } catch (e) {
+    if (e.status !== 400 && e.status !== 404) throw e;
+    console.warn('[notion] data_sources/query が使えないので /search に切り替えます:', e.message);
+  }
+
+  const out = [];
+  let cursor = null;
+  do {
+    const data = await notionRequest('/search', {
+      token,
+      method: 'POST',
+      body: {
+        filter: { property: 'object', value: 'page' },
+        sort: { direction: 'descending', timestamp: 'last_edited_time' },
+        page_size: 100,
+        ...(cursor ? { start_cursor: cursor } : {}),
+      },
+    });
+    out.push(...notionNotesFromResults(data?.results, dataSourceId));
+    cursor = (data?.has_more && out.length < limit) ? data.next_cursor : null;
+  } while (cursor);
+  return out.slice(0, limit);
 }
 
 /** 設定画面の「接続テスト」用。成功したらワークスペース上の表示名を返す */
