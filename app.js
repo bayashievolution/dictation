@@ -1913,6 +1913,9 @@ function stopRecording() {
  * 文面の組み立てと整形は live-summary.js（純関数）。ここは「いつ・どのタブに」を受け持つ。
  */
 
+/** リアルタイム要約で Claude を待つ上限。ほかの処理（180秒）より長くする (v0.24.23) */
+const LIVE_SUMMARY_TIMEOUT_MS = 600000;
+
 /** いま使える状態か。設定がオンで、Claude 連携がオンで、ログイン切れ等で止まっていない */
 function liveSummaryActive() {
   if (!state.settings.liveSummary) return false;
@@ -2002,7 +2005,9 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
       transcript: src.transcript, previous: src.previous, memo: src.memo,
       title: session.title, final, fresh,
     });
-    const r = await claudeBridgeRun(prompt);
+    // v0.24.23: 考える量を減らし（実測 23秒→14秒・中身はほぼ同じ）、長く待つ。
+    // やっさんの手元では 144.8秒かかり、次の回は 180秒で時間切れになっていた
+    const r = await claudeBridgeRun(prompt, { effort: 'low', timeoutMs: LIVE_SUMMARY_TIMEOUT_MS });
     if (!r.ok) throw new Error(r.error || 'Claude で処理できませんでした');
     const norm = normalizeLiveSummary(r.text);
     if (!norm.ok) diagLog.info('リアルタイム要約: 目次が見つからない形で返ってきました（そのまま表示します）');

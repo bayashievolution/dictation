@@ -223,31 +223,36 @@ function claudeNativeSend(msg) {
  * ブリッジに投げる。**例外は投げない。** 失敗は戻り値で返す
  * @returns {Promise<{ok:boolean, text?:string, error?:string}>}
  */
-async function claudeBridgeRun(prompt, { url = CLAUDE_BRIDGE_URL, signal } = {}) {
+async function claudeBridgeRun(prompt, { url = CLAUDE_BRIDGE_URL, signal, effort, timeoutMs } = {}) {
   if (!prompt || !prompt.trim()) return { ok: false, error: 'プロンプトが空です' };
+  // v0.24.23: 呼び出しごとの調整（リアルタイム要約だけが使う）。古いホストは黙って無視する
+  const tune = {
+    ...(effort ? { effort } : {}),
+    ...(timeoutMs ? { timeoutMs } : {}),
+  };
 
   /* v0.24.21: 拡張ならインストール式の口を先に使う。
    * 入っていないときだけ、これまでの中継（start.bat）を試す。start.bat で使っていた人が
    * インストールするまでの間も動くように。どちらも無ければ「インストールされていません」と言う
    * （「start.bat を起動して」と言うと、黒い窓に戻れと言っていることになる） */
   if (claudeNativeAvailable()) {
-    const r = await claudeNativeSend({ type: 'run', prompt });
+    const r = await claudeNativeSend({ type: 'run', prompt, ...tune });
     if (r.ok) return { ok: true, text: claudeBridgeUnfence(r.text), seconds: r.seconds, via: 'native' };
     if (r.kind !== 'not-installed') return { ok: false, error: r.error };
-    const viaHttp = await claudeBridgeRunHttp(prompt, { url, signal });
+    const viaHttp = await claudeBridgeRunHttp(prompt, { url, signal, tune });
     if (viaHttp.ok || !viaHttp.unreachable) return viaHttp;
     return { ok: false, error: CLAUDE_NOT_INSTALLED };
   }
-  return claudeBridgeRunHttp(prompt, { url, signal });
+  return claudeBridgeRunHttp(prompt, { url, signal, tune });
 }
 
-async function claudeBridgeRunHttp(prompt, { url = CLAUDE_BRIDGE_URL, signal } = {}) {
+async function claudeBridgeRunHttp(prompt, { url = CLAUDE_BRIDGE_URL, signal, tune = {} } = {}) {
   let res;
   try {
     res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, ...tune }),
       signal,
     });
   } catch (e) {
@@ -346,8 +351,15 @@ function claudeBridgeHealthMessage(health) {
     // 「ファイルは新しいがサーバーが古い」をその場で見分けられる
     const parts = [h.invocation,
       h.version ? (h.via === 'native' ? '連携 ' : 'サーバー ') + h.version : ''].filter(Boolean);
-    return { ok: true, needsLogin: false, unknown: false,
-             text: `使えます（ログイン済み${parts.length ? ' / ' + parts.join(' / ') : ''}）` };
+    // v0.24.23: 連携が古い（リアルタイム要約を速くする調整を知らない）なら、入れ直しを促す。
+    // 使えないわけではないので ok のまま
+    const stale = !(Array.isArray(h.features) && h.features.includes('effort'));
+    const fix = !stale ? ''
+      : h.via === 'native'
+        ? '。連携が古い版です。リアルタイム要約を速くするため、インストーラーを保存して入れ直してください'
+        : '。サーバーが古い版です。リアルタイム要約を速くするため、start.bat を起動し直してください';
+    return { ok: true, needsLogin: false, unknown: false, stale,
+             text: `使えます（ログイン済み${parts.length ? ' / ' + parts.join(' / ') : ''}）${fix}` };
   }
   if (a.ok && a.loggedIn === false) {
     return { ok: false, needsLogin: true, unknown: false,

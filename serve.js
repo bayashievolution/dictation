@@ -85,6 +85,7 @@ async function handleClaudeApi(req, res, urlPath) {
       invocation: claudeInvocationName(),
       version: SERVER_VERSION,
       auth,
+      features: ['effort', 'timeout'],   // v0.24.23
     });
     return true;
   }
@@ -109,7 +110,8 @@ async function handleClaudeApi(req, res, urlPath) {
   }
 
   const started = Date.now();
-  const r = await runClaude(prompt);
+  // v0.24.23: リアルタイム要約は考える量を減らし、長く待つ（claude-runner.js の claudeRunOptions）
+  const r = await runClaude(prompt, { effort: payload.effort, timeoutMs: payload.timeoutMs });
   const sec = ((Date.now() - started) / 1000).toFixed(1);
   if (r.ok) {
     console.log(`  [claude] ${prompt.length}字 → ${r.text.length}字 (${sec}秒)`);

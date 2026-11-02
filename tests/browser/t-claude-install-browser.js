@@ -104,7 +104,7 @@ const visible = (page, sel) => page.evaluate((s) => {
   console.log('■ 拡張でインストール済み');
   {
     const { ctx, page } = await open(browser, { extension: true,
-      nativeReply: { ok: true, version: '9.9.9', invocation: 'wsl', via: 'native', auth: { ok: true, loggedIn: true } } });
+      nativeReply: { ok: true, version: '9.9.9', invocation: 'wsl', via: 'native', features: ['effort', 'timeout'], auth: { ok: true, loggedIn: true } } });
     await page.click('#btn-claude-bridge-test');
     await page.waitForTimeout(600);
     eq('使えると言う', await page.textContent('#claude-bridge-status'), '使えます（ログイン済み / wsl / 連携 9.9.9）');

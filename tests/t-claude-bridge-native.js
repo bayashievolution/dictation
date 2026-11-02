@@ -101,9 +101,28 @@ function load({ native, http }) {
 
   console.log('\n■ 「接続を確認」');
   {
-    const { ctx } = load({ native: { reply: { ok: true, version: '0.24.21', invocation: 'wsl', via: 'native', auth: { ok: true, loggedIn: true } } }, http: 'down' });
+    const { ctx } = load({ native: { reply: { ok: true, version: '0.24.23', invocation: 'wsl', via: 'native', features: ['effort', 'timeout'], auth: { ok: true, loggedIn: true } } }, http: 'down' });
     const h = await ctx.claudeBridgeHealth();
-    eq('インストール式で使える', ctx.claudeBridgeHealthMessage(h).text, '使えます（ログイン済み / wsl / 連携 0.24.21）');
+    eq('インストール式で使える', ctx.claudeBridgeHealthMessage(h).text, '使えます（ログイン済み / wsl / 連携 0.24.23）');
+  }
+  {
+    // v0.24.21〜22 で入れた補助プログラムは調整（effort / timeout）を知らない
+    const { ctx } = load({ native: { reply: { ok: true, version: '0.24.21', invocation: 'wsl', via: 'native', auth: { ok: true, loggedIn: true } } }, http: 'down' });
+    const m = ctx.claudeBridgeHealthMessage(await ctx.claudeBridgeHealth());
+    eq('古い補助プログラム → 使えるが、インストーラーで入れ直してと言う', [m.ok, m.stale, /インストーラーを保存して入れ直して/.test(m.text)], [true, true, true]);
+  }
+
+  console.log('\n■ リアルタイム要約の調整（effort / timeout）が届く');
+  {
+    const { ctx, calls } = load({ native: { reply: { ok: true, text: 'x' } }, http: 'down' });
+    let sent = null;
+    ctx.chrome.runtime.sendNativeMessage = (name, msg, cb) => { sent = msg; cb({ ok: true, text: 'x' }); };
+    await ctx.claudeBridgeRun('まとめて', { effort: 'low', timeoutMs: 600000 });
+    eq('インストール式には effort と timeoutMs を一緒に送る', [sent.effort, sent.timeoutMs], ['low', 600000]);
+    sent = null;
+    await ctx.claudeBridgeRun('まとめて');
+    eq('調整なしの呼び出し（要約・質問）には付けない', ['effort' in sent, 'timeoutMs' in sent], [false, false]);
+    void calls;
   }
   {
     const { ctx } = load({ native: { reply: { ok: true, version: '0.24.21', invocation: 'claude', via: 'native', auth: { ok: true, loggedIn: false } } }, http: 'down' });

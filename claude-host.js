@@ -65,7 +65,9 @@ async function handle(msg) {
   const type = msg && msg.type;
   if (type === 'health') {
     const auth = await runner.checkClaudeAuth();
-    return { ok: true, version: hostVersion(), invocation: runner.claudeInvocationName(), auth, via: 'native' };
+    // features: この版のホストが分かる依頼の調整。アプリは無ければ「入れ直して」と言う (v0.24.23)
+    return { ok: true, version: hostVersion(), invocation: runner.claudeInvocationName(), auth, via: 'native',
+             features: ['effort', 'timeout'] };
   }
   if (type === 'run') {
     const prompt = String((msg && msg.prompt) || '');
@@ -74,7 +76,8 @@ async function handle(msg) {
       return { ok: false, error: `長すぎます（${prompt.length}字 / 上限${runner.CLAUDE_MAX_CHARS}字）` };
     }
     const started = Date.now();
-    const r = await runner.runClaude(prompt);
+    // v0.24.23: リアルタイム要約は考える量を減らし、長く待つ（claude-runner.js の claudeRunOptions）
+    const r = await runner.runClaude(prompt, { effort: msg.effort, timeoutMs: msg.timeoutMs });
     const seconds = Number(((Date.now() - started) / 1000).toFixed(1));
     return r.ok ? { ok: true, text: r.text, seconds } : { ok: false, error: r.error, seconds };
   }

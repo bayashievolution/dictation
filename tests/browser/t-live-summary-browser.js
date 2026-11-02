@@ -47,6 +47,8 @@ async function open(browser, { settings = {}, claude = 'ok' } = {}) {
   await page.route('**/api/claude', async r => {
     const body = JSON.parse(r.request().postData() || '{}');
     seen.claude.push(body.prompt || '');
+    seen.bodies = seen.bodies || [];
+    seen.bodies.push(body);
     if (claude === 'fail') {
       return r.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ ok: false, error: '一時的な失敗' }) });
     }
@@ -98,6 +100,9 @@ const summary = (page) => page.evaluate(() => ({
     eq('本文の節', s.secs, ['1. 評価の観点', '2. ルーブリック（進行中）']);
     eq('Claude に1回だけ頼んだ', seen.claude.filter(p => p.includes('目次付きの要約')).length, 1);
     eq('Gemini には頼んでいない', seen.gemini, 0);
+    // v0.24.23: やっさんの手元で 144.8秒→次は 180秒で時間切れ。考える量を減らし、長く待つ
+    const lb = seen.bodies.find(b => (b.prompt || '').includes('目次付きの要約'));
+    eq('考える量を減らし（effort: low）、600秒まで待つ', [lb.effort, lb.timeoutMs], ['low', 600000]);
 
     console.log('■ 目次を押すとその節へ飛ぶ');
     const jumped = await page.evaluate(() => {

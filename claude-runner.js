@@ -61,7 +61,40 @@ const CLAUDE_AUTH_TIMEOUT_MS = 25000;   // auth status はすぐ返るので短�
  * claude を1回呼ぶ。プロンプトは標準入力で渡す
  * @returns {Promise<{ok:boolean, text?:string, error?:string, code?:number}>}
  */
-function runClaudeOnce({ cmd, args }, prompt) {
+/**
+ * 呼び出しごとの調整 (v0.24.23)
+ *
+ * リアルタイム要約で、やっさんの手元の claude -p が **144.8秒かかり、次の回は 180秒で
+ * 時間切れになった**（文字起こし 1.8万字 → 2.1万字）。開発環境で同じ長さを測ると
+ * 既定 23秒・`--effort low` 14秒・`--model sonnet` 11秒で、中身の差はほとんど無かった。
+ * なのでリアルタイム要約だけ、考える量を減らし（effort）、待つ上限を延ばせる（timeoutMs）ようにする。
+ * モデルは変えない（どのモデルを使うかは利用者のサブスクの設定に任せる）。
+ *
+ * どちらも**決めた値だけ**を受け付ける（引数に乗るので、来たものをそのまま渡さない）。
+ */
+const CLAUDE_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+const CLAUDE_TIMEOUT_MIN_MS = 30000;
+const CLAUDE_TIMEOUT_MAX_MS = 900000;
+
+function claudeRunOptions(opts) {
+  const o = opts || {};
+  const effort = CLAUDE_EFFORTS.has(o.effort) ? o.effort : null;
+  const t = Number(o.timeoutMs);
+  const timeoutMs = Number.isFinite(t) && t > 0
+    ? Math.max(CLAUDE_TIMEOUT_MIN_MS, Math.min(CLAUDE_TIMEOUT_MAX_MS, Math.round(t)))
+    : CLAUDE_TIMEOUT_MS;
+  return { effort, timeoutMs };
+}
+
+/** -p の直後に足す引数 */
+function claudeExtraArgs({ effort }) {
+  return effort ? ['--effort', effort] : [];
+}
+
+function runClaudeOnce({ cmd, args }, prompt, opts) {
+  const { effort, timeoutMs } = claudeRunOptions(opts);
+  const full = [];
+  for (const a of args) { full.push(a); if (a === '-p') full.push(...claudeExtraArgs({ effort })); }
   return new Promise((resolve) => {
     let child;
     try {
@@ -75,7 +108,7 @@ function runClaudeOnce({ cmd, args }, prompt) {
       // 「最後のコミットは今日なので、アップデート手順の案内は不要です」が
       // 先頭に混ざった。**要約に関係ない文が本文に入る**のは明確な事故なので、
       // 何も置いていない場所で動かす
-      child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], cwd: os.tmpdir() });
+      child = spawn(cmd, full, { stdio: ['pipe', 'pipe', 'pipe'], cwd: os.tmpdir() });
     } catch (e) {
       resolve({ ok: false, error: e.message, spawnFailed: true });
       return;
@@ -85,8 +118,8 @@ function runClaudeOnce({ cmd, args }, prompt) {
 
     const timer = setTimeout(() => {
       try { child.kill(); } catch {}
-      finish({ ok: false, error: `${CLAUDE_TIMEOUT_MS / 1000}秒待っても返事がありませんでした` });
-    }, CLAUDE_TIMEOUT_MS);
+      finish({ ok: false, error: `${timeoutMs / 1000}秒待っても返事がありませんでした` });
+    }, timeoutMs);
 
     child.on('error', (e) => {
       clearTimeout(timer);
@@ -191,13 +224,18 @@ async function checkClaudeAuth() {
 }
 
 /** 覚えた呼び方を使い、無ければ順に試す */
-async function runClaude(prompt) {
+async function runClaude(prompt, opts) {
   const order = claudeInvocation
     ? [claudeInvocation]
     : CLAUDE_CANDIDATES;
   let last = null;
   for (const inv of order) {
-    const r = await runClaudeOnce(inv, prompt);
+    let r = await runClaudeOnce(inv, prompt, opts);
+    // --effort を知らない古い claude なら、付けずにもう一度（速さより、動くことを優先）
+    if (!r.ok && !r.spawnFailed && opts && opts.effort && /unknown option|unrecognized|--effort/i.test(r.error || '')) {
+      log('[claude] --effort が使えない版だったので、付けずに呼び直します');
+      r = await runClaudeOnce(inv, prompt, { ...opts, effort: null });
+    }
     if (r.ok) {
       if (!claudeInvocation) {
         claudeInvocation = inv;
@@ -243,6 +281,6 @@ async function claudeAuthLogin() {
 function claudeInvocationName() { return claudeInvocation ? claudeInvocation.cmd : null; }
 
 module.exports = {
-  CLAUDE_MAX_CHARS, CLAUDE_TIMEOUT_MS,
+  CLAUDE_MAX_CHARS, CLAUDE_TIMEOUT_MS, claudeRunOptions,
   runClaude, checkClaudeAuth, claudeAuthLogin, claudeInvocationName, setLogger,
 };

@@ -24,6 +24,8 @@ const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'fakeclaude-'));
 fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh
 if [ "$1" = "auth" ]; then echo '{"loggedIn": true, "authMethod": "oauth_token"}'; exit 0; fi
 if [ -n "$FAKE_FAIL" ]; then echo "Failed to authenticate: OAuth session expired" >&2; exit 1; fi
+if [ -n "$OLD_CLAUDE" ] && [ "$2" = "--effort" ]; then echo "error: unknown option '--effort'" >&2; exit 1; fi
+if [ -n "$ECHO_ARGS" ]; then echo "ARGS:$*"; cat >/dev/null; exit 0; fi
 printf '答え:'; cat
 `, { mode: 0o755 });
 
@@ -82,6 +84,34 @@ function ask(msg, env = {}, raw = null) {
     eq('長い文字起こしも1通で受け取れる（返事が途中で切れない）', [r.reply.ok, r.reply.text.length], [true, 3 + 150000]);
     // v0.24.21 で見つけた穴: claude の出力を Buffer のまま繋ぐと 64KB の切れ目で文字が割れた
     eq('日本語が切れ目で化けない（「�」が無い）', r.reply.text.indexOf('\uFFFD'), -1);
+  }
+
+  console.log('\n■ リアルタイム要約の調整（v0.24.23）');
+  {
+    const r = await ask({ type: 'run', prompt: 'x', effort: 'low', timeoutMs: 600000 }, { ECHO_ARGS: '1' });
+    eq('effort は -p の直後に --effort として渡る', r.reply.text, 'ARGS:-p --effort low');
+  }
+  {
+    const r = await ask({ type: 'run', prompt: 'x' }, { ECHO_ARGS: '1' });
+    eq('調整なしなら付けない（要約・質問はこれまでどおり）', r.reply.text, 'ARGS:-p');
+  }
+  {
+    const r = await ask({ type: 'run', prompt: 'x', effort: 'low; rm -rf /' }, { ECHO_ARGS: '1' });
+    eq('決めた値以外は渡さない', r.reply.text, 'ARGS:-p');
+  }
+  {
+    const r = await ask({ type: 'run', prompt: 'こんにちは', effort: 'low' }, { OLD_CLAUDE: '1' });
+    eq('--effort を知らない古い claude なら、付けずに呼び直す', [r.reply.ok, r.reply.text], [true, '答え:こんにちは']);
+  }
+  {
+    const r = await ask({ type: 'health' });
+    eq('health は分かる調整を返す（アプリが入れ直しを促す目印）', r.reply.features, ['effort', 'timeout']);
+  }
+  {
+    const { claudeRunOptions } = require(path.join(SRC, 'claude-runner.js'));
+    eq('待つ上限: 指定なしは 180秒', claudeRunOptions({}).timeoutMs, 180000);
+    eq('待つ上限: 600秒はそのまま', claudeRunOptions({ timeoutMs: 600000 }).timeoutMs, 600000);
+    eq('待つ上限: 短すぎ・長すぎは丸める', [claudeRunOptions({ timeoutMs: 1 }).timeoutMs, claudeRunOptions({ timeoutMs: 1e9 }).timeoutMs], [30000, 900000]);
   }
 
   console.log('\n■ おかしな依頼');

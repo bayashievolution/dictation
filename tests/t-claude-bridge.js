@@ -182,13 +182,18 @@ console.log('\n■ 「接続を確認」の文言（ログインまで見る）'
      { ok: false, needsLogin: false, unknown: false, text: '中継に繋がりません。start.bat でサーバーを起動してください' });
   is('何も返ってこない', h(null),
      { ok: false, needsLogin: false, unknown: false, text: '中継に繋がりません。start.bat でサーバーを起動してください' });
-  is('ログイン済み', h({ ok: true, invocation: 'claude', auth: { ok: true, loggedIn: true } }),
-     { ok: true, needsLogin: false, unknown: false, text: '使えます（ログイン済み / claude）' });
-  // サーバーの版を出す。拡張のカードの数字と比べられるように (v0.24.11)
+  const F = ['effort', 'timeout'];   // v0.24.23 からのサーバーが返す印
+  is('ログイン済み', h({ ok: true, invocation: 'claude', features: F, auth: { ok: true, loggedIn: true } }),
+     { ok: true, needsLogin: false, unknown: false, stale: false, text: '使えます（ログイン済み / claude）' });
   is('版も返ってきたとき',
+     h({ ok: true, invocation: 'claude', version: '0.24.23', features: F, auth: { ok: true, loggedIn: true } }),
+     { ok: true, needsLogin: false, unknown: false, stale: false,
+       text: '使えます（ログイン済み / claude / サーバー 0.24.23）' });
+  // v0.24.23: 調整（effort / timeout）を知らない古いサーバー。使えるが、入れ直しを促す
+  is('古いサーバー（start.bat）→ 起動し直してと言う',
      h({ ok: true, invocation: 'claude', version: '0.24.11', auth: { ok: true, loggedIn: true } }),
-     { ok: true, needsLogin: false, unknown: false,
-       text: '使えます（ログイン済み / claude / サーバー 0.24.11）' });
+     { ok: true, needsLogin: false, unknown: false, stale: true,
+       text: '使えます（ログイン済み / claude / サーバー 0.24.11）。サーバーが古い版です。リアルタイム要約を速くするため、start.bat を起動し直してください' });
   is('ログインしていない', h({ ok: true, invocation: 'claude', auth: { ok: true, loggedIn: false } }),
      { ok: false, needsLogin: true, unknown: false, text: 'Claude にログインしていません。login.bat でサインインしてください' });
   // ここが肝。**分からないときに「使えます」と言わない**。
