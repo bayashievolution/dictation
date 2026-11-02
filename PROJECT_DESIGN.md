@@ -3196,5 +3196,5 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
     1. `claude` が入力を読む前に終わる（ログイン切れで即失敗する等）と、書き込みの EPIPE を拾っておらず**プロセスごと落ちた**（serve.js ならサーバーが止まる）
     2. `claude` の出力を Buffer のまま `+=` していたので、**64KB の切れ目で日本語が割れて「�」になった**（実測: 15万字で2か所）。長い要約にときどき文字化けが混ざりうる穴だった
     3. （ホストを書いていて）`process.exit()` で終えると**書きかけの返事が捨てられた**（45万バイトが14万バイトで切れた）。自然に終わらせる
-  - テスト: `tests/t-claude-host.js`（13件・偽の claude で本物の node を4バイト＋JSON でやり取り）、`tests/t-claude-installer.js`（22件・埋め込んだファイルが certutil の形で元に戻るか、echo したあとの登録 JSON が読めるか）、`tests/t-claude-bridge-native.js`（19件・使い分けと文言）、`tests/browser/t-claude-install-browser.js`（13件・ボタンの配線と出し分け）、**`tests/browser/t-claude-native-e2e-browser.js`（6件・本物の Chromium にこのフォルダを拡張として読み込み、本物のホストを登録して、拡張 → ホスト → claude を端から端まで通す。Chromium が返す本物のエラー文言も見分けられることを確かめた）**
+  - テスト: `tests/t-claude-host.js`（12件・偽の claude で本物の node を4バイト＋JSON でやり取り）、`tests/t-claude-installer.js`（21件・埋め込んだファイルが certutil の形で元に戻るか、echo したあとの登録 JSON が読めるか）、`tests/t-claude-bridge-native.js`（19件・使い分けと文言）、`tests/browser/t-claude-install-browser.js`（13件・ボタンの配線と出し分け）、**`tests/browser/t-claude-native-e2e-browser.js`（6件・本物の Chromium にこのフォルダを拡張として読み込み、本物のホストを登録して、拡張 → ホスト → claude を端から端まで通す。Chromium が返す本物のエラー文言も見分けられることを確かめた）**
   - **確かめていないこと**: .bat そのもの（certutil / reg / choice / chcp 65001）と Windows のレジストリ登録・Edge。登録は Linux の場所で試した。インストールした補助プログラムは `update.bat` では入れ替わらない（入れ直しが要る版では知らせる）
