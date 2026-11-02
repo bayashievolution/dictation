@@ -2983,6 +2983,15 @@ body.chat-active #dict-bar {
   justify-content: space-between;
   gap: 12px;
 }
+/* v0.24.27: 隣の文が長いとボタンが押しつぶされて縦に3行になっていた（やっさんのスクリーンショット）。
+ * ボタンは1行のまま縮ませず、文のほうを折り返す */
+.audio-usage-row > .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.audio-usage-row > .field-hint {
+  min-width: 0;
+}
 /* 送信先についての注意書き。既存の --danger を使う（新しい色を増やさない） */
 .field-hint.warn-hint {
   display: block;

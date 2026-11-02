@@ -327,7 +327,7 @@ const state = {
   sessions: [],
   activeId: null,
   activePane: 'pane-transcript',
-  isSummarizing: false,
+  isSummarizing: false,   // v0.24.27 から使っていない（タブごとの state.busy に置き換え）
 
   // バックグラウンド録音: recordingSessionId は録音対象セッション。
   // activeId !== recordingSessionId の間は、文字起こしは bgTranscriptEl (detached) に流れる。
@@ -1330,13 +1330,44 @@ async function refineWholeTranscript({ showFeedback = true } = {}) {
     else if (n.nodeType === Node.ELEMENT_NODE && !n.classList.contains('paragraph')) n.remove();
   });
   const target = createParagraphEl('（全体整形中… しばらくお待ちください）', 'paragraph refining');
+  // v0.24.27: 途中でタブを切り替えられても結果を戻せるよう、印を付けておく
+  const refineId = 'r' + Date.now().toString(36);
+  target.dataset.refineId = refineId;
   container.appendChild(target);
 
   const inBg = container !== els.confirmed;
+  const sessionId = state.activeId;
   const persist = () => {
     if (inBg) syncBgToSession();
     else snapshotActiveToSession();
     persistSessions();
+  };
+  /* v0.24.27: 結果を「整形中」の段落に入れる。
+   *
+   * 途中で別のタブに移ると、画面の文字起こしはそのタブのものに入れ替わり、`target` は
+   * 画面から外れる。v0.24.26 まではそのまま外れた `target` に書いて**結果を捨て**、
+   * 元のタブには「（全体整形中…）」の1行だけが残っていた（実機の Chromium で再現）。
+   * 外れていたら、印の付いた段落を探して入れる（元のタブに戻っていれば画面の中、
+   * まだ別のタブなら保存データの中）。 */
+  const applyToTarget = (fn) => {
+    if (inBg || target.isConnected) { fn(target); delete target.dataset.refineId; persist(); return; }
+    if (sessionId === state.activeId) {
+      const el = els.confirmed.querySelector(`[data-refine-id="${refineId}"]`);
+      if (el) { fn(el); delete el.dataset.refineId; snapshotActiveToSession(); persistSessions(); }
+      return;
+    }
+    const sess = state.sessions.find((x) => x.id === sessionId);
+    if (!sess) return;
+    const box = document.createElement('div');
+    box.innerHTML = sess.transcript || '';
+    const el = box.querySelector(`[data-refine-id="${refineId}"]`);
+    if (!el) return;
+    fn(el);
+    delete el.dataset.refineId;
+    sess.transcript = box.innerHTML;
+    sess.updatedAt = Date.now();
+    persistSessions();
+    diagLog.info('全体整形: 別のタブを開いている間に終わったので、元のタブに入れました');
   };
   if (inBg) syncBgToSession(); else autoScroll();
   diagLog.info(`全体整形開始: ${allText.length}字${willChunk ? '（チャンク分割）' : ''}`);
@@ -1355,16 +1386,12 @@ async function refineWholeTranscript({ showFeedback = true } = {}) {
         feature: 'whole-refine',   // v0.24.0: 後処理なので Claude に回してよい
       });
     }
-    target.className = 'paragraph refined';
-    setParagraphContent(target, refined || allText);
-    persist();
+    applyToTarget((el) => { el.className = 'paragraph refined'; setParagraphContent(el, refined || allText); });
     diagLog.info(`全体整形完了: ${(refined || allText).length}字`);
-    if (!inBg) { updateActionButtons(); autoScroll(); }
+    if (!inBg && sessionId === state.activeId) { updateActionButtons(); autoScroll(); }
   } catch (e) {
     console.warn('[refine whole] failed:', e.message || e);
-    target.className = 'paragraph needs-retry';
-    setParagraphContent(target, allText);
-    persist();
+    applyToTarget((el) => { el.className = 'paragraph needs-retry'; setParagraphContent(el, allText); });
     if (showFeedback) {
       setStatus('error', '全体整形失敗: ' + (e.message || '').slice(0, 60));
       setTimeout(() => restoreStatus(), 4000);
@@ -1944,6 +1971,38 @@ function stopRecording() {
  * 文面の組み立てと整形は live-summary.js（純関数）。ここは「いつ・どのタブに」を受け持つ。
  */
 
+/* ───────── 動いている処理の印をタブごとに持つ (v0.24.27) ─────────
+ *
+ * やっさん「要約を生成ボタンを押すと、アニメーションがタブをまたいでも動いてる。
+ * タブで独立して動くよね？」。ボタンや要約の欄は**全タブで1つ**なのに、
+ * 処理を始めたタブを見ずに印を付け外ししていた。別のタブに移っても印が残り、
+ * 要約の欄は暗く押せないまま、逆に元のタブに戻ると先に外れていることもあった。
+ * 印は「どのタブで何が動いているか」で持ち、タブを切り替えるたびに付け直す。
+ */
+function busySet(kind) {
+  if (!state.busy) state.busy = {};
+  if (!state.busy[kind]) state.busy[kind] = new Set();
+  return state.busy[kind];
+}
+function markBusy(kind, sessionId, on) {
+  const set = busySet(kind);
+  if (on) set.add(sessionId); else set.delete(sessionId);
+  refreshBusyIndicators();
+}
+function isBusy(kind, sessionId) { return busySet(kind).has(sessionId); }
+
+function refreshBusyIndicators() {
+  const id = state.activeId;
+  const summary = isBusy('summary', id);
+  if (els.btnSummaryCombo) els.btnSummaryCombo.classList.toggle('firing', summary);
+  if (els.summary) els.summary.classList.toggle('generating', summary);
+  if (els.liveSummary) els.liveSummary.classList.toggle('generating', isBusy('liveDim', id));
+  if (els.btnLiveRedo) els.btnLiveRedo.disabled = isBusy('live', id);
+  if (els.btnRefineTranscript) els.btnRefineTranscript.classList.toggle('firing', isBusy('refine', id));
+  const memoBtn = document.getElementById('btn-memo-refine-selection');
+  if (memoBtn) memoBtn.classList.toggle('firing', isBusy('memoRefine', id));
+}
+
 /** リアルタイム要約で Claude を待つ上限。ほかの処理（180秒）より長くする (v0.24.23) */
 const LIVE_SUMMARY_TIMEOUT_MS = 600000;
 
@@ -2025,8 +2084,9 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
   const wasActive = session.id === state.activeId;
   // 録音中の定期更新では暗くしない（.generating は押せなくする。読んでいる途中で
   // 30秒ほど読めなくなるのは困る）。人が押したときと、止めたあとの最終版だけ
-  const dim = wasActive && (manual || fresh || final);
-  if (dim) els.liveSummary.classList.add('generating');
+  const dim = manual || fresh || final;
+  markBusy('live', sessionId, true);
+  if (dim) markBusy('liveDim', sessionId, true);
   diagLog.info(`RT要約を更新します（${fresh ? '最初から' : final ? '最終版' : '途中'} / 文字起こし${src.transcript.length}字）`);
   if (!state.isRecording || manual) setStatus('listening', fresh ? '目次付きで要約し直しています（Claude）' : 'RT要約を更新中（Claude）');
   try {
@@ -2072,7 +2132,8 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
     return false;
   } finally {
     state.liveSummaryBusy = false;
-    if (dim) els.liveSummary.classList.remove('generating');
+    markBusy('liveDim', sessionId, false);
+    markBusy('live', sessionId, false);
     // restoreStatus はここで呼ばない。成功も失敗も statusNotice で知らせていて、
     // 時間が来たら statusNotice が戻す。ここで戻すと**失敗の知らせが一瞬で消える**（テストで見つけた）
   }
@@ -4438,7 +4499,14 @@ function requestNotionCancel() {
  *
  * @returns {Promise<boolean>} 続行してよければ true
  */
-async function ensureTranscriptSettled() {
+async function ensureTranscriptSettled(sessions) {
+  /* v0.24.27: **保存するタブに録音中のタブが入っているときだけ**確かめる。
+   * やっさん「これ他のタブを録音中は関係ないよね？ 全てクラウドに保存するときだけでいいよね？」。
+   * 確定待ちの文字起こしは録音中のタブのものなので、別のタブを保存するだけなら関係ない。
+   * 止めた直後で録音中のタブがもう分からない（recordingSessionId が空）ときは、念のため従来どおり聞く */
+  const recId = state.recordingSessionId;
+  const list = Array.isArray(sessions) ? sessions : null;
+  if (list && recId && !list.some((x) => x && x.id === recId)) return true;
   if (state.isRecording) {
     return confirm(
       '録音中です。\n'
@@ -4482,7 +4550,7 @@ async function uploadSessionsToNotion(sessions) {
   }
 
   // 確定待ちを残したまま保存 → 閉じる、で内容が消えるのを防ぐ
-  if (!(await ensureTranscriptSettled())) return { results: [], cancelled: false };
+  if (!(await ensureTranscriptSettled(targets))) return { results: [], cancelled: false };
 
   const summary = targets.length === 1
     ? `「${targets[0].title}」を1ノートとして保存します。`
@@ -6220,9 +6288,10 @@ async function autoGenerateTitle({ silent = true, force = false, sessionId = nul
 /* ───────── Summary generation ───────── */
 
 async function generateSummary({ silent = false, sessionId = null } = {}) {
-  if (state.isSummarizing) return;
   // 対象セッションをIDで固定（非同期中にタブ切替されても安全に）
   const targetId = sessionId || state.activeId;
+  // v0.24.27: 二重起動の歯止めもタブごと（別のタブの要約は待たずに作れる）
+  if (isBusy('summary', targetId)) return;
   let session = state.sessions.find(s => s.id === targetId);
   if (!session) return;
   const transcript = (targetId === state.activeId)
@@ -6254,14 +6323,10 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
   if (targetId === state.activeId && (session.summary || '').trim()) {
     pushUndo(silent ? '要約自動生成' : '要約生成', 'pane-summary');
   }
-  state.isSummarizing = true;
   // 表示中のセッションだった場合のみ UI にローディング表示
   const wasActive = (targetId === state.activeId);
-  if (wasActive) {
-    els.summary.classList.add('generating');
-    els.summaryEmpty.hidden = true;
-    if (els.btnSummaryCombo) els.btnSummaryCombo.classList.add('firing');
-  }
+  if (wasActive) els.summaryEmpty.hidden = true;
+  markBusy('summary', targetId, true);
   // v0.24.12: どちらの AI で回しているかを出す（やっさんの要望）
   setStatus('listening', `要約生成中（${typeof aiEngineName === 'function' ? aiEngineName('summary') : 'Gemini'}）`);
   try {
@@ -6296,11 +6361,7 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
     console.error('Summary generation failed:', e);
     if (!silent) alert('要約生成に失敗しました: ' + e.message);
   } finally {
-    state.isSummarizing = false;
-    if (wasActive && targetId === state.activeId) {
-      els.summary.classList.remove('generating');
-      if (els.btnSummaryCombo) els.btnSummaryCombo.classList.remove('firing');
-    }
+    markBusy('summary', targetId, false);
     restoreStatus();
   }
 }
@@ -8133,6 +8194,7 @@ function removeImage(img) {
 function loadActiveSessionIntoDOM() {
   renderDictBar();   // v0.20.0: タブごとに辞書が違うので、切り替えたら描き直す
   updateDiarizeButton();   // v0.21.2: 保存済みの結果もタブごとに違う
+  refreshBusyIndicators(); // v0.24.27: 動いている処理の印も、そのタブのものに付け直す
   const s = getActiveSession();
   els.confirmed.innerHTML = s?.transcript || '';
   clearImageSelection();            // v0.22.1: 前のタブの画像の枠を消す
@@ -9010,14 +9072,10 @@ if (els.btnSummaryCombo) {
       saveSettings();
       applyAiButtonState();
     } else {
-      els.btnSummaryCombo.classList.add('firing');
-      try {
-        // v0.24.25: 要約タブのボタンは普通の要約に戻した。目次付きで作り直すのは
-        // リアルタイム要約タブの「最初から要約し直す」
-        await generateSummary({ silent: false });
-      } finally {
-        els.btnSummaryCombo.classList.remove('firing');
-      }
+      // v0.24.25: 要約タブのボタンは普通の要約に戻した。目次付きで作り直すのは
+      // リアルタイム要約タブの「最初から要約し直す」
+      // v0.24.27: 印は generateSummary がタブごとに付け外しする（ここで付けるとタブをまたぐ）
+      await generateSummary({ silent: false });
     }
   });
 }
@@ -9111,12 +9169,8 @@ if (els.btnLiveRedo) {
       statusNotice('error', 'RT要約は Claude 連携がオンのときだけ使えます', { ms: 4000 });
       return;
     }
-    els.btnLiveRedo.disabled = true;
-    try {
-      await runLiveSummary({ sessionId: state.activeId, fresh: true, final: !state.isRecording, manual: true });
-    } finally {
-      els.btnLiveRedo.disabled = false;
-    }
+    // 押せなくするのは runLiveSummary がタブごとにやる (v0.24.27)
+    await runLiveSummary({ sessionId: state.activeId, fresh: true, final: !state.isRecording, manual: true });
   });
 }
 
@@ -9842,11 +9896,13 @@ if (els.btnRefineTranscript) {
       // 本体クリック: トグルON/OFFに関わらず、全体を上から下までまとめて文脈込みで
       // 再整形＋見出し付け。既に整形済みのテキストも一度に整う。
       if (!state.settings.apiKey) { openSettings(); return; }
-      els.btnRefineTranscript.classList.add('firing');
+      // v0.24.27: 印はタブごと（別のタブに移ったら消え、戻ったらまた付く）
+      const sid = state.activeId;
+      markBusy('refine', sid, true);
       try {
         await refineWholeTranscript({ showFeedback: true });
       } finally {
-        els.btnRefineTranscript.classList.remove('firing');
+        markBusy('refine', sid, false);
       }
     }
   });
@@ -10220,8 +10276,9 @@ async function refineMemoSelection() {
   snapshotActiveToSession();
   persistSessions();
 
-  const btn = document.getElementById('btn-memo-refine-selection');
-  if (btn) btn.classList.add('firing');
+  // v0.24.27: 印はタブごと
+  const memoSid = state.activeId;
+  markBusy('memoRefine', memoSid, true);
   diagLog.info(`メモ選択整形開始: ${selectedText.length}字`);
 
   try {
@@ -10265,7 +10322,7 @@ async function refineMemoSelection() {
     setStatus('error', 'メモ整形失敗: ' + (e.message || '').slice(0, 60));
     setTimeout(() => setStatus('idle', '停止'), 4000);
   } finally {
-    if (btn) btn.classList.remove('firing');
+    markBusy('memoRefine', memoSid, false);
   }
 }
 
