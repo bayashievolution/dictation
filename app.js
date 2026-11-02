@@ -4459,7 +4459,83 @@ function notionProgressOpen(title, { cancellable = true } = {}) {
   els.btnNotionCancel.textContent = '中止';
   els.btnNotionCloseTabs.hidden = true;
   els.btnNotionKeepTabs.hidden = true;
+  // v0.24.33: 前に動かした場所に出す（無ければ右下）
+  const pos = loadNotionFloatPos();
+  if (pos) {
+    els.notionProgress.classList.add('positioned');
+    els.notionProgress.style.left = `${pos.x}px`;
+    els.notionProgress.style.top = `${pos.y}px`;
+  }
   els.notionProgress.classList.remove('hidden');
+  if (pos) requestAnimationFrame(() => clampFloatEl(els.notionProgress));
+}
+
+/* v0.24.33: Notion 保存の小窓の位置。質問の小窓とは別に覚える */
+const NOTION_FLOAT_POS_KEY = 'dictation:notionFloatPos';
+function loadNotionFloatPos() {
+  try {
+    const p = JSON.parse(localStorage.getItem(NOTION_FLOAT_POS_KEY) || 'null');
+    return p && Number.isFinite(p.x) && Number.isFinite(p.y) ? p : null;
+  } catch { return null; }
+}
+function saveNotionFloatPos(x, y) {
+  try { localStorage.setItem(NOTION_FLOAT_POS_KEY, JSON.stringify({ x, y })); } catch {}
+}
+
+/** 画面の外に出ないように戻す（clampFloatWindow の、どの窓にも使える版） */
+function clampFloatEl(win) {
+  if (!win || !win.classList.contains('positioned')) return;
+  const z = getAppZoom();
+  const rect = win.getBoundingClientRect();
+  const margin = 4;
+  const maxX = (window.innerWidth - rect.width - margin) / z;
+  const maxY = (window.innerHeight - rect.height - margin) / z;
+  const x = Math.max(margin / z, Math.min(parseFloat(win.style.left) || 0, maxX));
+  const y = Math.max(margin / z, Math.min(parseFloat(win.style.top) || 0, maxY));
+  win.style.left = `${x}px`;
+  win.style.top = `${y}px`;
+}
+
+/**
+ * ヘッダーをつかんで窓を動かす（質問の小窓と同じ動き。v0.24.33 で Notion の小窓にも使う）
+ * 倍率（html の zoom）がかかっていても、つかんだ位置からずれないように /z で直す
+ */
+function enableFloatDrag(win, header, onEnd) {
+  if (!win || !header) return;
+  let startX = 0, startY = 0, originX = 0, originY = 0, dragging = false;
+  header.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button, input, a')) return;
+    const z = getAppZoom();
+    if (!win.classList.contains('positioned')) {
+      const rect = win.getBoundingClientRect();
+      win.classList.add('positioned');
+      win.style.left = `${rect.left / z}px`;
+      win.style.top = `${rect.top / z}px`;
+    }
+    startX = e.clientX; startY = e.clientY;
+    originX = parseFloat(win.style.left) || 0;
+    originY = parseFloat(win.style.top) || 0;
+    dragging = true;
+    header.classList.add('dragging');
+    try { header.setPointerCapture(e.pointerId); } catch {}
+    e.preventDefault();
+  });
+  header.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const z = getAppZoom();
+    win.style.left = `${originX + (e.clientX - startX) / z}px`;
+    win.style.top = `${originY + (e.clientY - startY) / z}px`;
+  });
+  const end = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    header.classList.remove('dragging');
+    try { header.releasePointerCapture(e.pointerId); } catch {}
+    clampFloatEl(win);
+    if (onEnd) onEnd(parseFloat(win.style.left) || 0, parseFloat(win.style.top) || 0);
+  };
+  header.addEventListener('pointerup', end);
+  header.addEventListener('pointercancel', end);
 }
 
 function notionProgressSet(text) {
@@ -4588,6 +4664,8 @@ async function uploadSessionsToNotion(sessions) {
     notionProgressSet(appending
       ? `「${session.title}」を「${dest.pageTitle}」に追記しています…`
       : `「${session.title}」を保存しています…`);
+    // v0.24.33: 送る直前の中身を覚えておく（保存中に書き足された分を見分けるため）
+    const sentSig = sessionContentSig(session);
     try {
       if (appending) {
         await notionAppendToNote({
@@ -4612,7 +4690,7 @@ async function uploadSessionsToNotion(sessions) {
       }
       // アップ済み印。閉じずに残したタブをタブバーで見分けられるようにする
       session.notionUploadedAt = Date.now();
-      results.push({ session, ok: true });
+      results.push({ session, ok: true, sentSig });
       notionProgressAddRow(session.title, 'ok');
     } catch (e) {
       results.push({ session, ok: false, error: e.message });
@@ -4632,6 +4710,19 @@ async function uploadSessionsToNotion(sessions) {
   if (notionCancelRequested) cancelled = true;
   if (results.some(r => r.ok)) { persistSessions(); renderTabs(); }
   return { results, cancelled, remaining: targets.length - done , verb };
+}
+
+/**
+ * タブの中身の目印 (v0.24.33)
+ *
+ * v0.24.33 から Notion に保存している間もほかの操作ができる。保存中のタブに書き足すと、
+ * その分は送られていないのに、終わったあとの「閉じる」で**書き足した分ごと消える**。
+ * 送る直前と終わったときで中身を比べ、変わっていたら閉じる対象から外す。
+ */
+function sessionContentSig(session) {
+  if (!session) return '';
+  const chat = (session.chat || []).filter((m) => !m.thinking).map((m) => m.content).join('\u0001');
+  return [session.transcript || '', session.memo || '', session.summary || '', session.liveSummary || '', chat].join('\u0002');
 }
 
 /**
@@ -4659,6 +4750,15 @@ function notionFinish({ results, cancelled, remaining, verb }) {
   // v0.21.4: チェックの状態は**覚えない**（notionProgressOpen の解説を参照）
   const autoClose = !!els.notionAutoClose.checked;
 
+  // v0.24.33: 保存中に書き足されたタブは閉じない（書き足した分は送っていないので、閉じると消える）
+  snapshotActiveToSession();
+  const changed = ok.filter((r) => r.sentSig != null && sessionContentSig(r.session) !== r.sentSig);
+  for (const r of changed) {
+    r.session.notionUploadedAt = null;   // 最新は上がっていない
+  }
+  if (changed.length) { persistSessions(); renderTabs(); }
+  const closable = ok.filter((r) => !changed.includes(r));
+
   els.btnNotionCancel.hidden = true;
   els.notionAutoCloseRow.hidden = true;
   els.btnNotionKeepTabs.hidden = false;
@@ -4679,11 +4779,12 @@ function notionFinish({ results, cancelled, remaining, verb }) {
   const label = ok.length === 1 ? `「${ok[0].session.title}」` : `${ok.length}個のタブ`;
   const notes = [];
   if (ng.length) notes.push(`${ng.length}個は失敗したので残します`);
+  if (changed.length) notes.push(`${changed.length === 1 ? `「${changed[0].session.title}」` : `${changed.length}個のタブ`}は${act}中に書き足されたので、閉じずに残します（書き足した分は送っていません）`);
   if (cancelled && remaining > 0) notes.push(`${remaining}個は中止したので送っていません`);
   const note = notes.length ? `\n（${notes.join('／')}）` : '';
 
   // Notion に上がっている前提なので、closeSession の削除確認は出さない（二重確認の回避）
-  const closeOkTabs = () => closeMultipleSessions(ok.map(r => r.session.id), { skipConfirm: true });
+  const closeOkTabs = () => closeMultipleSessions(closable.map(r => r.session.id), { skipConfirm: true });
 
   if (autoClose) {
     // 「自動的に閉じる」がオンなら聞かずに閉じ、結果だけ見せる
@@ -4692,6 +4793,16 @@ function notionFinish({ results, cancelled, remaining, verb }) {
     els.btnNotionKeepTabs.textContent = '閉じる';
     els.btnNotionKeepTabs.onclick = notionProgressClose;
     notionProgressSet(`${label}を${act}して閉じました。${note}`);
+    els.btnNotionKeepTabs.focus();
+    return;
+  }
+
+  // 閉じてよいタブが無い（全部、保存中に書き足された）なら、閉じるかどうかは聞かない
+  if (closable.length === 0) {
+    els.btnNotionCloseTabs.hidden = true;
+    els.btnNotionKeepTabs.textContent = '閉じる';
+    els.btnNotionKeepTabs.onclick = notionProgressClose;
+    notionProgressSet(`${label}を${act}しました。${note}`);
     els.btnNotionKeepTabs.focus();
     return;
   }
@@ -8848,6 +8959,10 @@ if (els.btnNotionUpload) {
   }
   els.btnNotionCancel.addEventListener('click', requestNotionCancel);
 }
+// v0.24.33: Notion 保存の小窓をヘッダーで動かす。**起動時に1回だけ登録する**
+// （tests/browser/t-notion-float-browser.js で実際につかんで動かして確かめている）
+enableFloatDrag(els.notionProgress, els.notionProgress && els.notionProgress.querySelector('.notion-float-header'),
+  (x, y) => saveNotionFloatPos(x, y));
 els.btnLoadJson.addEventListener('click', () => els.fileLoad.click());
 els.fileLoad.addEventListener('change', (e) => {
   const f = e.target.files?.[0];

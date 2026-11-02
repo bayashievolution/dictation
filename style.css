@@ -2923,6 +2923,46 @@ body.chat-active #dict-bar {
 .notion-test-result.is-note { color: var(--text-muted); }
 
 /* アップロード進捗の結果リスト v0.14.2 */
+/* v0.24.33: Notion 保存の進み具合は、右下の小さな窓（後ろを止めない）。
+ * 見た目は質問の小窓（.float-window）に合わせる。ヘッダーで動かせる */
+.notion-float {
+  position: fixed;
+  right: 16px;
+  bottom: 64px;          /* 下の倍率バーに重ならない高さ */
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 120px));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 1900;         /* 保存先を選ぶモーダル（2000〜）より下 */
+  overflow: hidden;
+}
+.notion-float.hidden { display: none; }
+.notion-float.positioned { right: auto; bottom: auto; }
+.notion-float-body {
+  padding: 10px 14px 4px;
+  overflow-y: auto;
+  flex: 1;
+}
+.notion-float-text {
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-line;
+  margin: 0 0 6px;
+}
+.notion-float-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px 10px;
+}
+.notion-float .field-row { font-size: 12px; }
+/* ボタンが1つも出ていないとき（1件だけの保存中）は、下の段ごと隠す（空白が残るため） */
+.notion-float-footer:not(:has(button:not([hidden]))) { display: none; }
+
 .notion-progress-list {
   margin-top: 10px;
   max-height: 180px;

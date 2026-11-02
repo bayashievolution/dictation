@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.32" />
+  <link rel="stylesheet" href="style.css?v=0.24.33" />
 </head>
 <body>
   <div id="app">
@@ -989,26 +989,25 @@
     </div>
   </div>
 
-  <!-- v0.14.2: アップロード進捗＋完了後の「閉じますか？」 -->
-  <div id="notion-progress" class="modal hidden">
-    <div class="modal-backdrop"></div>
-    <div class="modal-card modal-small">
-      <div class="modal-header">
-        <h2 id="notion-progress-title">Notion に保存中…</h2>
-      </div>
-      <div class="modal-body">
-        <p id="notion-progress-body" style="font-size:14px; line-height:1.7; white-space:pre-line;"></p>
-        <label class="field field-row" id="notion-auto-close-row">
-          <input id="notion-auto-close" type="checkbox" />
-          <span>保存できたタブを、確認せずに閉じる（この回だけ）</span>
-        </label>
-        <div id="notion-progress-list" class="notion-progress-list"></div>
-      </div>
-      <div class="modal-footer" id="notion-progress-footer">
-        <button id="btn-notion-cancel" class="btn btn-ghost">中止</button>
-        <button id="btn-notion-close-tabs" class="btn btn-primary" hidden>閉じる</button>
-        <button id="btn-notion-keep-tabs" class="btn btn-ghost" hidden>残す</button>
-      </div>
+  <!-- v0.14.2: アップロード進捗＋完了後の「閉じますか？」
+       v0.24.33: モーダル（後ろを暗くして操作を止める）をやめ、右下の小さな窓にした。
+       ヘッダーをつかんで動かせる。保存中も、録音中のタブなどで作業を続けられる（やっさんの要望） -->
+  <div id="notion-progress" class="notion-float hidden" role="dialog" aria-label="Notion への保存">
+    <div class="float-window-header notion-float-header" title="ドラッグで移動">
+      <h2 id="notion-progress-title">Notion に保存中…</h2>
+    </div>
+    <div class="notion-float-body">
+      <p id="notion-progress-body" class="notion-float-text"></p>
+      <label class="field field-row" id="notion-auto-close-row">
+        <input id="notion-auto-close" type="checkbox" />
+        <span>保存できたタブを、確認せずに閉じる（この回だけ）</span>
+      </label>
+      <div id="notion-progress-list" class="notion-progress-list"></div>
+    </div>
+    <div class="notion-float-footer" id="notion-progress-footer">
+      <button id="btn-notion-cancel" class="btn btn-ghost btn-sm">中止</button>
+      <button id="btn-notion-close-tabs" class="btn btn-primary btn-sm" hidden>閉じる</button>
+      <button id="btn-notion-keep-tabs" class="btn btn-ghost btn-sm" hidden>残す</button>
     </div>
   </div>
 
@@ -1033,16 +1032,16 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.32"></script>
-  <script src="gemini.js?v=0.24.32"></script>
-  <script src="notion.js?v=0.24.32"></script>
-  <script src="audio-store.js?v=0.24.32"></script>
-  <script src="claude-bridge.js?v=0.24.32"></script>
-  <script src="claude-installer.js?v=0.24.32"></script>
-  <script src="live-summary.js?v=0.24.32"></script>
-  <script src="image-store.js?v=0.24.32"></script>
-  <script src="gemini-files.js?v=0.24.32"></script>
-  <script src="term-dicts.js?v=0.24.32"></script>
-  <script src="app.js?v=0.24.32"></script>
+  <script src="icons.js?v=0.24.33"></script>
+  <script src="gemini.js?v=0.24.33"></script>
+  <script src="notion.js?v=0.24.33"></script>
+  <script src="audio-store.js?v=0.24.33"></script>
+  <script src="claude-bridge.js?v=0.24.33"></script>
+  <script src="claude-installer.js?v=0.24.33"></script>
+  <script src="live-summary.js?v=0.24.33"></script>
+  <script src="image-store.js?v=0.24.33"></script>
+  <script src="gemini-files.js?v=0.24.33"></script>
+  <script src="term-dicts.js?v=0.24.33"></script>
+  <script src="app.js?v=0.24.33"></script>
 </body>
 </html>
