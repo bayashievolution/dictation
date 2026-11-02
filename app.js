@@ -733,7 +733,9 @@ window.statusNotice = statusNotice;   // gemini.js から呼ぶ
 function setRecordingUI(isRec) {
   els.btnToggle.classList.toggle('recording', isRec);
   const iconEl = els.btnToggle.querySelector('[data-icon]');
-  if (iconEl && typeof setIcon === 'function') setIcon(iconEl, isRec ? 'record-stop' : 'record', 18);
+  // v0.24.31: 録音中（赤）も中の形は ●（やっさんの要望）。以前は ■（停止）に変えていた。
+  // 押すと止まることは、赤い色と title の「停止」で伝える
+  if (iconEl && typeof setIcon === 'function') setIcon(iconEl, 'record', 18);
   els.btnToggle.title = isRec ? '停止' : '録音開始';
   renderTabs();
 }
