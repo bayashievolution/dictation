@@ -2724,6 +2724,35 @@ function isDuplicateOfTail(provisionalText, tailText, threshold = 0.7) {
   return hit / ba.size >= threshold;
 }
 
+/**
+ * 相づちだけか (v0.24.34)
+ *
+ * やっさんの実機（2026-11-02）: 「みんな無言で文字を打っている」間の文字起こしが
+ *   はい。／はい。／はい。…（17行）
+ * になった。キーボードの音を Gemini が発話と取り違え、相づちを書いている。
+ * 音量の判定でもキーボードの音は「発話あり」になりうるので、音量では止められない。
+ *
+ * 全部消すと**本当の返事（「はい」）まで消える**ので、相づちだけのチャンクが**続いたとき**、
+ * 2つ目以降を出さない（1つ目は残す）。句読点と空白を除いて、相づちの語だけで
+ * できているものを「相づちだけ」とみなす。
+ */
+const FILLER_ONLY_RE = /^(?:はい|ええ|うん|ふん|ふーん|へー|ああ|あー|あ|え|お|ん|はーい)+$/;
+function isFillerOnly(text) {
+  const t = String(text || '').replace(/[\s、。，．,.!！?？…・ー〜~「」]/g, '');
+  if (!t) return false;
+  return FILLER_ONLY_RE.test(t);
+}
+
+/** すぐ前の確定した段落の文字（処理中の段落は飛ばす） */
+function previousParagraphText(el) {
+  for (let p = el && el.previousElementSibling; p; p = p.previousElementSibling) {
+    if (!p.classList || !p.classList.contains('paragraph')) continue;
+    if (p.classList.contains('refining')) continue;
+    return p.textContent || '';
+  }
+  return '';
+}
+
 /** 指定要素を除いた、直近の確定テキスト（末尾 maxChars 文字） */
 function confirmedTailText(excludeEl, maxChars = 400) {
   const container = excludeEl && excludeEl.parentElement;
@@ -3695,7 +3724,12 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
       contextHint: getContextForGemini(),
       edges,
     });
-    if (text && text.trim()) {
+    if (text && text.trim() && isFillerOnly(text) && isFillerOnly(previousParagraphText(targetEl))) {
+      // v0.24.34: 相づちだけのチャンクが続いたら、2つ目以降は出さない（判断根拠は isFillerOnly）
+      diagLog.info(`相づちだけのチャンクが続いたので表示しない（${text.trim().slice(0, 20)}）`);
+      targetEl.remove();
+      persist();
+    } else if (text && text.trim()) {
       // Geminiオーディオ経由の短チャンクは `.short-refined` とマーク。
       // このあと maybeConsolidateShortChunks() が 3つ溜まったら
       // refineWithGemini（見出し付き）でまとめて整形する。

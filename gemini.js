@@ -852,6 +852,8 @@ async function transcribeAudioWithGemini({ apiKey, audioBlob, contextHint, sessi
     '- 話題の切れ目では段落を分ける',
     '- 出力は整形済みテキストのみ、前置き・説明は不要',
     '- 音声が無音・ノイズのみ・意味ある発話ゼロなら、空文字列のみ返す',
+    // v0.24.34: 無言でキーボードを打っている間に「はい。」が17行並んだ（実機 2026-11-02）
+    '- キーボードを打つ音・紙の音・物音は発話ではない。相づちしか聞き取れないのに「はい」「うん」と書かない',
     buildNoInventionRule(),
   ].join('\n');
 
