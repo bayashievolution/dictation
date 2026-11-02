@@ -473,6 +473,7 @@ const els = {
   claudeBridgeStatus: document.getElementById('claude-bridge-status'),        // v0.24.0
   btnClaudeBridgeTest: document.getElementById('btn-claude-bridge-test'),     // v0.24.0
   btnSaveBridgeFiles: document.getElementById('btn-save-bridge-files'),      // v0.24.12
+  btnClaudeInstall: document.getElementById('btn-claude-install'),           // v0.24.21
   audioUsageText: document.getElementById('audio-usage-text'),
   btnClearAudio: document.getElementById('btn-clear-audio'),
   inputGeminiLiveDisplay: document.getElementById('input-gemini-live-display'),
@@ -3814,7 +3815,8 @@ async function testClaudeBridge() {
  * 必要な3つをアプリから出せば、拡張だけ入れた人でも揃う。
  * （.bat は %~dp0 で自分の隣の serve.js を見るので、置く場所を問わない）
  */
-const BRIDGE_FILES = ['serve.js', 'start.bat', 'login.bat'];
+// v0.24.21: serve.js は claude-runner.js を読むので、一緒に出さないと動かない
+const BRIDGE_FILES = ['serve.js', 'claude-runner.js', 'start.bat', 'login.bat'];
 
 async function saveBridgeFiles() {
   const btn = els.btnSaveBridgeFiles;
@@ -3849,6 +3851,66 @@ async function saveBridgeFiles() {
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+/**
+ * Claude 連携のインストーラーを保存する (v0.24.21)
+ *
+ * やっさんの要望:
+ * > start.bat、黒いウインドウが出るし、見た目がちょっとマニアックなので、
+ * > 今後リリースすることも考えて、インストール式にしてくれないかな
+ * > 連携に関してはソフトの方で管理
+ *
+ * v0.24.12 では「拡張からパソコンのプログラムは起動できない」と書いたが、
+ * 正確には**登録さえあれば起動できる**（ネイティブメッセージング）。登録の手作業を
+ * アプリが作るインストーラーに任せることで、ダブルクリック1回にした。
+ * 組み立ては claude-installer.js、ホストの本体は claude-host.js。
+ */
+async function saveClaudeInstaller() {
+  const btn = els.btnClaudeInstall;
+  const say = (msg, ng) => {
+    if (!els.claudeBridgeStatus) return;
+    els.claudeBridgeStatus.className = 'field-hint' + (ng ? ' is-ng' : '');
+    els.claudeBridgeStatus.textContent = msg;
+  };
+  if (btn) btn.disabled = true;
+  try {
+    const read = async (name) => {
+      const res = await fetch(name);
+      if (!res.ok) throw new Error(`${name} を読めませんでした (${res.status})`);
+      return res.text();
+    };
+    const bat = buildClaudeInstaller({
+      extensionId: chrome.runtime.id,
+      browser: detectInstallerBrowser(),
+      version: chrome.runtime.getManifest().version,
+      hostSource: await read('claude-host.js'),
+      runnerSource: await read('claude-runner.js'),
+    });
+    const url = URL.createObjectURL(new Blob([bat], { type: 'application/octet-stream' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dictation-claude-setup.bat';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    say('dictation-claude-setup.bat を保存しました。ダブルクリックしたあと「接続を確認」を押してください');
+  } catch (e) {
+    say('インストーラーを作れませんでした: ' + (e.message || e), true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/**
+ * 拡張かブラウザ版かで、Claude 連携の案内を出し分ける (v0.24.21)
+ * 拡張 … インストール式。ブラウザ版 … これまでどおり start.bat（ウェブページは登録を使えない）
+ */
+function applyClaudeBridgeMode() {
+  const native = typeof claudeNativeAvailable === 'function' && claudeNativeAvailable();
+  document.querySelectorAll('[data-claude-native-only]').forEach((el) => { el.hidden = !native; });
+  document.querySelectorAll('[data-claude-web-only]').forEach((el) => { el.hidden = native; });
 }
 
 /**
@@ -9807,6 +9869,11 @@ if (els.inputClaudeBridge) {
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });
 }
+// v0.24.21: インストール式。**起動時に走る行なので tests/browser/ で押して確かめる**（CLAUDE.md）
+if (els.btnClaudeInstall) {
+  els.btnClaudeInstall.addEventListener('click', () => { saveClaudeInstaller(); });
+}
+applyClaudeBridgeMode();
 // v0.19.0: 期限切れの音声を掃除する。「タブを閉じたら消す」はクラッシュや
 // 強制リロードでは走らないので、消し忘れを防ぐ本体はこちら
 sweepStoredAudio();

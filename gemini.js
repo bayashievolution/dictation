@@ -274,6 +274,17 @@ function aiEngineName(feature) {
   return aiEngineForFeature(feature) === 'claude' ? 'Claude' : 'Gemini';
 }
 
+/**
+ * サインインのしかた (v0.24.21)
+ * インストール式ならインストーラーがサインインまで進める。ブラウザ版は login.bat
+ */
+function claudeLoginHowTo() {
+  const native = typeof claudeNativeAvailable === 'function' && claudeNativeAvailable();
+  return native
+    ? 'Claude 連携のインストーラー（dictation-claude-setup.bat）をもう一度ダブルクリックしてサインインし、'
+    : 'dictation フォルダの login.bat をダブルクリックしてサインインし、';
+}
+
 async function _tryClaudeBridge(body, feature) {
   if (typeof claudeBridgeShouldUse !== 'function') return null;   // 読み込まれていない
   if (!claudeBridgeShouldUse({ enabled: claudeBridgeIsEnabled(), feature, body })) return null;
@@ -290,7 +301,7 @@ async function _tryClaudeBridge(body, feature) {
       window.statusNotice('error', claudeBridgeFallbackMessage(broken), {
         detail: `Claude Code を使えない状態が続いています\n\n${broken}\n\n`
           + '── 直し方 ──\n'
-          + 'dictation フォルダの login.bat をダブルクリックしてサインインし、\n'
+          + claudeLoginHowTo() + '\n'
           + '設定の「接続を確認」を押してください。',
       });
     }
@@ -319,9 +330,9 @@ async function _tryClaudeBridge(body, feature) {
   // ログイン切れは放っておいて治らないので、詳細に直し方を添える (v0.24.8)
   const fix = /authenticat|OAuth|session expired|unauthorized|401/i.test(String(r.error || ''))
     ? '\n\n── 直し方 ──\n'
-      + 'dictation フォルダの login.bat をダブルクリックして、ブラウザでサインインしてください。\n'
+      + claudeLoginHowTo() + '\n'
       + '（ターミナルなら claude auth login）\n'
-      + 'そのあと「接続を確認」を押すと戸っているか分かります。'
+      + 'そのあと「接続を確認」を押すと直っているか分かります。'
     : '';
   const detail = `Claude Code に回せませんでした（${feature}）\n\n${r.error}${fix}`;
   if (window.statusNotice) window.statusNotice('error', msg, { detail });

@@ -31,8 +31,18 @@
  * 気づかないまま Gemini のトークンを使い続けることになる。
  */
 
-/** 既定の中継先。serve.js が 127.0.0.1:8765 で待っている */
+/** 既定の中継先。serve.js が 127.0.0.1:8765 で待っている（ブラウザ版・start.bat の人） */
 const CLAUDE_BRIDGE_URL = 'http://127.0.0.1:8765/api/claude';
+
+/**
+ * インストール式の口（ネイティブメッセージング）の登録名 (v0.24.21)
+ * claude-installer.js の DICTATION_HELPER_NAME と同じ。字幕オーバーレイを将来まとめる前提で
+ * Claude 専用の名前にしていない
+ */
+const CLAUDE_NATIVE_HOST = 'com.dictation.helper';
+
+/** インストールされていないときの文言。fallback / health の両方で使う */
+const CLAUDE_NOT_INSTALLED = 'Claude 連携がインストールされていません（設定の「インストーラーを保存」から入れてください）';
 
 /** Claude に回してよい処理。ここに無いものは必ず Gemini */
 const CLAUDE_BRIDGE_FEATURES = new Set([
@@ -161,6 +171,52 @@ function claudeBridgeUnfence(text) {
   return m[1].trim();
 }
 
+/* ───────── インストール式の口（v0.24.21） ───────── */
+
+/** 拡張として開いていて、ネイティブメッセージングが使えるか（ブラウザ版では false） */
+function claudeNativeAvailable() {
+  return typeof chrome !== 'undefined' && !!chrome.runtime
+    && typeof chrome.runtime.sendNativeMessage === 'function' && !!chrome.runtime.id;
+}
+
+/**
+ * ブラウザが返すエラーを分ける (v0.24.21)
+ * 文言は Chromium のもの（native_message_process_host.cc）。
+ */
+function claudeNativeErrorKind(message) {
+  const m = String(message || '');
+  if (/not found/i.test(m)) return 'not-installed';     // Specified native messaging host not found.
+  if (/forbidden/i.test(m)) return 'other-extension';   // Access to the specified native messaging host is forbidden.
+  return 'broken';                                       // Native host has exited. / Error when communicating ...
+}
+
+function claudeNativeErrorText(kind, raw) {
+  if (kind === 'not-installed') return CLAUDE_NOT_INSTALLED;
+  if (kind === 'other-extension') {
+    return 'Claude 連携が別の場所の拡張用に入っています（設定の「インストーラーを保存」から入れ直してください）';
+  }
+  return 'Claude 連携の補助プログラムが動きませんでした（Node.js が消えた等。入れ直すと直ることがあります）: ' + String(raw || '');
+}
+
+/** 1通送って1通受け取る。**例外は投げない** */
+function claudeNativeSend(msg) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendNativeMessage(CLAUDE_NATIVE_HOST, msg, (reply) => {
+        const le = chrome.runtime.lastError;
+        if (le) {
+          const kind = claudeNativeErrorKind(le.message);
+          resolve({ ok: false, kind, error: claudeNativeErrorText(kind, le.message) });
+          return;
+        }
+        resolve(reply && typeof reply === 'object' ? reply : { ok: false, kind: 'broken', error: '返事が空でした' });
+      });
+    } catch (e) {
+      resolve({ ok: false, kind: 'broken', error: claudeNativeErrorText('broken', e && e.message) });
+    }
+  });
+}
+
 /* ───────── 中継を叩く ───────── */
 
 /**
@@ -169,6 +225,23 @@ function claudeBridgeUnfence(text) {
  */
 async function claudeBridgeRun(prompt, { url = CLAUDE_BRIDGE_URL, signal } = {}) {
   if (!prompt || !prompt.trim()) return { ok: false, error: 'プロンプトが空です' };
+
+  /* v0.24.21: 拡張ならインストール式の口を先に使う。
+   * 入っていないときだけ、これまでの中継（start.bat）を試す。start.bat で使っていた人が
+   * インストールするまでの間も動くように。どちらも無ければ「インストールされていません」と言う
+   * （「start.bat を起動して」と言うと、黒い窓に戻れと言っていることになる） */
+  if (claudeNativeAvailable()) {
+    const r = await claudeNativeSend({ type: 'run', prompt });
+    if (r.ok) return { ok: true, text: claudeBridgeUnfence(r.text), seconds: r.seconds, via: 'native' };
+    if (r.kind !== 'not-installed') return { ok: false, error: r.error };
+    const viaHttp = await claudeBridgeRunHttp(prompt, { url, signal });
+    if (viaHttp.ok || !viaHttp.unreachable) return viaHttp;
+    return { ok: false, error: CLAUDE_NOT_INSTALLED };
+  }
+  return claudeBridgeRunHttp(prompt, { url, signal });
+}
+
+async function claudeBridgeRunHttp(prompt, { url = CLAUDE_BRIDGE_URL, signal } = {}) {
   let res;
   try {
     res = await fetch(url, {
@@ -181,6 +254,7 @@ async function claudeBridgeRun(prompt, { url = CLAUDE_BRIDGE_URL, signal } = {})
     // サーバーが動いていない、が圧倒的に多い。そう言う
     return {
       ok: false,
+      unreachable: true,
       error: 'Claude Code の中継に繋がりません（start.bat でサーバーを起動してください）',
     };
   }
@@ -189,7 +263,7 @@ async function claudeBridgeRun(prompt, { url = CLAUDE_BRIDGE_URL, signal } = {})
   if (!res.ok || !data || !data.ok) {
     return { ok: false, error: (data && data.error) || `中継がエラーを返しました (${res.status})` };
   }
-  return { ok: true, text: claudeBridgeUnfence(data.text), seconds: data.seconds };
+  return { ok: true, text: claudeBridgeUnfence(data.text), seconds: data.seconds, via: 'http' };
 }
 
 /** 中継が生きているか。claude は起動しないので速い */
@@ -214,6 +288,15 @@ async function claudeBridgeRun(prompt, { url = CLAUDE_BRIDGE_URL, signal } = {})
 function claudeBridgeFallbackMessage(error) {
   const e = String(error == null ? '' : error);
   if (!e.trim()) return 'Claude で処理できなかったので Gemini で処理しました';
+  if (e.includes('インストールされていません')) {
+    return 'Claude 連携が未インストールなので Gemini で処理';
+  }
+  if (e.includes('別の場所の拡張用')) {
+    return 'Claude 連携を入れ直す必要があるので Gemini で処理';
+  }
+  if (e.includes('補助プログラムが動きませんでした')) {
+    return 'Claude 連携の補助プログラムが動かないので Gemini で処理';
+  }
   if (e.includes('繋がりません')) {
     return '中継に繋がらないので Gemini で処理（start.bat を起動）';
   }
@@ -253,20 +336,24 @@ function claudeBridgeFallbackMessage(error) {
 function claudeBridgeHealthMessage(health) {
   const h = health || {};
   if (!h.ok) {
+    // v0.24.21: インストール式の口が返した理由があればそれを出す
     return { ok: false, needsLogin: false, unknown: false,
-             text: '中継に繋がりません。start.bat でサーバーを起動してください' };
+             text: h.error || '中継に繋がりません。start.bat でサーバーを起動してください' };
   }
   const a = h.auth || {};
   if (a.ok && a.loggedIn === true) {
     // サーバーの版も出す (v0.24.11)。拡張のカードの数字と見比べれば、
     // 「ファイルは新しいがサーバーが古い」をその場で見分けられる
-    const parts = [h.invocation, h.version ? 'サーバー ' + h.version : ''].filter(Boolean);
+    const parts = [h.invocation,
+      h.version ? (h.via === 'native' ? '連携 ' : 'サーバー ') + h.version : ''].filter(Boolean);
     return { ok: true, needsLogin: false, unknown: false,
              text: `使えます（ログイン済み${parts.length ? ' / ' + parts.join(' / ') : ''}）` };
   }
   if (a.ok && a.loggedIn === false) {
     return { ok: false, needsLogin: true, unknown: false,
-             text: 'Claude にログインしていません。login.bat でサインインしてください' };
+             text: h.via === 'native'
+               ? 'Claude にログインしていません。インストーラーをもう一度ダブルクリックするとサインインできます'
+               : 'Claude にログインしていません。login.bat でサインインしてください' };
   }
   // 応答に auth が無い = 古い serve.js が動いたまま (v0.24.10)
   //
@@ -283,6 +370,17 @@ function claudeBridgeHealthMessage(health) {
 }
 
 async function claudeBridgeHealth({ url = CLAUDE_BRIDGE_URL } = {}) {
+  // v0.24.21: 拡張ならインストール式の口を先に見る。入っていなければ start.bat の中継を見る
+  if (claudeNativeAvailable()) {
+    const r = await claudeNativeSend({ type: 'health' });
+    if (r.ok || r.kind !== 'not-installed') return r;
+    const viaHttp = await claudeBridgeHealthHttp({ url });
+    return viaHttp.ok ? viaHttp : r;
+  }
+  return claudeBridgeHealthHttp({ url });
+}
+
+async function claudeBridgeHealthHttp({ url = CLAUDE_BRIDGE_URL } = {}) {
   try {
     const res = await fetch(url + '/health');
     if (!res.ok) return { ok: false };

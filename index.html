@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.20" />
+  <link rel="stylesheet" href="style.css?v=0.24.21" />
 </head>
 <body>
   <div id="app">
@@ -367,7 +367,8 @@
             <small class="field-hint">
               Claude Code の<strong>ターミナル版</strong>が入っていれば、そちらで処理します。
               Gemini の API トークンではなく<strong>お使いの Claude のサブスクで動きます</strong>。
-              <code>start.bat</code> でサーバーを起動しておく必要があります。
+              <span data-claude-native-only>最初に一度だけ、下の「インストーラーを保存」から連携を入れてください。</span>
+              <span data-claude-web-only><code>start.bat</code> でサーバーを起動しておく必要があります。</span>
             </small>
           </div>
           <div class="field">
@@ -384,16 +385,31 @@
               <button type="button" id="btn-claude-bridge-test" class="btn btn-ghost btn-sm">接続を確認</button>
             </div>
           </div>
+          <!-- v0.24.21: インストール式（拡張のときだけ出す） -->
+          <div class="field" data-claude-native-only>
+            <div class="audio-usage-row">
+              <span class="field-hint">連携を入れる（一度だけ）</span>
+              <button type="button" id="btn-claude-install" class="btn btn-ghost btn-sm">インストーラーを保存</button>
+            </div>
+            <small class="field-hint">
+              保存された <code>dictation-claude-setup.bat</code> を<strong>ダブルクリック</strong>するだけです。
+              黒い窓を開いたままにしておく必要はありません（要約などを頼んだときだけ、裏で Claude を呼びます）。
+              ログインしていなければ、そのままサインインまで進めます。
+              Windows 用・管理者の権限は不要・<strong>Node.js が入っていることが前提</strong>です。
+              ダウンロード時にブラウザが「危険なファイル」と警告することがあります（.bat なので）。
+              外すときは <code>%LOCALAPPDATA%\dictation-helper\uninstall.bat</code> を実行してください。
+            </small>
+          </div>
           <!-- v0.24.12: 中継に必要なファイルをここから出せるようにする -->
-          <div class="field">
+          <div class="field" data-claude-web-only>
             <div class="audio-usage-row">
               <span class="field-hint">中継用のファイルが手元に無いとき</span>
               <button type="button" id="btn-save-bridge-files" class="btn btn-ghost btn-sm">中継用ファイルを保存</button>
             </div>
             <small class="field-hint">
-              <strong>拡張からパソコンのプログラムを起動することはできません</strong>（Chrome の制限）。
+              <strong>ブラウザ版（localhost で開いたとき）からは、パソコンのプログラムを起動できません</strong>（ブラウザの制限）。
               そのため、中継役の <code>serve.js</code> をパソコンで動かしてもらう必要があります。
-              このボタンで <code>serve.js</code> ・<code>start.bat</code> ・<code>login.bat</code> の3つを保存し、
+              このボタンで <code>serve.js</code> ・<code>claude-runner.js</code> ・<code>start.bat</code> ・<code>login.bat</code> の4つを保存し、
               <strong>同じフォルダに置いて</strong> <code>start.bat</code> をダブルクリックしてください。
               （Node.js が入っていることが前提です）
             </small>
@@ -964,14 +980,15 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.20"></script>
-  <script src="gemini.js?v=0.24.20"></script>
-  <script src="notion.js?v=0.24.20"></script>
-  <script src="audio-store.js?v=0.24.20"></script>
-  <script src="claude-bridge.js?v=0.24.20"></script>
-  <script src="image-store.js?v=0.24.20"></script>
-  <script src="gemini-files.js?v=0.24.20"></script>
-  <script src="term-dicts.js?v=0.24.20"></script>
-  <script src="app.js?v=0.24.20"></script>
+  <script src="icons.js?v=0.24.21"></script>
+  <script src="gemini.js?v=0.24.21"></script>
+  <script src="notion.js?v=0.24.21"></script>
+  <script src="audio-store.js?v=0.24.21"></script>
+  <script src="claude-bridge.js?v=0.24.21"></script>
+  <script src="claude-installer.js?v=0.24.21"></script>
+  <script src="image-store.js?v=0.24.21"></script>
+  <script src="gemini-files.js?v=0.24.21"></script>
+  <script src="term-dicts.js?v=0.24.21"></script>
+  <script src="app.js?v=0.24.21"></script>
 </body>
 </html>

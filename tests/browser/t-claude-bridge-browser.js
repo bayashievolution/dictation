@@ -265,7 +265,8 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
     await page.waitForTimeout(250);
     await page.evaluate(() => { document.getElementById('btn-save-bridge-files').click(); });
     await page.waitForTimeout(3000);
-    eq('3つとも保存される', got.sort(), ['login.bat', 'serve.js', 'start.bat']);
+    // v0.24.21: serve.js は claude-runner.js を読むので4つ（無いと保存した serve.js が起動しない）
+    eq('4つとも保存される', got.sort(), ['claude-runner.js', 'login.bat', 'serve.js', 'start.bat']);
     eq('同じフォルダに置くことを言う',
        (await status(page)).includes('同じフォルダ'), true);
     eq('記号がそのまま出ていない', (await status(page)).includes('**'), false);
