@@ -1037,6 +1037,48 @@ async function refineMemoSelectionWithGemini({ apiKey, text }) {
  * @param {string[]} [args.knownTerms] - すでに確定している語（やっさんが書いたもの）
  * @returns {Promise<{terms:string[], topicPath:string[], flow:string}>}
  */
+/**
+ * 文脈の自動抽出の返事を読む (v0.24.23)
+ *
+ * 実機ログ（2026-11-02）で4回「JSON として読めませんでした」になり、その回は語0件だった。
+ * 返事を見ると (1) 指定と違って `[ {...} ]` と配列で包み (2) 改行とインデントで膨らませ
+ * (3) 20字を超える長い句を入れて、出力の上限で**途中で切れていた**。
+ * 切れていても、書き終わっている語は使えるので拾う。
+ * @returns {{ok:boolean, out?:object, salvaged?:boolean}}
+ */
+function parseContextJson(raw) {
+  const text = String(raw || '').trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+  const unwrap = (v) => (Array.isArray(v) ? v.find((x) => x && typeof x === 'object' && !Array.isArray(x)) : v);
+  try {
+    const v = unwrap(JSON.parse(text));
+    if (v && typeof v === 'object') return { ok: true, out: v };
+  } catch (e) { /* 下で拾う */ }
+
+  // 途中で切れている。キーごとに、閉じている文字列だけを集める
+  const strings = (key) => {
+    const at = text.indexOf(`"${key}"`);
+    if (at < 0) return null;
+    const open = text.indexOf('[', at);
+    if (open < 0) return null;
+    const close = text.indexOf(']', open);
+    const seg = text.slice(open + 1, close < 0 ? text.length : close);
+    const out = [];
+    const re = /"((?:[^"\\]|\\.)*)"/g;
+    let m;
+    while ((m = re.exec(seg))) {
+      try { out.push(JSON.parse(`"${m[1]}"`)); } catch (e) { /* 壊れた1語は捨てる */ }
+    }
+    return out;
+  };
+  const terms = strings('terms');
+  const topicPath = strings('topicPath');
+  if (!terms && !topicPath) return { ok: false };
+  const fm = text.match(/"flow"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  let flow = '';
+  if (fm) { try { flow = JSON.parse(`"${fm[1]}"`); } catch (e) { /* 空のまま */ } }
+  return { ok: true, salvaged: true, out: { terms: terms || [], topicPath: topicPath || [], flow } };
+}
+
 async function extractContextWithGemini({ apiKey, transcript, memoOutline, knownTerms }) {
   if (!apiKey) throw new Error('Gemini API キーが設定されていません');
   const body_text = (transcript || '').trim();
@@ -1045,13 +1087,14 @@ async function extractContextWithGemini({ apiKey, transcript, memoOutline, known
   const instruction = [
     'あなたは会議・講義の記録から「用語」と「議題の位置」を抜き出す担当です。',
     '出力は JSON のみ。前置き・説明・コードフェンスは付けない。',
+    '**1行で書く（改行やインデントを入れない）。全体を [ ] で包まない。**',
     '',
     '形式:',
     '{"terms": ["語1","語2"], "topicPath": ["大項目","中項目","小項目"], "flow": "一文"}',
     '',
     'terms のルール:',
     '- この分野の専門用語・固有名詞・人名・製品名だけ。最大20語',
-    '- 文や説明を入れない。語だけ（各20字以内）',
+    '- 文や説明を入れない。語だけ（各20字以内。研究題目のような長い句は入れない）',
     '- **音声認識の誤変換と思われるものは、正しい表記に直して入れる**',
     '  （例「機関」と書かれていても、文脈から「期間」が正しいならそう直す）',
     '- 一般語（会議、今日、みなさん、それ等）は入れない',
@@ -1080,19 +1123,23 @@ async function extractContextWithGemini({ apiKey, transcript, memoOutline, known
     contents: [{ role: 'user', parts: [{ text: parts.join('\n') }] }],
     generationConfig: {
       temperature: 0.1,          // 抽出なので揺れは要らない
-      maxOutputTokens: 1024,
+      // v0.24.23: 1024 では途中で切れていた（実機 2026-11-02 に4回）。2048 にしたうえで、
+      // 切れても読めるところまで読む（parseContextJson）
+      maxOutputTokens: 2048,
       responseMimeType: 'application/json',
     },
   };
 
   const raw = await _callGemini(body, apiKey, { maxRetries: 1, skipSanitize: true });
-  let out;
-  try {
-    out = JSON.parse((raw || '').trim());
-  } catch (e) {
+  const parsed = parseContextJson(raw);
+  if (!parsed.ok) {
     console.warn('[context] JSON として読めませんでした:', (raw || '').slice(0, 200));
     return { terms: [], topicPath: [], flow: '' };
   }
+  if (parsed.salvaged && window.diagLog) {
+    window.diagLog.info(`文脈: 途中で切れた返事から読めた分だけ使います（語${(parsed.out.terms || []).length}件）`);
+  }
+  const out = parsed.out;
 
   // モデルの出力はそのまま信じない。形と長さをこちらで詰める
   const terms = Array.isArray(out.terms) ? out.terms : [];
