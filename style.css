@@ -1672,6 +1672,20 @@ mark.search-hit.current {
   pointer-events: none;
 }
 
+/* リアルタイム要約の目次 (v0.24.22)。押すとその節へ飛ぶ */
+#summary .live-summary-toc {
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.5em 0.8em 0.5em 2em;
+}
+#summary .live-summary-toc li[data-ls-jump] {
+  cursor: pointer;
+  color: var(--accent);
+}
+#summary .live-summary-toc li[data-ls-jump]:hover {
+  text-decoration: underline;
+}
+
 /* ───────── Chat (NotebookLM風) ───────── */
 #pane-chat .pane-body.chat-body {
   display: flex;

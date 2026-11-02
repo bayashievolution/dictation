@@ -479,7 +479,8 @@ async function notionCreateNote({
  *   Notion 側の反映が追いつかず一瞬 404 を返すことがある。
  *   既存ページでの 404 は本当に「見つからない」なので、そちらは再試行しない
  */
-async function notionAppendToggles({ token, pageId, toggles, onProgress, retryNotFound = false }) {
+async function notionAppendToggles({ token, pageId, toggles, onProgress, retryNotFound = false,
+  onLog = (m) => { if (typeof window !== 'undefined' && window.diagLog) window.diagLog.info(m); } }) {
   const total = toggles.length;
   let done = 0;
   for (const t of toggles) {
@@ -498,10 +499,91 @@ async function notionAppendToggles({ token, pageId, toggles, onProgress, retryNo
           token, method: 'PATCH', retryNotFound: true, body: { children: chunk },
         });
       }
+      // v0.24.22: 目次付きの要約なら、目次の項目から本文の見出しへリンクを張る。
+      // **失敗しても保存は失敗にしない**（中身はもう送れている。リンクはおまけ）
+      if (t.liveToc) {
+        try {
+          const n = await notionLinkLiveSummaryToc({ token, pageId, toggleId });
+          if (onLog) onLog(`Notion: 目次に${n}件のリンクを付けました`);
+        } catch (e) {
+          if (onLog) onLog('Notion: 目次のリンクを付けられませんでした（中身は保存済み）: ' + (e.message || e));
+        }
+      }
     }
     done += 1;
     if (onProgress) onProgress(done, total);
   }
+}
+
+/* ───────── 目次のリンク (v0.24.22) ─────────
+ *
+ * やっさん「目次と要約はリンクで飛ばすことはできる？ notion に送った時にリンクが
+ * 残せるなら付けてほしい。それが難しいなら付けなくてもいいよ」
+ *
+ * Notion のブロックへのリンクは `https://www.notion.so/<ページID>#<ブロックID>`（ハイフン無し）。
+ * 見出しのブロック ID は**送ったあとでないと分からない**ので、送り終えてから
+ * トグルの中身を読み直し、目次の各項目の文字にリンクを付け直す（2段階）。
+ *
+ * Notion の「目次」ブロック（table_of_contents）を使う案は採らなかった。あれはページ全体の
+ * 見出しを拾うので、既存ノートに追記したときに前の回の見出しまで混ざる。
+ *
+ * **実物の Notion では確かめられていない**（開発環境から api.notion.com に届かない）。
+ */
+
+/** ハイフン無しの ID */
+function notionPlainId(id) { return String(id || '').replace(/-/g, ''); }
+
+function notionBlockPlainText(b) {
+  const body = b && b[b.type];
+  return ((body && body.rich_text) || []).map((r) => (r.plain_text != null ? r.plain_text : (r.text && r.text.content) || '')).join('');
+}
+
+/**
+ * トグルの中身（GET /blocks/{id}/children の results）から、張るリンクの一覧を作る（純関数）
+ *
+ * 「目次」という見出しのすぐ後に続く番号付きリストの i 番目 → その後の i 番目の見出し。
+ * @returns {Array<{blockId:string, type:string, rich_text:Array}>}
+ */
+function notionTocLinkPlan(children, pageId) {
+  const list = children || [];
+  const isHeading = (b) => /^heading_[123]$/.test(b && b.type);
+  const tocAt = list.findIndex((b) => isHeading(b) && notionBlockPlainText(b).trim() === '目次');
+  if (tocAt < 0) return [];
+  const items = [];
+  let i = tocAt + 1;
+  for (; i < list.length && list[i].type === 'numbered_list_item'; i++) items.push(list[i]);
+  const sections = list.slice(i).filter(isHeading);
+  const plan = [];
+  items.forEach((item, k) => {
+    const sec = sections[k];
+    if (!sec || !sec.id || !item.id) return;
+    const text = notionBlockPlainText(item);
+    const url = `https://www.notion.so/${notionPlainId(pageId)}#${notionPlainId(sec.id)}`;
+    plan.push({
+      blockId: item.id,
+      type: item.type,
+      rich_text: notionRichText(text).map((r) => ({ ...r, text: { ...r.text, link: { url } } })),
+    });
+  });
+  return plan;
+}
+
+async function notionLinkLiveSummaryToc({ token, pageId, toggleId }) {
+  const children = [];
+  let cursor = null;
+  do {
+    const q = `?page_size=100${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const res = await notionRequest(`/blocks/${toggleId}/children${q}`, { token, retryNotFound: true });
+    children.push(...((res && res.results) || []));
+    cursor = res && res.has_more ? res.next_cursor : null;
+  } while (cursor);
+  const plan = notionTocLinkPlan(children, pageId);
+  for (const p of plan) {
+    await notionRequest(`/blocks/${p.blockId}`, {
+      token, method: 'PATCH', body: { [p.type]: { rich_text: p.rich_text } },
+    });
+  }
+  return plan.length;
 }
 
 /**

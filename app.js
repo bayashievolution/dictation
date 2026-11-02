@@ -113,6 +113,9 @@ const DEFAULT_SETTINGS = {
   autoStopSec: 120,
   autoStopEnabled: true,
   autoSummarize: true,
+  // v0.24.22: リアルタイム要約（目次付き・Claude 連携のみ）。間隔は分
+  liveSummary: false,
+  liveSummaryMin: 10,
   summaryDetail: 'medium',
   appZoom: 100,
   paneOrder: ['pane-transcript', 'pane-memo', 'pane-summary', 'pane-chat'],
@@ -474,6 +477,9 @@ const els = {
   btnClaudeBridgeTest: document.getElementById('btn-claude-bridge-test'),     // v0.24.0
   btnSaveBridgeFiles: document.getElementById('btn-save-bridge-files'),      // v0.24.12
   btnClaudeInstall: document.getElementById('btn-claude-install'),           // v0.24.21
+  inputLiveSummary: document.getElementById('input-live-summary'),           // v0.24.22
+  inputLiveSummaryMin: document.getElementById('input-live-summary-min'),    // v0.24.22
+  liveSummaryNote: document.getElementById('live-summary-note'),             // v0.24.22
   audioUsageText: document.getElementById('audio-usage-text'),
   btnClearAudio: document.getElementById('btn-clear-audio'),
   inputGeminiLiveDisplay: document.getElementById('input-gemini-live-display'),
@@ -1818,6 +1824,7 @@ async function startRecording() {
     state.recognition.start();
     setRecordingUI(true);
     startContextExtractTimer();   // v0.16.1
+  startLiveSummaryTimer();      // v0.24.22
     resetLongSilenceTimer();
     // v0.13.14: Web Speech 強制 commit タイマーを起動（commitSec=0 なら何もしない）
     restartWebSpeechCommitTimer();
@@ -1861,6 +1868,7 @@ function stopRecording() {
   // v0.16.1: 文脈の自動抽出を止め、最後の内容で1回だけ更新しておく
   // （次にこのタブで録音を再開したとき、いきなり文脈が効く）
   stopContextExtractTimer();
+  stopLiveSummaryTimer();       // v0.24.22
   refreshAutoContext({ force: true });
   clearAllTimers();
   flushPendingToGemini().finally(async () => {
@@ -1887,11 +1895,153 @@ function stopRecording() {
     state.recordingSessionId = null;
     persistSessions();
     renderTabs(); // 録音中の赤線消去
-    if (state.settings.autoSummarize && state.settings.aiEnabled && state.settings.apiKey) {
+    // v0.24.22: リアルタイム要約がオンなら、普通の要約は作らず最終版に更新する
+    // （普通の要約で上書きすると、10分ごとに積み上げた目次が消える）
+    if (liveSummaryActive()) {
+      await runLiveSummary({ sessionId: recSessionId, final: true });
+      if (state.settings.aiEnabled && state.settings.apiKey) await autoGenerateTitle({ sessionId: recSessionId });
+    } else if (state.settings.autoSummarize && state.settings.aiEnabled && state.settings.apiKey) {
       await generateSummary({ silent: true, sessionId: recSessionId });
       await autoGenerateTitle({ sessionId: recSessionId });
     }
   });
+}
+
+/* ───────── リアルタイム要約 (v0.24.22) ─────────
+ *
+ * 目次付きで、録音中に一定間隔で要約を更新する。Claude 連携のみ。
+ * 文面の組み立てと整形は live-summary.js（純関数）。ここは「いつ・どのタブに」を受け持つ。
+ */
+
+/** いま使える状態か。設定がオンで、Claude 連携がオンで、ログイン切れ等で止まっていない */
+function liveSummaryActive() {
+  if (!state.settings.liveSummary) return false;
+  if (typeof claudeBridgeIsEnabled !== 'function' || !claudeBridgeIsEnabled()) return false;
+  if (typeof claudeBridgeBrokenReason === 'function' && claudeBridgeBrokenReason()) return false;
+  return true;
+}
+
+function startLiveSummaryTimer() {
+  stopLiveSummaryTimer();
+  state.liveSummaryLastAt = Date.now();   // 最初の更新も間隔ぶん待つ（始めた直後は中身が無い）
+  state.liveSummaryLastLen = 0;
+  // 20秒ごとに「間隔が来たか」だけ見る。間隔そのもので setInterval しないのは、
+  // 録音中に設定で分数を変えたときに、その場で効かせるため
+  state.liveSummaryTimer = setInterval(liveSummaryTick, 20 * 1000);
+}
+
+function stopLiveSummaryTimer() {
+  if (state.liveSummaryTimer) { clearInterval(state.liveSummaryTimer); state.liveSummaryTimer = null; }
+}
+
+function liveSummaryTick() {
+  if (!state.isRecording) { stopLiveSummaryTimer(); return; }
+  if (!liveSummaryActive() || state.liveSummaryBusy) return;
+  const ms = clampLiveSummaryMinutes(state.settings.liveSummaryMin) * 60 * 1000;
+  if (Date.now() - (state.liveSummaryLastAt || 0) < ms) return;
+  runLiveSummary({ sessionId: state.recordingSessionId || state.activeId });
+}
+
+/** そのタブの文字起こし・メモ・いまの要約（プレーンテキスト）を集める */
+function liveSummarySources(session) {
+  const active = session.id === state.activeId;
+  const summaryHtml = active ? els.summary.innerHTML : (session.summary || '');
+  // 前回の要約として使うのは、目次付きの要約のときだけ（普通の要約は形が違う）
+  const isLive = /<h2[^>]*>\s*目次\s*<\/h2>/.test(summaryHtml);
+  return {
+    transcript: active ? getConfirmedText() : htmlToPlain(session.transcript),
+    memo: active ? getMemoText() : htmlToPlain(session.memo),
+    previous: isLive ? (active ? getSummaryText() : htmlToPlain(summaryHtml)) : '',
+  };
+}
+
+/** Markdown → 要約タブに入れる HTML（目次から本文へ飛べるようにする） */
+function renderLiveSummaryHtml(md) {
+  const box = document.createElement('div');
+  box.innerHTML = renderMarkdown(md);
+  linkLiveSummaryToc(box);
+  return box.innerHTML;
+}
+
+/**
+ * 要約を1回更新する
+ * @param {object} o
+ * @param {string} o.sessionId
+ * @param {boolean} [o.final]  録音を止めたあと
+ * @param {boolean} [o.fresh]  前回に縛られず最初から（要約ボタンから）
+ * @param {boolean} [o.manual] 人が押した（失敗したら必ず知らせる）
+ */
+async function runLiveSummary({ sessionId, final = false, fresh = false, manual = false } = {}) {
+  if (state.liveSummaryBusy) return false;
+  let session = state.sessions.find((x) => x.id === sessionId);
+  if (!session) return false;
+  if (session.id === state.activeId) snapshotActiveToSession();
+  const src = liveSummarySources(session);
+  // 前回から増えていなければ回さない（無音が続いているときに同じものを作り直さない）。
+  // 最後と「作り直す」は、増えていなくても回す
+  if (!src.transcript || src.transcript.length < 200) {
+    if (manual) setStatus('idle', '文字起こしがまだ短いので、要約できません');
+    return false;
+  }
+  if (!final && !fresh && src.transcript.length - (state.liveSummaryLastLen || 0) < 200) {
+    state.liveSummaryLastAt = Date.now();
+    return false;
+  }
+
+  state.liveSummaryBusy = true;
+  state.liveSummaryLastAt = Date.now();
+  const wasActive = session.id === state.activeId;
+  // 録音中の定期更新では暗くしない（.generating は押せなくする。読んでいる途中で
+  // 30秒ほど読めなくなるのは困る）。人が押したときと、止めたあとの最終版だけ
+  const dim = wasActive && (manual || fresh || final);
+  if (dim) els.summary.classList.add('generating');
+  diagLog.info(`リアルタイム要約を更新します（${fresh ? '最初から' : final ? '最終版' : '途中'} / 文字起こし${src.transcript.length}字）`);
+  if (!state.isRecording || manual) setStatus('listening', fresh ? '目次付きで要約し直しています（Claude）' : 'リアルタイム要約を更新中（Claude）');
+  try {
+    const prompt = buildLiveSummaryPrompt({
+      transcript: src.transcript, previous: src.previous, memo: src.memo,
+      title: session.title, final, fresh,
+    });
+    const r = await claudeBridgeRun(prompt);
+    if (!r.ok) throw new Error(r.error || 'Claude で処理できませんでした');
+    const norm = normalizeLiveSummary(r.text);
+    if (!norm.ok) diagLog.info('リアルタイム要約: 目次が見つからない形で返ってきました（そのまま表示します）');
+    session = state.sessions.find((x) => x.id === sessionId);
+    if (!session) return false;
+    const html = renderLiveSummaryHtml(norm.md);
+    if (session.id === state.activeId && (getSummaryText() || '').trim()) {
+      pushUndo(fresh ? '目次付き要約を作り直し' : 'リアルタイム要約を更新', 'pane-summary');
+    }
+    session.summary = html;
+    session.updatedAt = Date.now();
+    if (session.id === state.activeId) {
+      els.summary.innerHTML = html;
+      if (els.summaryEmpty) els.summaryEmpty.hidden = true;
+      syncPaneBaselineFromDOM();
+      updateActionButtons();
+    }
+    persistSessions();
+    state.liveSummaryLastLen = src.transcript.length;
+    diagLog.info(`リアルタイム要約を更新しました（${r.seconds != null ? r.seconds + '秒' : '?'}）`);
+    statusNotice('listening', fresh ? '目次付きで要約し直しました（Claude）' : 'リアルタイム要約を更新しました（Claude）', { ms: 2500 });
+    return true;
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    diagLog.info('リアルタイム要約を更新できませんでした: ' + msg);
+    // ログイン切れなどは覚えて、10分ごとに同じ失敗を繰り返さない（要約・質問と同じ扱い）
+    if (typeof claudeBridgeIsFatal === 'function' && claudeBridgeIsFatal(msg)) claudeBridgeMarkBroken(msg);
+    // **Gemini には戻さない**。戻すと 10分ごとに黙って Gemini のトークンを使う
+    statusNotice('error', 'リアルタイム要約を更新できませんでした（Gemini には切り替えていません）', {
+      detail: `${msg}\n\n${state.isRecording ? '次の回にもう一度試します。' : ''}`
+        + '「接続を確認」で Claude 連携の状態を見られます。',
+    });
+    return false;
+  } finally {
+    state.liveSummaryBusy = false;
+    if (dim) els.summary.classList.remove('generating');
+    // restoreStatus はここで呼ばない。成功も失敗も statusNotice で知らせていて、
+    // 時間が来たら statusNotice が戻す。ここで戻すと**失敗の知らせが一瞬で消える**（テストで見つけた）
+  }
 }
 
 /* ───────── Gemini Audio recording mode ───────── */
@@ -3106,6 +3256,7 @@ async function startGeminiAudioRecording() {
         : '(固定間隔)'));
   setRecordingUI(true);
   startContextExtractTimer();   // v0.16.1
+  startLiveSummaryTimer();      // v0.24.22
   startLiveDisplay();           // v0.17.0
   setStatus('listening', recordingLabel());
   resetLongSilenceTimer();
@@ -3740,7 +3891,9 @@ function buildNotionToggles(session) {
         blocks.push(...notionBlocksFromText(m.content));
       }
     }
-    if (blocks.length) toggles.push({ label: meta.label, blocks });
+    // v0.24.22: 目次付きの要約なら、送ったあとに目次から見出しへのリンクを張る
+    const liveToc = id === 'pane-summary' && /<h2[^>]*>\s*目次\s*<\/h2>/.test(session.summary || '');
+    if (blocks.length) toggles.push({ label: meta.label, blocks, ...(liveToc ? { liveToc: true } : {}) });
   }
   return toggles;
 }
@@ -3901,6 +4054,20 @@ async function saveClaudeInstaller() {
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+/**
+ * リアルタイム要約は Claude 連携がオンのときだけ選べる (v0.24.22)
+ * オフのときはチェックを外して押せなくし、なぜ押せないかを書く
+ */
+function applyLiveSummaryAvailability() {
+  const box = els.inputLiveSummary;
+  if (!box) return;
+  const claudeOn = !!(els.inputClaudeBridge && els.inputClaudeBridge.checked);
+  box.disabled = !claudeOn;
+  if (els.inputLiveSummaryMin) els.inputLiveSummaryMin.disabled = !claudeOn;
+  if (!claudeOn) box.checked = false;
+  if (els.liveSummaryNote) els.liveSummaryNote.hidden = claudeOn;
 }
 
 /**
@@ -6970,6 +7137,8 @@ function openSettings() {
   els.inputApiKey.value = state.settings.apiKey;
   syncNotionSettingsUi();
   els.inputSilenceSec.value = state.settings.silenceSec;
+  if (els.inputLiveSummary) els.inputLiveSummary.checked = !!state.settings.liveSummary;
+  if (els.inputLiveSummaryMin) els.inputLiveSummaryMin.value = clampLiveSummaryMinutes(state.settings.liveSummaryMin);
   els.inputAiEnabled.checked = state.settings.aiEnabled;
   els.inputAutoStop.checked = state.settings.autoStopEnabled;
   els.inputAutoStopSec.value = state.settings.autoStopSec;
@@ -6991,6 +7160,9 @@ function openSettings() {
   if (els.inputKeepRecording) els.inputKeepRecording.checked = !!state.settings.audioKeepRecording;
   if (els.inputAudioRetention) els.inputAudioRetention.value = state.settings.audioRetention || 'close';
   if (els.inputClaudeBridge) els.inputClaudeBridge.checked = !!state.settings.useClaudeBridge;   // v0.24.0
+  // v0.24.22: Claude 連携のチェックを入れた**あと**で見る。先に見ると、連携オフと読み違えて
+  // リアルタイム要約のチェックを外してしまい、そのまま保存するとオフになる（テストで見つけた）
+  applyLiveSummaryAvailability();
   refreshAudioUsage();
   if (els.inputGeminiLiveDisplay) els.inputGeminiLiveDisplay.checked = state.settings.geminiLiveDisplay !== false;
   if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
@@ -7044,6 +7216,8 @@ function saveSettingsFromForm() {
   state.settings.apiKey = els.inputApiKey.value.trim();
   if (els.inputNotionToken) state.settings.notionToken = els.inputNotionToken.value.trim();
   state.settings.silenceSec = Math.max(1, Math.min(30, Number(els.inputSilenceSec.value) || 3));
+  if (els.inputLiveSummary) state.settings.liveSummary = els.inputLiveSummary.checked && !!(els.inputClaudeBridge && els.inputClaudeBridge.checked);
+  if (els.inputLiveSummaryMin) state.settings.liveSummaryMin = clampLiveSummaryMinutes(els.inputLiveSummaryMin.value);
   state.settings.aiEnabled = els.inputAiEnabled.checked;
   state.settings.autoStopEnabled = els.inputAutoStop.checked;
   state.settings.autoStopSec = Math.max(30, Math.min(600, Number(els.inputAutoStopSec.value) || 120));
@@ -8748,7 +8922,10 @@ if (els.btnSummaryCombo) {
     } else {
       els.btnSummaryCombo.classList.add('firing');
       try {
-        await generateSummary({ silent: false });
+        // v0.24.22: リアルタイム要約がオンなら、目次付きで最初から要約し直す
+        // （やっさん「最後、改めて要約しなおすこともできる」）
+        if (liveSummaryActive()) await runLiveSummary({ sessionId: state.activeId, fresh: true, final: !state.isRecording, manual: true });
+        else await generateSummary({ silent: false });
       } finally {
         els.btnSummaryCombo.classList.remove('firing');
       }
@@ -8828,6 +9005,13 @@ function onEdit() {
 els.confirmed.addEventListener('input', onEdit);
 els.memo.addEventListener('input', onEdit);
 els.summary.addEventListener('input', onEdit);
+// v0.24.22: リアルタイム要約の目次を押したら、その節へ飛ぶ
+els.summary.addEventListener('click', (e) => {
+  const li = e.target.closest && e.target.closest('[data-ls-jump]');
+  if (!li || !els.summary.contains(li)) return;
+  const sec = els.summary.querySelector(`[data-ls-section="${li.dataset.lsJump}"]`);
+  if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 
 /* ───────── Memo Notion風 Markdown エディタ ───────── */
 
@@ -9864,7 +10048,7 @@ if (els.btnClaudeBridgeTest) {
 }
 // v0.24.9: オンにしたその場でログインを見る
 if (els.inputClaudeBridge) {
-  els.inputClaudeBridge.addEventListener('change', () => { verifyClaudeBridgeToggle(); });
+  els.inputClaudeBridge.addEventListener('change', () => { verifyClaudeBridgeToggle(); applyLiveSummaryAvailability(); });
 }
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });
