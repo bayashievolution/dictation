@@ -77,8 +77,8 @@ const fillTranscript = (page, text) => page.evaluate((t) => {
 }, text);
 
 const summary = (page) => page.evaluate(() => ({
-  toc: Array.from(document.querySelectorAll('#summary .live-summary-toc li')).map(li => [li.textContent, li.dataset.lsJump]),
-  secs: Array.from(document.querySelectorAll('#summary h2[data-ls-section]')).map(h => h.textContent),
+  toc: Array.from(document.querySelectorAll('#live-summary .live-summary-toc li')).map(li => [li.textContent, li.dataset.lsJump]),
+  secs: Array.from(document.querySelectorAll('#live-summary h2[data-ls-section]')).map(h => h.textContent),
 }));
 
 (async () => {
@@ -109,7 +109,7 @@ const summary = (page) => page.evaluate(() => ({
       let hit = '';
       const orig = Element.prototype.scrollIntoView;
       Element.prototype.scrollIntoView = function () { hit = this.textContent; };
-      document.querySelector('#summary [data-ls-jump="2"]').click();
+      document.querySelector('#live-summary [data-ls-jump="2"]').click();
       Element.prototype.scrollIntoView = orig;
       return hit;
     });
@@ -120,7 +120,7 @@ const summary = (page) => page.evaluate(() => ({
     await page.waitForTimeout(500);
     eq('同じ中身で作り直さない', seen.claude.filter(p => p.includes('目次付きの要約')).length, 1);
 
-    console.log('■ 録音を止めたら最終版に更新し、普通の要約は作らない');
+    console.log('■ 録音を止めたら最終版に更新する（普通の要約は aiEnabled:false なのでここでは作られない）');
     await fillTranscript(page, '次にルーブリックの話です。四段階で示します。'.repeat(12));
     await page.evaluate(() => stopRecording());
     await page.waitForTimeout(2500);
@@ -129,13 +129,12 @@ const summary = (page) => page.evaluate(() => ({
     eq('最終版には前回の要約を渡す', lives[1].includes('【前回の要約】') && lives[1].includes('評価の観点'), true);
     eq('最終版では（進行中）を付けさせない', lives[1].includes('「（進行中）」は付けない'), true);
     eq('（進行中）が消えた', (await summary(page)).secs, ['1. 評価の観点', '2. ルーブリック']);
-    eq('Gemini の普通の要約は作っていない', seen.gemini, 0);
-    eq('要約タブに Gemini の要約が入っていない', (await page.textContent('#summary')).includes('Gemini の要約'), false);
+    eq('Gemini は使っていない', seen.gemini, 0);
+    eq('要約タブには書いていない（別のタブ）', (await page.textContent('#summary')).trim(), '');
 
-    console.log('■ 要約ボタン → 目次付きで最初から要約し直す');
-    await page.evaluate(() => { switchInnerPane('pane-summary'); });
-    // ボタン本体を押す（ノブ＝自動オン/オフではない側）
-    await page.evaluate(() => els.btnSummaryCombo.click());
+    console.log('■ リアルタイム要約タブの「最初から要約し直す」');
+    await page.evaluate(() => { switchInnerPane('pane-live'); });
+    await page.click('#btn-live-redo');
     await page.waitForTimeout(1500);
     const last = seen.claude.filter(p => p.includes('目次付きの要約')).pop();
     eq('前回に縛られず全体から組み立てる', [last.includes('いまある文字起こし全体を見て'), last.includes('【前回の要約】')], [true, false]);
@@ -147,9 +146,9 @@ const summary = (page) => page.evaluate(() => ({
   {
     const { ctx, page, seen } = await open(browser, { claude: 'fail' });
     await fillTranscript(page, T);
-    const before = await page.innerHTML('#summary');
+    const before = await page.innerHTML('#live-summary');
     const ok = await page.evaluate(() => runLiveSummary({ sessionId: state.activeId }));
-    eq('更新しない', [ok, await page.innerHTML('#summary')], [false, before]);
+    eq('更新しない', [ok, await page.innerHTML('#live-summary')], [false, before]);
     eq('Gemini には頼んでいない', seen.gemini, 0);
     eq('画面に理由を出す', (await page.textContent('#status-indicator')).includes('リアルタイム要約を更新できませんでした'), true);
     await ctx.close();
@@ -182,6 +181,74 @@ const summary = (page) => page.evaluate(() => ({
     await page.evaluate(() => { document.getElementById('input-live-summary-min').value = '7'; saveSettingsFromForm(); });
     await page.waitForTimeout(200);
     eq('保存してもオンのまま、分数は変えた値', await page.evaluate(() => [state.settings.liveSummary, state.settings.liveSummaryMin]), [true, 7]);
+    await ctx.close();
+  }
+
+  // ───── v0.24.25: 要約とは別のタブ ─────
+  // やっさん「リアルタイム要約と要約それぞれの良さがあると思うから、オンにしたらタブを表示して、
+  // オフにしたら非表示にして、それぞれ分けてほしい」
+  const tabs = (page) => page.evaluate(() => Array.from(document.querySelectorAll('.inner-tab')).map(t => t.dataset.pane));
+
+  console.log('■ タブはオンのときだけ出て、オフにすると隠れる');
+  {
+    const { ctx, page } = await open(browser);
+    eq('オン: 要約の隣にリアルタイム要約のタブ', await tabs(page), ['pane-transcript', 'pane-memo', 'pane-summary', 'pane-live', 'pane-chat']);
+    await page.evaluate(() => switchInnerPane('pane-live'));
+    await page.evaluate(() => document.getElementById('btn-settings').click());
+    await page.waitForTimeout(200);
+    await page.evaluate(() => { document.getElementById('input-live-summary').checked = false; saveSettingsFromForm(); });
+    await page.waitForTimeout(400);
+    eq('オフ: タブが隠れる', (await tabs(page)).includes('pane-live'), false);
+    eq('開いていたなら要約タブへ移る', await page.evaluate(() => state.activePane), 'pane-summary');
+    await ctx.close();
+  }
+
+  console.log('■ 止めたら、リアルタイム要約の最終版と普通の要約の両方ができる');
+  {
+    const { ctx, page, seen } = await open(browser, { settings: { aiEnabled: true } });
+    await page.evaluate(() => startRecording());
+    await page.waitForTimeout(300);
+    await fillTranscript(page, T);
+    await page.evaluate(() => stopRecording());
+    await page.waitForTimeout(3000);
+    eq('リアルタイム要約タブに目次', (await summary(page)).toc.length > 0, true);
+    eq('要約タブには普通の要約（Claude 連携オンなので Claude）', (await page.textContent('#summary')).includes('講義のタイトル'), true);
+    eq('目次付きの要約を最終版として頼んだ', seen.claude.some(p => p.includes('目次付きの要約') && p.includes('「（進行中）」は付けない')), true);
+    await ctx.close();
+  }
+
+  console.log('■ 前の版で要約タブに書かれた目次付き要約は、リアルタイム要約タブへ移す');
+  {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
+    // アプリが起動する前に仕込む（起動後に書くと、読み込み直す瞬間にアプリが上書きする）
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem('seeded')) return;
+      sessionStorage.setItem('seeded', '1');
+      localStorage.setItem('dictation:settings', JSON.stringify({ useClaudeBridge: true, liveSummary: true }));
+      localStorage.setItem('dictation:sessions', JSON.stringify([
+        { id: 's1', title: 'a', transcript: '', memo: '', chat: [],
+          // v0.24.22〜24 が実際に保存していた形（renderLiveSummaryHtml の出力そのまま）
+          summary: '<h2 class="live-summary-toc-head">目次</h2>\n<ol class="live-summary-toc">\n<li data-ls-jump="1">a</li>\n</ol>\n<h2 data-ls-section="1">1. a</h2>\n<ul>\n<li>x</li>\n</ul>' },
+        { id: 's2', title: 'b', transcript: '', memo: '', chat: [], summary: '<h2>概要</h2><p>普通の要約</p>' },
+      ]));
+      localStorage.setItem('dictation:activeTab', 's1');
+    });
+    await page.goto(URL);
+    await page.waitForTimeout(800);
+    const r = await page.evaluate(() => state.sessions.map(x => [x.id, !!x.summary, !!x.liveSummary]));
+    eq('印の付いたものだけ移し、普通の要約は触らない', r, [['s1', false, true], ['s2', true, false]]);
+    eq('移したものがタブに出る', await page.evaluate(() => document.querySelector('#live-summary .live-summary-toc') !== null), true);
+    await ctx.close();
+  }
+
+  console.log('■ 隠れているタブは、コピーにも載らない');
+  {
+    const { ctx, page } = await open(browser, { settings: { liveSummary: false } });
+    await page.evaluate(() => { els.liveSummary.innerHTML = '<p>隠れている中身</p>'; els.summary.innerHTML = '<p>要約</p>'; });
+    eq('コピーの文面に入らない', await page.evaluate(() => buildCombinedPlain().includes('隠れている中身')), false);
+    eq('要約は入る', await page.evaluate(() => buildCombinedPlain().includes('要約')), true);
     await ctx.close();
   }
 

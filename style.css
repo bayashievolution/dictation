@@ -1630,7 +1630,7 @@ mark.search-hit.current {
   gap: 4px;
 }
 
-#summary {
+#summary, #live-summary {
   font-family: var(--summary-font);
   font-size: var(--summary-size);
   line-height: 1.75;
@@ -1639,7 +1639,7 @@ mark.search-hit.current {
   color: var(--text);
 }
 
-#summary h2 {
+#summary h2, #live-summary h2 {
   color: var(--heading);
   font-size: 16px;
   font-weight: 600;
@@ -1648,41 +1648,41 @@ mark.search-hit.current {
   border-top: 1px solid var(--border);
 }
 
-#summary h2:first-child {
+#summary h2:first-child, #live-summary h2:first-child {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
 }
 
-#summary p {
+#summary p, #live-summary p {
   margin: 0.35em 0;
 }
 
-#summary ul, #summary ol {
+#summary ul, #summary ol, #live-summary ul, #live-summary ol {
   padding-left: 1.3em;
   margin: 0.35em 0;
 }
 
-#summary li {
+#summary li, #live-summary li {
   margin: 0.15em 0;
 }
 
-#summary.generating {
+#summary.generating, #live-summary.generating {
   opacity: 0.5;
   pointer-events: none;
 }
 
 /* リアルタイム要約の目次 (v0.24.22)。押すとその節へ飛ぶ */
-#summary .live-summary-toc {
+#summary .live-summary-toc, #live-summary .live-summary-toc {
   background: var(--bg-subtle);
   border-radius: var(--radius-sm);
   padding: 0.5em 0.8em 0.5em 2em;
 }
-#summary .live-summary-toc li[data-ls-jump] {
+#summary .live-summary-toc li[data-ls-jump], #live-summary .live-summary-toc li[data-ls-jump] {
   cursor: pointer;
   color: var(--accent);
 }
-#summary .live-summary-toc li[data-ls-jump]:hover {
+#summary .live-summary-toc li[data-ls-jump]:hover, #live-summary .live-summary-toc li[data-ls-jump]:hover {
   text-decoration: underline;
 }
 

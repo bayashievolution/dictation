@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.24" />
+  <link rel="stylesheet" href="style.css?v=0.24.25" />
 </head>
 <body>
   <div id="app">
@@ -235,6 +235,31 @@
         </div>
       </div>
 
+      <!-- v0.24.25: リアルタイム要約は要約と別のタブ。設定でオンのときだけタブが出る -->
+      <div id="pane-live" class="pane">
+        <div class="pane-header">
+          <button id="btn-live-redo" class="pane-btn" title="講義全体を見て、目次付きで最初から要約し直す（Claude）">
+            <span data-icon="sparkles"></span>最初から要約し直す
+          </button>
+          <button class="pane-btn pane-btn-icon" data-pane-undo="pane-live" disabled title="リアルタイム要約の変更を戻す（Ctrl+Z）">
+            <span data-icon="undo"></span>
+          </button>
+          <button class="pane-btn pane-btn-icon" data-pane-redo="pane-live" disabled title="リアルタイム要約の変更をやり直す（Ctrl+Shift+Z）">
+            <span data-icon="redo"></span>
+          </button>
+          <button class="pane-btn pane-btn-icon" data-pane-clear="pane-live" title="リアルタイム要約をクリア">
+            <span data-icon="trash"></span>
+          </button>
+        </div>
+        <div class="pane-body">
+          <div id="live-summary" contenteditable="true" spellcheck="false"></div>
+          <div id="live-summary-empty" class="empty-hint" hidden>
+            録音中、設定した間隔ごとに<strong>目次付きの要約</strong>がここにできます（Claude 連携）。<br>
+            <small>間隔は 設定 → Claude Code 連携 で変えられます</small>
+          </div>
+        </div>
+      </div>
+
       <div id="pane-chat" class="pane">
         <div class="pane-header">
           <button class="pane-btn pane-btn-icon" data-pane-clear="pane-chat" title="チャット履歴をクリア">
@@ -394,12 +419,12 @@
               </div>
             </div>
             <small class="field-hint">
-              オンにすると<strong>要約タブの中身が目次付きの要約に変わり</strong>、録音中はこの間隔で更新されます。
+              オンにすると<strong>「リアルタイム要約」タブが出て</strong>、録音中はこの間隔で目次付きの要約が更新されます。
+              普通の「要約」タブはこれまでどおりで、録音を止めたときは両方が作られます。オフにするとタブは隠れます（中身は消えません）。
               目次の項目を押すとその節へ飛びます（Notion に送ったときも目次にリンクを付けます）。
-              録音を止めると最後まで入れた形に更新され、普通の要約は作りません。
-              要約タブの「要約」ボタンは、<strong>目次付きで最初から要約し直す</strong>動きになります。
+              タブの「最初から要約し直す」で、講義全体を見て目次を組み直せます。
               Claude に回せなかったときは Gemini には切り替えず、その回の更新を見送ります。
-              要約タブを手で直した内容は、次の更新で前回の要約として渡ります。
+              タブを手で直した内容は、次の更新で前回の要約として渡ります。
             </small>
             <small id="live-summary-note" class="field-hint warn-hint">上の「Claude Code に任せる」をオンにすると選べます。</small>
           </label>
@@ -1004,16 +1029,16 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.24"></script>
-  <script src="gemini.js?v=0.24.24"></script>
-  <script src="notion.js?v=0.24.24"></script>
-  <script src="audio-store.js?v=0.24.24"></script>
-  <script src="claude-bridge.js?v=0.24.24"></script>
-  <script src="claude-installer.js?v=0.24.24"></script>
-  <script src="live-summary.js?v=0.24.24"></script>
-  <script src="image-store.js?v=0.24.24"></script>
-  <script src="gemini-files.js?v=0.24.24"></script>
-  <script src="term-dicts.js?v=0.24.24"></script>
-  <script src="app.js?v=0.24.24"></script>
+  <script src="icons.js?v=0.24.25"></script>
+  <script src="gemini.js?v=0.24.25"></script>
+  <script src="notion.js?v=0.24.25"></script>
+  <script src="audio-store.js?v=0.24.25"></script>
+  <script src="claude-bridge.js?v=0.24.25"></script>
+  <script src="claude-installer.js?v=0.24.25"></script>
+  <script src="live-summary.js?v=0.24.25"></script>
+  <script src="image-store.js?v=0.24.25"></script>
+  <script src="gemini-files.js?v=0.24.25"></script>
+  <script src="term-dicts.js?v=0.24.25"></script>
+  <script src="app.js?v=0.24.25"></script>
 </body>
 </html>

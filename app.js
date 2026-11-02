@@ -118,7 +118,7 @@ const DEFAULT_SETTINGS = {
   liveSummaryMin: 10,
   summaryDetail: 'medium',
   appZoom: 100,
-  paneOrder: ['pane-transcript', 'pane-memo', 'pane-summary', 'pane-chat'],
+  paneOrder: ['pane-transcript', 'pane-memo', 'pane-summary', 'pane-live', 'pane-chat'],
   transcriptFont: 'sans',
   transcriptSize: 15,
   memoFont: 'sans',
@@ -209,8 +209,26 @@ const PANE_META = {
   'pane-transcript': { label: '文字起こし', icon: 'mic' },
   'pane-memo':       { label: 'メモ',       icon: 'pencil' },
   'pane-summary':    { label: '要約',       icon: 'file-text' },
+  // v0.24.25: 設定でリアルタイム要約がオンのときだけタブを出す（paneVisible）
+  'pane-live':       { label: 'リアルタイム要約', icon: 'list' },
   'pane-chat':       { label: '質問',       icon: 'message-circle' },
 };
+
+/**
+ * そのタブを今出すか (v0.24.25)
+ *
+ * やっさん「リアルタイム要約と要約それぞれの良さがあると思うから、リアルタイム要約を
+ * オンにしたらタブを表示して、オフにしたら非表示にして、それぞれ分けてほしい」。
+ * 隠すだけで中身は消さない（オンに戻せば見える）。保存・コピー・Notion にも、
+ * 出ているタブだけを載せる（隠れているものが知らないうちに送られないように）。
+ */
+function paneVisible(id) {
+  if (id === 'pane-live') return !!state.settings.liveSummary;
+  return true;
+}
+function visiblePaneOrder() {
+  return (state.settings.paneOrder || []).filter(paneVisible);
+}
 
 const FONT_FAMILIES = {
   sans:            "'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Yu Gothic UI', sans-serif",
@@ -384,6 +402,10 @@ const els = {
   paneTranscript: document.getElementById('pane-transcript'),
   paneMemo: document.getElementById('pane-memo'),
   paneSummary: document.getElementById('pane-summary'),
+  paneLive: document.getElementById('pane-live'),                       // v0.24.25
+  liveSummary: document.getElementById('live-summary'),                 // v0.24.25
+  liveSummaryEmpty: document.getElementById('live-summary-empty'),      // v0.24.25
+  btnLiveRedo: document.getElementById('btn-live-redo'),                // v0.24.25
   paneChat: document.getElementById('pane-chat'),
   paneTranscriptBody: document.querySelector('#pane-transcript .pane-body'),
   paneMemoBody: document.querySelector('#pane-memo .pane-body'),   // v0.22.1
@@ -528,6 +550,11 @@ function loadSettings() {
   // Migration: add pane-chat to paneOrder if missing
   if (Array.isArray(state.settings.paneOrder) && !state.settings.paneOrder.includes('pane-chat')) {
     state.settings.paneOrder.push('pane-chat');
+  }
+  // v0.24.25: リアルタイム要約のタブ。保存済みの並びに無ければ、要約のすぐ後ろに入れる
+  if (Array.isArray(state.settings.paneOrder) && !state.settings.paneOrder.includes('pane-live')) {
+    const i = state.settings.paneOrder.indexOf('pane-summary');
+    state.settings.paneOrder.splice(i >= 0 ? i + 1 : state.settings.paneOrder.length, 0, 'pane-live');
   }
   applyAiButtonState();
 }
@@ -715,6 +742,7 @@ function hideEmptyHint() {
 function getActivePaneEl() {
   if (state.activePane === 'pane-transcript') return els.paneTranscript;
   if (state.activePane === 'pane-memo') return els.paneMemo;
+  if (state.activePane === 'pane-live') return els.paneLive;
   return els.paneSummary;
 }
 
@@ -1895,12 +1923,12 @@ function stopRecording() {
     state.recordingSessionId = null;
     persistSessions();
     renderTabs(); // 録音中の赤線消去
-    // v0.24.22: リアルタイム要約がオンなら、普通の要約は作らず最終版に更新する
-    // （普通の要約で上書きすると、10分ごとに積み上げた目次が消える）
+    // v0.24.25: リアルタイム要約は別のタブになったので、最終版に更新したうえで、
+    // 普通の要約もこれまでどおり作る（v0.24.22〜24 は同じタブだったので、普通の要約を止めていた）
     if (liveSummaryActive()) {
       await runLiveSummary({ sessionId: recSessionId, final: true });
-      if (state.settings.aiEnabled && state.settings.apiKey) await autoGenerateTitle({ sessionId: recSessionId });
-    } else if (state.settings.autoSummarize && state.settings.aiEnabled && state.settings.apiKey) {
+    }
+    if (state.settings.autoSummarize && state.settings.aiEnabled && state.settings.apiKey) {
       await generateSummary({ silent: true, sessionId: recSessionId });
       await autoGenerateTitle({ sessionId: recSessionId });
     }
@@ -1948,13 +1976,11 @@ function liveSummaryTick() {
 /** そのタブの文字起こし・メモ・いまの要約（プレーンテキスト）を集める */
 function liveSummarySources(session) {
   const active = session.id === state.activeId;
-  const summaryHtml = active ? els.summary.innerHTML : (session.summary || '');
-  // 前回の要約として使うのは、目次付きの要約のときだけ（普通の要約は形が違う）
-  const isLive = /<h2[^>]*>\s*目次\s*<\/h2>/.test(summaryHtml);
+  // v0.24.25: 前回の要約は「リアルタイム要約」タブの中身（要約タブとは別）
   return {
     transcript: active ? getConfirmedText() : htmlToPlain(session.transcript),
     memo: active ? getMemoText() : htmlToPlain(session.memo),
-    previous: isLive ? (active ? getSummaryText() : htmlToPlain(summaryHtml)) : '',
+    previous: active ? elementToPlainText(els.liveSummary) : htmlToPlain(session.liveSummary || ''),
   };
 }
 
@@ -1997,7 +2023,7 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
   // 録音中の定期更新では暗くしない（.generating は押せなくする。読んでいる途中で
   // 30秒ほど読めなくなるのは困る）。人が押したときと、止めたあとの最終版だけ
   const dim = wasActive && (manual || fresh || final);
-  if (dim) els.summary.classList.add('generating');
+  if (dim) els.liveSummary.classList.add('generating');
   diagLog.info(`リアルタイム要約を更新します（${fresh ? '最初から' : final ? '最終版' : '途中'} / 文字起こし${src.transcript.length}字）`);
   if (!state.isRecording || manual) setStatus('listening', fresh ? '目次付きで要約し直しています（Claude）' : 'リアルタイム要約を更新中（Claude）');
   try {
@@ -2014,14 +2040,14 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
     session = state.sessions.find((x) => x.id === sessionId);
     if (!session) return false;
     const html = renderLiveSummaryHtml(norm.md);
-    if (session.id === state.activeId && (getSummaryText() || '').trim()) {
-      pushUndo(fresh ? '目次付き要約を作り直し' : 'リアルタイム要約を更新', 'pane-summary');
+    if (session.id === state.activeId && elementToPlainText(els.liveSummary).trim()) {
+      pushUndo(fresh ? '目次付き要約を作り直し' : 'リアルタイム要約を更新', 'pane-live');
     }
-    session.summary = html;
+    session.liveSummary = html;
     session.updatedAt = Date.now();
     if (session.id === state.activeId) {
-      els.summary.innerHTML = html;
-      if (els.summaryEmpty) els.summaryEmpty.hidden = true;
+      els.liveSummary.innerHTML = html;
+      if (els.liveSummaryEmpty) els.liveSummaryEmpty.hidden = true;
       syncPaneBaselineFromDOM();
       updateActionButtons();
     }
@@ -2043,7 +2069,7 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
     return false;
   } finally {
     state.liveSummaryBusy = false;
-    if (dim) els.summary.classList.remove('generating');
+    if (dim) els.liveSummary.classList.remove('generating');
     // restoreStatus はここで呼ばない。成功も失敗も statusNotice で知らせていて、
     // 時間が来たら statusNotice が戻す。ここで戻すと**失敗の知らせが一瞬で消える**（テストで見つけた）
   }
@@ -3770,6 +3796,7 @@ function getPaneText(id) {
   if (id === 'pane-transcript') return getConfirmedText();
   if (id === 'pane-memo') return getMemoText();
   if (id === 'pane-summary') return getSummaryText();
+  if (id === 'pane-live') return elementToPlainText(els.liveSummary);
   if (id === 'pane-chat') return getChatText();
   return '';
 }
@@ -3777,13 +3804,14 @@ function getPaneHtml(id) {
   if (id === 'pane-transcript') return els.confirmed.innerHTML;
   if (id === 'pane-memo') return els.memo.innerHTML;
   if (id === 'pane-summary') return els.summary.innerHTML;
+  if (id === 'pane-live') return els.liveSummary.innerHTML;
   if (id === 'pane-chat') return getChatHtml();
   return '';
 }
 
 function buildCombinedPlain() {
   const parts = [];
-  for (const id of state.settings.paneOrder) {
+  for (const id of visiblePaneOrder()) {
     const meta = PANE_META[id];
     const t = getPaneText(id);
     if (t) parts.push(`【${meta.label}】\n` + t);
@@ -3795,7 +3823,7 @@ function buildCombinedMarkdown() {
   const parts = [];
   const session = getActiveSession();
   if (session?.title) parts.push(`# ${session.title}`);
-  for (const id of state.settings.paneOrder) {
+  for (const id of visiblePaneOrder()) {
     const meta = PANE_META[id];
     const t = getPaneText(id);
     if (t) parts.push(`## ${meta.label}\n\n` + t);
@@ -3808,7 +3836,7 @@ function buildCombinedHtmlForNotion() {
   const session = getActiveSession();
   const title = session?.title ? `<h1>${escapeHtml(session.title)}</h1>` : '';
   const sections = [];
-  for (const id of state.settings.paneOrder) {
+  for (const id of visiblePaneOrder()) {
     const meta = PANE_META[id];
     const html = getPaneHtml(id);
     const plain = getPaneText(id);
@@ -3881,12 +3909,13 @@ function clearNotionUploadedMark(session) {
 /** セッション1件 → ノート内のトグル配列。空のペインは省略する */
 function buildNotionToggles(session) {
   const toggles = [];
-  for (const id of state.settings.paneOrder) {
+  for (const id of visiblePaneOrder()) {
     const meta = PANE_META[id];
     let blocks = [];
     if (id === 'pane-transcript')   blocks = notionBlocksFromHtml(session.transcript || '');
     else if (id === 'pane-memo')    blocks = notionBlocksFromHtml(session.memo || '');
     else if (id === 'pane-summary') blocks = notionBlocksFromHtml(session.summary || '');
+    else if (id === 'pane-live')    blocks = notionBlocksFromHtml(session.liveSummary || '');
     else if (id === 'pane-chat') {
       // 質問ペインは配列なので、Q/A を見出し無しの段落ペアとして組み立てる
       const chat = (session.chat || []).filter(m => !m.thinking && !m.error);
@@ -3897,7 +3926,7 @@ function buildNotionToggles(session) {
       }
     }
     // v0.24.22: 目次付きの要約なら、送ったあとに目次から見出しへのリンクを張る
-    const liveToc = id === 'pane-summary' && /<h2[^>]*>\s*目次\s*<\/h2>/.test(session.summary || '');
+    const liveToc = id === 'pane-live' && /<h2[^>]*>\s*目次\s*<\/h2>/.test(session.liveSummary || '');
     if (blocks.length) toggles.push({ label: meta.label, blocks, ...(liveToc ? { liveToc: true } : {}) });
   }
   return toggles;
@@ -4059,6 +4088,15 @@ async function saveClaudeInstaller() {
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+/**
+ * リアルタイム要約のタブを出し入れする (v0.24.25)
+ * 隠すとき、そのタブを開いていたら要約タブへ移る（見えないタブに居続けない）
+ */
+function applyLiveSummaryTab() {
+  renderInnerTabs();
+  if (!paneVisible(state.activePane)) switchInnerPane('pane-summary');
 }
 
 /**
@@ -4642,12 +4680,13 @@ function buildExportHtml(session) {
   };
 
   const sections = [];
-  for (const id of state.settings.paneOrder) {
+  for (const id of visiblePaneOrder()) {
     const meta = PANE_META[id];
     let html = '';
     if (id === 'pane-transcript') html = session.transcript || '';
     else if (id === 'pane-memo') html = session.memo || '';
     else if (id === 'pane-summary') html = session.summary || '';
+    else if (id === 'pane-live') html = session.liveSummary || '';
     else if (id === 'pane-chat') {
       const chat = (session.chat || []).filter(m => !m.thinking);
       if (chat.length === 0) continue;
@@ -4659,7 +4698,7 @@ function buildExportHtml(session) {
       }).join('\n');
     }
     if (!html || !html.trim()) continue;
-    const iconGlyph = id === 'pane-transcript' ? '🎙' : id === 'pane-memo' ? '📝' : id === 'pane-summary' ? '📄' : '💬';
+    const iconGlyph = id === 'pane-transcript' ? '🎙' : id === 'pane-memo' ? '📝' : id === 'pane-summary' ? '📄' : id === 'pane-live' ? '🗂' : '💬';
     sections.push(`
 <section class="pane-section">
   <h2><span class="sec-icon">${iconGlyph}</span>${escapeHtml(meta.label)}</h2>
@@ -4893,12 +4932,13 @@ function buildAllSessionsExportHtml(sessions) {
 
   const sessionsHtml = list.map((session, idx) => {
     const sections = [];
-    for (const paneId of state.settings.paneOrder) {
+    for (const paneId of visiblePaneOrder()) {
       const meta = PANE_META[paneId];
       let innerHtml = '';
       if (paneId === 'pane-transcript') innerHtml = session.transcript || '';
       else if (paneId === 'pane-memo') innerHtml = session.memo || '';
       else if (paneId === 'pane-summary') innerHtml = session.summary || '';
+      else if (paneId === 'pane-live') innerHtml = session.liveSummary || '';
       else if (paneId === 'pane-chat') {
         const chat = (session.chat || []).filter(m => !m.thinking);
         if (chat.length === 0) continue;
@@ -4910,7 +4950,7 @@ function buildAllSessionsExportHtml(sessions) {
         }).join('\n');
       }
       if (!innerHtml || !innerHtml.trim()) continue;
-      const iconGlyph = paneId === 'pane-transcript' ? '🎙' : paneId === 'pane-memo' ? '📝' : paneId === 'pane-summary' ? '📄' : '💬';
+      const iconGlyph = paneId === 'pane-transcript' ? '🎙' : paneId === 'pane-memo' ? '📝' : paneId === 'pane-summary' ? '📄' : paneId === 'pane-live' ? '🗂' : '💬';
       sections.push(`<section class="pane-section">
     <h3><span class="sec-icon">${iconGlyph}</span>${escapeHtml(meta.label)}</h3>
     <div class="sec-body">${innerHtml}</div>
@@ -5333,6 +5373,7 @@ function clearPane(paneId, { confirmFirst = true, skipUndo = false } = {}) {
   const hasContent = paneId === 'pane-transcript' ? !!getConfirmedText()
     : paneId === 'pane-memo' ? !!getMemoText()
     : paneId === 'pane-summary' ? !!getSummaryText()
+    : paneId === 'pane-live' ? !!elementToPlainText(els.liveSummary).trim()
     : paneId === 'pane-chat' ? !!getChatText()
     : false;
   if (!hasContent) return;
@@ -5349,6 +5390,9 @@ function clearPane(paneId, { confirmFirst = true, skipUndo = false } = {}) {
   } else if (paneId === 'pane-summary') {
     els.summary.innerHTML = '';
     if (els.summaryEmpty) els.summaryEmpty.hidden = false;
+  } else if (paneId === 'pane-live') {
+    els.liveSummary.innerHTML = '';
+    if (els.liveSummaryEmpty) els.liveSummaryEmpty.hidden = false;
   } else if (paneId === 'pane-chat') {
     const session = getActiveSession();
     if (session) session.chat = [];
@@ -5367,6 +5411,7 @@ function clearAllPanes() {
   clearPane('pane-transcript', { confirmFirst: false, skipUndo: true });
   clearPane('pane-memo',       { confirmFirst: false, skipUndo: true });
   clearPane('pane-summary',    { confirmFirst: false, skipUndo: true });
+  clearPane('pane-live',       { confirmFirst: false, skipUndo: true });
   clearPane('pane-chat',       { confirmFirst: false, skipUndo: true });
 }
 
@@ -5380,6 +5425,7 @@ const PANE_FIELD = {
   'pane-transcript': 'transcript',
   'pane-memo':       'memo',
   'pane-summary':    'summary',
+  'pane-live':       'liveSummary',   // v0.24.25
 };
 const MAX_UNDO_ENTRIES = 15;
 
@@ -5478,6 +5524,7 @@ const paneLastStable = {
   'pane-transcript': '',
   'pane-memo': '',
   'pane-summary': '',
+  'pane-live': '',
 };
 const paneTypingTimers = {};
 /** ペインごとの「打ちかけを確定させる」関数。bindPaneTypingUndo が入れる */
@@ -5519,6 +5566,7 @@ function paneHtml(paneId) {
   if (paneId === 'pane-memo') return els.memo ? stripManagedImageSrc(els.memo.innerHTML) : '';
   if (paneId === 'pane-transcript') return els.confirmed ? els.confirmed.innerHTML : '';
   if (paneId === 'pane-summary') return els.summary ? els.summary.innerHTML : '';
+  if (paneId === 'pane-live') return els.liveSummary ? els.liveSummary.innerHTML : '';
   return '';
 }
 
@@ -5526,6 +5574,7 @@ function syncPaneBaselineFromDOM() {
   if (els.confirmed) paneLastStable['pane-transcript'] = paneHtml('pane-transcript');
   if (els.memo)      paneLastStable['pane-memo']       = paneHtml('pane-memo');
   if (els.summary)   paneLastStable['pane-summary']    = paneHtml('pane-summary');
+  if (els.liveSummary) paneLastStable['pane-live']     = paneHtml('pane-live');
 }
 
 function bindPaneTypingUndo() {
@@ -5533,6 +5582,7 @@ function bindPaneTypingUndo() {
     { paneId: 'pane-transcript', el: els.confirmed },
     { paneId: 'pane-memo',       el: els.memo },
     { paneId: 'pane-summary',    el: els.summary },
+    { paneId: 'pane-live',       el: els.liveSummary },
   ];
 
   /* スナップショット頻度の目安:
@@ -5898,7 +5948,7 @@ function renderInnerTabs() {
   if (indicator && indicator.parentElement === listEl) indicator.remove();
 
   listEl.innerHTML = '';
-  for (const id of state.settings.paneOrder) {
+  for (const id of visiblePaneOrder()) {
     const meta = PANE_META[id];
     if (!meta) continue;
     const btn = document.createElement('button');
@@ -5955,8 +6005,14 @@ function updateInnerTabsIndicator() {
 }
 
 function reorderPaneOrder(newOrder) {
-  if (!Array.isArray(newOrder) || newOrder.length !== state.settings.paneOrder.length) return;
-  state.settings.paneOrder = newOrder;
+  if (!Array.isArray(newOrder)) return;
+  // v0.24.25: 隠れているタブ（リアルタイム要約がオフ）はドラッグの並びに入ってこない。
+  // 元の位置に戻して並びを保つ（無いと長さが合わず、並べ替えが効かなくなる）
+  const full = state.settings.paneOrder;
+  const merged = newOrder.slice();
+  full.forEach((id, i) => { if (!merged.includes(id)) merged.splice(Math.min(i, merged.length), 0, id); });
+  if (merged.length !== full.length) return;
+  state.settings.paneOrder = merged;
   saveSettings();
   applyPaneOrder();
 }
@@ -7223,6 +7279,7 @@ function saveSettingsFromForm() {
   state.settings.silenceSec = Math.max(1, Math.min(30, Number(els.inputSilenceSec.value) || 3));
   if (els.inputLiveSummary) state.settings.liveSummary = els.inputLiveSummary.checked && !!(els.inputClaudeBridge && els.inputClaudeBridge.checked);
   if (els.inputLiveSummaryMin) state.settings.liveSummaryMin = clampLiveSummaryMinutes(els.inputLiveSummaryMin.value);
+  applyLiveSummaryTab();   // v0.24.25: オン/オフでタブを出し入れする
   state.settings.aiEnabled = els.inputAiEnabled.checked;
   state.settings.autoStopEnabled = els.inputAutoStop.checked;
   state.settings.autoStopSec = Math.max(30, Math.min(600, Number(els.inputAutoStopSec.value) || 120));
@@ -7288,7 +7345,9 @@ function saveSettingsFromForm() {
   state.settings.memoSize = Math.max(10, Math.min(36, Number(els.sizeMemo.value) || 15));
   state.settings.summaryFont = els.fontSummary.value;
   state.settings.summarySize = Math.max(10, Math.min(36, Number(els.sizeSummary.value) || 15));
-  if (settingsWorkingOrder && settingsWorkingOrder.length === 3) {
+  // v0.24.25: 以前は「3つのとき」と決め打ちしていて、質問タブを足して4つになってから
+  // 設定画面での並べ替えが保存されていなかった。いまのタブの数と同じなら保存する
+  if (settingsWorkingOrder && settingsWorkingOrder.length === state.settings.paneOrder.length) {
     state.settings.paneOrder = settingsWorkingOrder.slice();
   }
   saveSettings();
@@ -7332,7 +7391,7 @@ function switchInnerPane(paneId) {
   if (typeof updateInnerTabsIndicator === 'function') updateInnerTabsIndicator();
   // 検索バー等のリスナーに通知
   document.dispatchEvent(new CustomEvent('dictation:paneSwitched', { detail: { paneId } }));
-  const panes = [els.paneTranscript, els.paneMemo, els.paneSummary, els.paneChat];
+  const panes = [els.paneTranscript, els.paneMemo, els.paneSummary, els.paneLive, els.paneChat].filter(Boolean);
   panes.forEach(p => {
     p.classList.toggle('active', p.id === paneId);
     p.classList.remove('enter-from-right', 'enter-from-left');
@@ -7350,6 +7409,9 @@ function switchInnerPane(paneId) {
 
   if (paneId === 'pane-summary') {
     els.summaryEmpty.hidden = !!getSummaryText();
+  }
+  if (paneId === 'pane-live' && els.liveSummaryEmpty) {
+    els.liveSummaryEmpty.hidden = !!elementToPlainText(els.liveSummary).trim();
   }
   if (paneId === 'pane-chat') {
     setTimeout(() => { els.chatBody.scrollTop = els.chatBody.scrollHeight; }, 0);
@@ -7374,6 +7436,19 @@ function initSessions() {
     }
     if (s.memo === undefined) s.memo = '';
     if (s.summary === undefined) s.summary = '';
+    /* v0.24.25: リアルタイム要約を要約タブから自分のタブへ移す。
+     * v0.24.22〜24 は目次付きの要約を**要約タブに**書いていた。目次の印
+     * （class="live-summary-toc"。linkLiveSummaryToc が付ける）があるものだけを移す。
+     * 普通の要約には印が無いので触らない。移すだけで消さない。
+     * ※ class="live-summary" は外側の入れ物に付く印で、**保存される HTML には入っていない**
+     *   （最初これで判定して、テストも実物と違う形で通っていた）*/
+    if (s.liveSummary === undefined) {
+      s.liveSummary = '';
+      if (/class="live-summary-toc"/.test(s.summary || '')) {
+        s.liveSummary = s.summary;
+        s.summary = '';
+      }
+    }
     if (s.transcript === undefined) s.transcript = '';
     if (!Array.isArray(s.chat)) s.chat = [];
     // v0.16.0: 文脈が無い古いセッションに空の器を足す
@@ -7438,6 +7513,7 @@ function createSession({ activate = true, title = null, skipSave = false } = {})
     transcript: '',
     memo: '',
     summary: '',
+    liveSummary: '',   // v0.24.25: リアルタイム要約（要約とは別のタブ）
     chat: [],
     // v0.16.0: 文字起こしの語彙ヒント。既定値を引き継いで開始する
     context: {
@@ -7477,15 +7553,18 @@ function snapshotActiveToSession(opts = {}) {
   // id だけ残し、表示のたびに差し込み直す（image-store.js の冒頭を参照）
   const nextMemo       = stripManagedImageSrc(els.memo.innerHTML);
   const nextSummary    = els.summary.innerHTML;
+  const nextLive       = els.liveSummary ? els.liveSummary.innerHTML : (s.liveSummary || '');   // v0.24.25
   // v0.15.1: Notion に上げたあとで中身が変わったら、アップ済み印を外す。
   // 「印は付いているが最新版は上がっていない」状態を作らないため。
   if (s.notionUploadedAt &&
-      (s.transcript !== nextTranscript || s.memo !== nextMemo || s.summary !== nextSummary)) {
+      (s.transcript !== nextTranscript || s.memo !== nextMemo || s.summary !== nextSummary
+       || (s.liveSummary || '') !== nextLive)) {
     clearNotionUploadedMark(s);
   }
   s.transcript = nextTranscript;
   s.memo = nextMemo;
   s.summary = nextSummary;
+  s.liveSummary = nextLive;
   s.updatedAt = Date.now();
   // タイピングUndoの baseline も同期（autosave 由来の場合はスキップ：
   // ユーザーが入力中の可能性があり、baseline を上書きすると履歴が流れるため）
@@ -7493,6 +7572,7 @@ function snapshotActiveToSession(opts = {}) {
     paneLastStable['pane-transcript'] = s.transcript;
     paneLastStable['pane-memo']       = s.memo;
     paneLastStable['pane-summary']    = s.summary;
+    paneLastStable['pane-live']       = s.liveSummary;
   }
 }
 
@@ -8058,6 +8138,8 @@ function loadActiveSessionIntoDOM() {
   migrateMemoTaskItems();
   hydrateMemoImages(els.memo);      // v0.22.0: 画像の実物を差し込む（非同期）
   els.summary.innerHTML = s?.summary || '';
+  if (els.liveSummary) els.liveSummary.innerHTML = s?.liveSummary || '';   // v0.24.25
+  if (els.liveSummaryEmpty) els.liveSummaryEmpty.hidden = !!(s?.liveSummary || '').replace(/<[^>]*>/g, '').trim();
   els.interim.textContent = '';
   state.pendingChunkEl = null;
   state.pendingChunkText = '';
@@ -8927,10 +9009,9 @@ if (els.btnSummaryCombo) {
     } else {
       els.btnSummaryCombo.classList.add('firing');
       try {
-        // v0.24.22: リアルタイム要約がオンなら、目次付きで最初から要約し直す
-        // （やっさん「最後、改めて要約しなおすこともできる」）
-        if (liveSummaryActive()) await runLiveSummary({ sessionId: state.activeId, fresh: true, final: !state.isRecording, manual: true });
-        else await generateSummary({ silent: false });
+        // v0.24.25: 要約タブのボタンは普通の要約に戻した。目次付きで作り直すのは
+        // リアルタイム要約タブの「最初から要約し直す」
+        await generateSummary({ silent: false });
       } finally {
         els.btnSummaryCombo.classList.remove('firing');
       }
@@ -9010,13 +9091,31 @@ function onEdit() {
 els.confirmed.addEventListener('input', onEdit);
 els.memo.addEventListener('input', onEdit);
 els.summary.addEventListener('input', onEdit);
-// v0.24.22: リアルタイム要約の目次を押したら、その節へ飛ぶ
-els.summary.addEventListener('click', (e) => {
-  const li = e.target.closest && e.target.closest('[data-ls-jump]');
-  if (!li || !els.summary.contains(li)) return;
-  const sec = els.summary.querySelector(`[data-ls-section="${li.dataset.lsJump}"]`);
-  if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
-});
+// v0.24.22: リアルタイム要約の目次を押したら、その節へ飛ぶ（v0.24.25 から自分のタブ）
+if (els.liveSummary) {
+  els.liveSummary.addEventListener('input', onEdit);
+  els.liveSummary.addEventListener('click', (e) => {
+    const li = e.target.closest && e.target.closest('[data-ls-jump]');
+    if (!li || !els.liveSummary.contains(li)) return;
+    const sec = els.liveSummary.querySelector(`[data-ls-section="${li.dataset.lsJump}"]`);
+    if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+// v0.24.25: 目次付きで最初から要約し直す（やっさん「最後、改めて要約しなおすこともできる」）
+if (els.btnLiveRedo) {
+  els.btnLiveRedo.addEventListener('click', async () => {
+    if (!liveSummaryActive()) {
+      statusNotice('error', 'リアルタイム要約は Claude 連携がオンのときだけ使えます', { ms: 4000 });
+      return;
+    }
+    els.btnLiveRedo.disabled = true;
+    try {
+      await runLiveSummary({ sessionId: state.activeId, fresh: true, final: !state.isRecording, manual: true });
+    } finally {
+      els.btnLiveRedo.disabled = false;
+    }
+  });
+}
 
 /* ───────── Memo Notion風 Markdown エディタ ───────── */
 
@@ -10264,6 +10363,7 @@ const SEARCH_TARGETS = {
   'pane-transcript': { sel: '#confirmed',        label: '文字起こし' },
   'pane-memo':       { sel: '#memo',             label: 'メモ' },
   'pane-summary':    { sel: '#summary',          label: '要約' },
+  'pane-live':       { sel: '#live-summary',     label: 'リアルタイム要約' },
   'pane-chat':       { sel: '#chat-messages',    label: '質問（チャット）' },
 };
 
