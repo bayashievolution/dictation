@@ -118,7 +118,8 @@ const DEFAULT_SETTINGS = {
   liveSummaryMin: 10,
   summaryDetail: 'medium',
   appZoom: 100,
-  paneOrder: ['pane-transcript', 'pane-memo', 'pane-summary', 'pane-live', 'pane-chat'],
+  // v0.24.26: RT要約は既定で要約の左（やっさんの指定）
+  paneOrder: ['pane-transcript', 'pane-memo', 'pane-live', 'pane-summary', 'pane-chat'],
   transcriptFont: 'sans',
   transcriptSize: 15,
   memoFont: 'sans',
@@ -210,7 +211,9 @@ const PANE_META = {
   'pane-memo':       { label: 'メモ',       icon: 'pencil' },
   'pane-summary':    { label: '要約',       icon: 'file-text' },
   // v0.24.25: 設定でリアルタイム要約がオンのときだけタブを出す（paneVisible）
-  'pane-live':       { label: 'リアルタイム要約', icon: 'list' },
+  // v0.24.26: 画面の名前は「RT要約」（やっさん「リアルタイム要約って長かったね」）。
+  // 中の名前（pane-live / liveSummary / 設定の liveSummary）は保存データに入っているので変えない
+  'pane-live':       { label: 'RT要約', icon: 'list' },
   'pane-chat':       { label: '質問',       icon: 'message-circle' },
 };
 
@@ -551,10 +554,10 @@ function loadSettings() {
   if (Array.isArray(state.settings.paneOrder) && !state.settings.paneOrder.includes('pane-chat')) {
     state.settings.paneOrder.push('pane-chat');
   }
-  // v0.24.25: リアルタイム要約のタブ。保存済みの並びに無ければ、要約のすぐ後ろに入れる
+  // v0.24.25: RT要約のタブ。保存済みの並びに無ければ、要約のすぐ左に入れる（v0.24.26 で左に）
   if (Array.isArray(state.settings.paneOrder) && !state.settings.paneOrder.includes('pane-live')) {
     const i = state.settings.paneOrder.indexOf('pane-summary');
-    state.settings.paneOrder.splice(i >= 0 ? i + 1 : state.settings.paneOrder.length, 0, 'pane-live');
+    state.settings.paneOrder.splice(i >= 0 ? i : state.settings.paneOrder.length, 0, 'pane-live');
   }
   applyAiButtonState();
 }
@@ -2024,8 +2027,8 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
   // 30秒ほど読めなくなるのは困る）。人が押したときと、止めたあとの最終版だけ
   const dim = wasActive && (manual || fresh || final);
   if (dim) els.liveSummary.classList.add('generating');
-  diagLog.info(`リアルタイム要約を更新します（${fresh ? '最初から' : final ? '最終版' : '途中'} / 文字起こし${src.transcript.length}字）`);
-  if (!state.isRecording || manual) setStatus('listening', fresh ? '目次付きで要約し直しています（Claude）' : 'リアルタイム要約を更新中（Claude）');
+  diagLog.info(`RT要約を更新します（${fresh ? '最初から' : final ? '最終版' : '途中'} / 文字起こし${src.transcript.length}字）`);
+  if (!state.isRecording || manual) setStatus('listening', fresh ? '目次付きで要約し直しています（Claude）' : 'RT要約を更新中（Claude）');
   try {
     const prompt = buildLiveSummaryPrompt({
       transcript: src.transcript, previous: src.previous, memo: src.memo,
@@ -2036,12 +2039,12 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
     const r = await claudeBridgeRun(prompt, { effort: 'low', timeoutMs: LIVE_SUMMARY_TIMEOUT_MS });
     if (!r.ok) throw new Error(r.error || 'Claude で処理できませんでした');
     const norm = normalizeLiveSummary(r.text);
-    if (!norm.ok) diagLog.info('リアルタイム要約: 目次が見つからない形で返ってきました（そのまま表示します）');
+    if (!norm.ok) diagLog.info('RT要約: 目次が見つからない形で返ってきました（そのまま表示します）');
     session = state.sessions.find((x) => x.id === sessionId);
     if (!session) return false;
     const html = renderLiveSummaryHtml(norm.md);
     if (session.id === state.activeId && elementToPlainText(els.liveSummary).trim()) {
-      pushUndo(fresh ? '目次付き要約を作り直し' : 'リアルタイム要約を更新', 'pane-live');
+      pushUndo(fresh ? 'RT要約を作り直し' : 'RT要約を更新', 'pane-live');
     }
     session.liveSummary = html;
     session.updatedAt = Date.now();
@@ -2053,16 +2056,16 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
     }
     persistSessions();
     state.liveSummaryLastLen = src.transcript.length;
-    diagLog.info(`リアルタイム要約を更新しました（${r.seconds != null ? r.seconds + '秒' : '?'}）`);
-    statusNotice('listening', fresh ? '目次付きで要約し直しました（Claude）' : 'リアルタイム要約を更新しました（Claude）', { ms: 2500 });
+    diagLog.info(`RT要約を更新しました（${r.seconds != null ? r.seconds + '秒' : '?'}）`);
+    statusNotice('listening', fresh ? '目次付きで要約し直しました（Claude）' : 'RT要約を更新しました（Claude）', { ms: 2500 });
     return true;
   } catch (e) {
     const msg = String((e && e.message) || e);
-    diagLog.info('リアルタイム要約を更新できませんでした: ' + msg);
+    diagLog.info('RT要約を更新できませんでした: ' + msg);
     // ログイン切れなどは覚えて、10分ごとに同じ失敗を繰り返さない（要約・質問と同じ扱い）
     if (typeof claudeBridgeIsFatal === 'function' && claudeBridgeIsFatal(msg)) claudeBridgeMarkBroken(msg);
     // **Gemini には戻さない**。戻すと 10分ごとに黙って Gemini のトークンを使う
-    statusNotice('error', 'リアルタイム要約を更新できませんでした（Gemini には切り替えていません）', {
+    statusNotice('error', 'RT要約を更新できませんでした（Gemini には切り替えていません）', {
       detail: `${msg}\n\n${state.isRecording ? '次の回にもう一度試します。' : ''}`
         + '「接続を確認」で Claude 連携の状態を見られます。',
     });
@@ -9105,7 +9108,7 @@ if (els.liveSummary) {
 if (els.btnLiveRedo) {
   els.btnLiveRedo.addEventListener('click', async () => {
     if (!liveSummaryActive()) {
-      statusNotice('error', 'リアルタイム要約は Claude 連携がオンのときだけ使えます', { ms: 4000 });
+      statusNotice('error', 'RT要約は Claude 連携がオンのときだけ使えます', { ms: 4000 });
       return;
     }
     els.btnLiveRedo.disabled = true;
@@ -10363,7 +10366,7 @@ const SEARCH_TARGETS = {
   'pane-transcript': { sel: '#confirmed',        label: '文字起こし' },
   'pane-memo':       { sel: '#memo',             label: 'メモ' },
   'pane-summary':    { sel: '#summary',          label: '要約' },
-  'pane-live':       { sel: '#live-summary',     label: 'リアルタイム要約' },
+  'pane-live':       { sel: '#live-summary',     label: 'RT要約' },
   'pane-chat':       { sel: '#chat-messages',    label: '質問（チャット）' },
 };
 
