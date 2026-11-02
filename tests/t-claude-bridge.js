@@ -193,7 +193,7 @@ console.log('\n■ 「接続を確認」の文言（ログインまで見る）'
   is('古いサーバー（start.bat）→ 起動し直してと言う',
      h({ ok: true, invocation: 'claude', version: '0.24.11', auth: { ok: true, loggedIn: true } }),
      { ok: true, needsLogin: false, unknown: false, stale: true,
-       text: '使えます（ログイン済み / claude / サーバー 0.24.11）。サーバーが古い版です。リアルタイム要約を速くするため、start.bat を起動し直してください' });
+       text: '使えます（ログイン済み / claude / サーバー 0.24.11）。サーバーが古い版です。ライブ要約を速くするため、start.bat を起動し直してください' });
   is('ログインしていない', h({ ok: true, invocation: 'claude', auth: { ok: true, loggedIn: false } }),
      { ok: false, needsLogin: true, unknown: false, text: 'Claude にログインしていません。login.bat でサインインしてください' });
   // ここが肝。**分からないときに「使えます」と言わない**。

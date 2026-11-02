@@ -150,7 +150,7 @@ const summary = (page) => page.evaluate(() => ({
     const ok = await page.evaluate(() => runLiveSummary({ sessionId: state.activeId }));
     eq('更新しない', [ok, await page.innerHTML('#live-summary')], [false, before]);
     eq('Gemini には頼んでいない', seen.gemini, 0);
-    eq('画面に理由を出す', (await page.textContent('#status-indicator')).includes('RT要約を更新できませんでした'), true);
+    eq('画面に理由を出す', (await page.textContent('#status-indicator')).includes('ライブ要約を更新できませんでした'), true);
     await ctx.close();
   }
 
@@ -192,8 +192,8 @@ const summary = (page) => page.evaluate(() => ({
   console.log('■ タブはオンのときだけ出て、オフにすると隠れる');
   {
     const { ctx, page } = await open(browser);
-    eq('オン: 要約の左に RT要約のタブ（v0.24.26）', await tabs(page), ['pane-transcript', 'pane-memo', 'pane-live', 'pane-summary', 'pane-chat']);
-    eq('タブの名前は「RT要約」', await page.evaluate(() => document.querySelector('.inner-tab[data-pane="pane-live"]').textContent.trim()), 'RT要約');
+    eq('オン: 要約の左に ライブ要約のタブ（v0.24.26）', await tabs(page), ['pane-transcript', 'pane-memo', 'pane-live', 'pane-summary', 'pane-chat']);
+    eq('タブの名前は「ライブ要約」（v0.24.28。RT要約はリツイートに見えるので変えた）', await page.evaluate(() => document.querySelector('.inner-tab[data-pane="pane-live"]').textContent.trim()), 'ライブ要約');
     await page.evaluate(() => switchInnerPane('pane-live'));
     await page.evaluate(() => document.getElementById('btn-settings').click());
     await page.waitForTimeout(200);
@@ -204,7 +204,7 @@ const summary = (page) => page.evaluate(() => ({
     await ctx.close();
   }
 
-  console.log('■ 前の版の並び順（RT要約が無い）でも、要約の左に入る');
+  console.log('■ 前の版の並び順（ライブ要約が無い）でも、要約の左に入る');
   {
     const { ctx, page } = await open(browser, { settings: { paneOrder: ['pane-memo', 'pane-transcript', 'pane-summary', 'pane-chat'] } });
     eq('自分で並べ替えた順は保ったまま、要約の左に足す', await tabs(page), ['pane-memo', 'pane-transcript', 'pane-live', 'pane-summary', 'pane-chat']);

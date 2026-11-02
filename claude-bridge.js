@@ -356,8 +356,8 @@ function claudeBridgeHealthMessage(health) {
     const stale = !(Array.isArray(h.features) && h.features.includes('effort'));
     const fix = !stale ? ''
       : h.via === 'native'
-        ? '。連携が古い版です。リアルタイム要約を速くするため、インストーラーを保存して入れ直してください'
-        : '。サーバーが古い版です。リアルタイム要約を速くするため、start.bat を起動し直してください';
+        ? '。連携が古い版です。ライブ要約を速くするため、インストーラーを保存して入れ直してください'
+        : '。サーバーが古い版です。ライブ要約を速くするため、start.bat を起動し直してください';
     return { ok: true, needsLogin: false, unknown: false, stale,
              text: `使えます（ログイン済み${parts.length ? ' / ' + parts.join(' / ') : ''}）${fix}` };
   }
