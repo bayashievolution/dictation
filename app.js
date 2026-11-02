@@ -733,9 +733,11 @@ window.statusNotice = statusNotice;   // gemini.js から呼ぶ
 function setRecordingUI(isRec) {
   els.btnToggle.classList.toggle('recording', isRec);
   const iconEl = els.btnToggle.querySelector('[data-icon]');
-  // v0.24.31: 録音中（赤）も中の形は ●（やっさんの要望）。以前は ■（停止）に変えていた。
-  // 押すと止まることは、赤い色と title の「停止」で伝える
-  if (iconEl && typeof setIcon === 'function') setIcon(iconEl, 'record', 18);
+  // ボタンの記号は「押すと何が起きるか」（待機中 ● ＝録音、録音中 ■ ＝停止）。
+  // 家電と同じで、IEC 60417 でも ● 録音・■ 停止は**操作の記号**として決まっている。
+  // v0.24.31 で録音中も ● にしたが、やっさんと相談して v0.24.32 で戻した。
+  // 「今録音中か」はボタンではなく、右上の「聞き取り中」とタブの赤線で示す
+  if (iconEl && typeof setIcon === 'function') setIcon(iconEl, isRec ? 'record-stop' : 'record', 18);
   els.btnToggle.title = isRec ? '停止' : '録音開始';
   renderTabs();
 }
