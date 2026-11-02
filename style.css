@@ -185,6 +185,10 @@ html, body {
 .status {
   font-size: 12px;
   padding: 3px 10px;
+  /* v0.24.30: 全角の「）」は右半分が空白なので、文が「）」で終わると右が空いて
+   * 文字が左に寄って見えた（やっさん指摘「要約生成中（Claude）」）。約物の空白を詰める。
+   * 実測（3倍の画像）: 左35・右55 → 左35・右38 */
+  font-feature-settings: "palt";
   border-radius: 999px;
   font-weight: 500;
   transition: all 0.25s var(--ease-out);
