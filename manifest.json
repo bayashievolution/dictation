@@ -30,5 +30,17 @@
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8765 https://generativelanguage.googleapis.com https://api.notion.com;"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "app.json",
+        "index.html",
+        "assets/icon-128.png"
+      ],
+      "extension_ids": [
+        "bjmnpgoaodjhbkpmpiaaceibhffemmgo"
+      ]
+    }
+  ]
 }
