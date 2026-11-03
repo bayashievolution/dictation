@@ -55,6 +55,16 @@ Ubuntu の開き方（スタートメニューで `Ubuntu` / `Win+R` → `wsl`�
 やっさんの手元も同じブランチを見ているので、
 **「`main` を pull しても新しくならない」**のが久しぶりに触るときの一番の落とし穴。
 
+## SUMADO の中でも動く（2026-11-03 から）
+
+この拡張の `index.html` は、SUMADO（やっさんの別の拡張機能）の中に **iframe でそのまま開かれる**。
+拡張単独のサイドパネルと中身・localStorage が一致することを、やっさんはとても大事にしている。
+
+- `app.json` と `manifest.json` の `web_accessible_resources` は**消さない**。
+  `index.html` やアイコンの名前・場所を変えたら、その2つも合わせる
+- `window.top` / `parent` や `chrome.sidePanel` に頼る処理を画面側に足さない（iframe の中で変わる）
+- 詳しくは `PROJECT_DESIGN.md` の 2026-11-03
+
 ## 版番号は3か所そろえる
 
 更新のたびに、この3つを必ず同じ値にする。
