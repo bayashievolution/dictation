@@ -145,6 +145,7 @@ const DEFAULT_SETTINGS = {
   // v0.20.0: 自作の語彙辞書 [{id, name, terms[]}]。プリセットは term-dicts.js 側
   termDicts: [],
   audioKeepRecording: false,
+  sumadoIslandMeter: false,   // v0.24.37: SUMADO の中で録音中、アイランドに声の大きさのメーターを出す（既定はオフ）
   // v0.21.3: 既定を close にした。repass（話者判別が終わったら消す）はいちばん早く
   // 消えるが、**同じ録音に2回目をかけられない**。どちらもタブを閉じれば必ず消えるので、
   // 「できるだけ早く消す」という方針は close でも満たせる。
@@ -496,6 +497,7 @@ const els = {
   inputChunkMaxSec: document.getElementById('input-chunk-max-sec'),
   inputAudioBitrate: document.getElementById('input-audio-bitrate'),
   inputKeepRecording: document.getElementById('input-keep-recording'),
+  inputSumadoMeter: document.getElementById('input-sumado-meter'),
   inputAudioRetention: document.getElementById('input-audio-retention'),
   inputClaudeBridge: document.getElementById('input-claude-bridge'),          // v0.24.0
   claudeBridgeStatus: document.getElementById('claude-bridge-status'),        // v0.24.0
@@ -767,16 +769,52 @@ function fmtRecElapsed(ms) {
   const ss = String(s % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
+// 声の大きさのメーター（SUMADO のアイランドの縦の棒）。
+// - Web Speech のときは録音の音の流れを自分では持っていないので、メーターのためにマイクの大きさを別に測る
+//   （同じマイクを 2 つで使っても Chrome では問題ない。v0.15 の同時利用テストで確かめ済み）
+// - SUMADO の中で使っているとき・設定でオンにしたときだけ。測るのは 80ms ごと、送るのは大きさの数だけ（音は送らない）
+let sumadoMeter = null;
+async function startSumadoMeter() {
+  if (sumadoMeter || !(typeof window !== 'undefined' && window.parent !== window)) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const ctx = new AudioContext();
+    const an = ctx.createAnalyser();
+    an.fftSize = 1024;
+    ctx.createMediaStreamSource(stream).connect(an);
+    const buf = new Float32Array(an.fftSize);
+    const timer = setInterval(() => {
+      an.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      toSumado({ action: 'level', level: Math.min(1, Math.sqrt(sum / buf.length) * 4) });
+    }, 80);
+    sumadoMeter = { stream, ctx, timer };
+    if (!sumadoRecTimer) stopSumadoMeter(); // 測りはじめるまでのあいだに録音が止まっていた
+  } catch (e) {
+    diagLog.info(`SUMADO のメーター用にマイクを開けませんでした: ${e.message || e}`);
+  }
+}
+function stopSumadoMeter() {
+  if (!sumadoMeter) return;
+  clearInterval(sumadoMeter.timer);
+  sumadoMeter.stream.getTracks().forEach((t) => t.stop());
+  sumadoMeter.ctx.close().catch(() => {});
+  sumadoMeter = null;
+}
 function tellSumadoRecording(isRec) {
   if (isRec) {
     if (sumadoRecTimer) return; // 自動の再接続などで続けて呼ばれても、時間は最初から数えなおさない
     sumadoRecStart = Date.now();
-    toSumado({ action: 'start', glyph: 'mic', right: '0:00', color: '#ff453a', recording: true, ttl: 30 });
+    const meter = !!state.settings.sumadoIslandMeter;
+    toSumado({ action: 'start', glyph: 'mic', right: '0:00', color: '#ff453a', recording: true, meter, ttl: 30 });
+    if (meter) startSumadoMeter();
     sumadoRecTimer = setInterval(() => toSumado({ action: 'update', right: fmtRecElapsed(Date.now() - sumadoRecStart), ttl: 30 }), 1000);
   } else {
     if (!sumadoRecTimer) return;
     clearInterval(sumadoRecTimer);
     sumadoRecTimer = null;
+    stopSumadoMeter();
     toSumado({ action: 'end' });
   }
 }
@@ -7500,6 +7538,7 @@ function openSettings() {
   if (els.inputChunkMaxSec) els.inputChunkMaxSec.value = state.settings.audioChunkMaxSec || 20;
   if (els.inputAudioBitrate) els.inputAudioBitrate.value = String(state.settings.audioBitrate || 64000);
   if (els.inputKeepRecording) els.inputKeepRecording.checked = !!state.settings.audioKeepRecording;
+  if (els.inputSumadoMeter) els.inputSumadoMeter.checked = !!state.settings.sumadoIslandMeter;
   if (els.inputAudioRetention) els.inputAudioRetention.value = state.settings.audioRetention || 'close';
   if (els.inputClaudeBridge) els.inputClaudeBridge.checked = !!state.settings.useClaudeBridge;   // v0.24.0
   // v0.24.22: Claude 連携のチェックを入れた**あと**で見る。先に見ると、連携オフと読み違えて
@@ -7588,6 +7627,7 @@ function saveSettingsFromForm() {
     }
   }
   if (els.inputAudioRetention) state.settings.audioRetention = els.inputAudioRetention.value || 'close';
+  if (els.inputSumadoMeter) state.settings.sumadoIslandMeter = els.inputSumadoMeter.checked;
   // v0.24.0: Claude Code 連携。gemini.js 側はこの値を claude-bridge.js 経由で見る
   if (els.inputClaudeBridge) {
     state.settings.useClaudeBridge = els.inputClaudeBridge.checked;

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.36" />
+  <link rel="stylesheet" href="style.css?v=0.24.37" />
 </head>
 <body>
   <div id="app">
@@ -618,6 +618,17 @@
         </div>
 
         <div class="field-group">
+          <h3 class="field-group-title">SUMADO</h3>
+          <label class="field field-row">
+            <input id="input-sumado-meter" type="checkbox" />
+            <span>録音中、SUMADO のアイランドに声の大きさのメーターを出す</span>
+          </label>
+          <div class="field">
+            <small class="field-hint">SUMADO の中で使っているときだけ働きます。メーターのために、マイクの音の大きさを別に測ります（音そのものは SUMADO に送りません）。</small>
+          </div>
+        </div>
+
+        <div class="field-group">
           <h3 class="field-group-title">録音の保持</h3>
           <label class="field field-row">
             <input id="input-keep-recording" type="checkbox" />
@@ -1032,16 +1043,16 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.36"></script>
-  <script src="gemini.js?v=0.24.36"></script>
-  <script src="notion.js?v=0.24.36"></script>
-  <script src="audio-store.js?v=0.24.36"></script>
-  <script src="claude-bridge.js?v=0.24.36"></script>
-  <script src="claude-installer.js?v=0.24.36"></script>
-  <script src="live-summary.js?v=0.24.36"></script>
-  <script src="image-store.js?v=0.24.36"></script>
-  <script src="gemini-files.js?v=0.24.36"></script>
-  <script src="term-dicts.js?v=0.24.36"></script>
-  <script src="app.js?v=0.24.36"></script>
+  <script src="icons.js?v=0.24.37"></script>
+  <script src="gemini.js?v=0.24.37"></script>
+  <script src="notion.js?v=0.24.37"></script>
+  <script src="audio-store.js?v=0.24.37"></script>
+  <script src="claude-bridge.js?v=0.24.37"></script>
+  <script src="claude-installer.js?v=0.24.37"></script>
+  <script src="live-summary.js?v=0.24.37"></script>
+  <script src="image-store.js?v=0.24.37"></script>
+  <script src="gemini-files.js?v=0.24.37"></script>
+  <script src="term-dicts.js?v=0.24.37"></script>
+  <script src="app.js?v=0.24.37"></script>
 </body>
 </html>
