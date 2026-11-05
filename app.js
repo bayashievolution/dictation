@@ -740,6 +740,45 @@ function setRecordingUI(isRec) {
   if (iconEl && typeof setIcon === 'function') setIcon(iconEl, isRec ? 'record-stop' : 'record', 18);
   els.btnToggle.title = isRec ? '停止' : '録音開始';
   renderTabs();
+  tellSumadoRecording(isRec);
+}
+
+// SUMADO（iPhone 風のホーム。bayashievolution/sumado）の中で使っているとき、録音中だと知らせる。
+// SUMADO の上の帯の時計のまわりが赤くなり、アイランド（上の黒い帯）に録音の時間が出る。
+// 取り決めは SUMADO の docs/v1/SUMADO対応アプリの作り方.md の「SUMADO の仕組みを使う（API）」。
+// - 録音の状態は、どの道（Web Speech・Gemini・エラーで止まった）でも setRecordingUI を通るので、ここ 1 か所で送る
+// - SUMADO が入っていない Chrome でも、届かないだけ（lastError を読んで捨てる）。ブラウザ版（serve.js）には chrome.runtime がないので送らない
+// - ttl 30 秒：毎秒の update で延びる。拡張が落ちて end を送れなくても、30 秒で SUMADO から消える
+const SUMADO_ID = 'bjmnpgoaodjhbkpmpiaaceibhffemmgo';
+let sumadoRecStart = 0;
+let sumadoRecTimer = null;
+function toSumado(msg) {
+  try {
+    if (!(typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage && chrome.runtime.id)) return;
+    chrome.runtime.sendMessage(SUMADO_ID, { type: 'island', id: 'rec', ...msg }, () => void chrome.runtime.lastError);
+  } catch (e) {
+    // 送れなくても録音には関係ない
+  }
+}
+function fmtRecElapsed(ms) {
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+function tellSumadoRecording(isRec) {
+  if (isRec) {
+    if (sumadoRecTimer) return; // 自動の再接続などで続けて呼ばれても、時間は最初から数えなおさない
+    sumadoRecStart = Date.now();
+    toSumado({ action: 'start', glyph: 'mic', right: '0:00', color: '#ff453a', recording: true, ttl: 30 });
+    sumadoRecTimer = setInterval(() => toSumado({ action: 'update', right: fmtRecElapsed(Date.now() - sumadoRecStart), ttl: 30 }), 1000);
+  } else {
+    if (!sumadoRecTimer) return;
+    clearInterval(sumadoRecTimer);
+    sumadoRecTimer = null;
+    toSumado({ action: 'end' });
+  }
 }
 
 function hideEmptyHint() {
