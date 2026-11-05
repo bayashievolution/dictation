@@ -3256,3 +3256,9 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - **守ること**: 2つとも残す。`index.html` やアイコンの名前・場所を変えるときは `app.json` の `start` / `icon` と WAR の resources も合わせる。`main` など別のブランチに移すときも一緒に持っていく（`main`（v0.15.2）にはまだ入っていない）。`window.top` / `parent` や `chrome.sidePanel` に頼る処理は iframe の中で動き方が変わりうる（2026-11-03 時点で app.js / captions.js / claude-bridge.js には無い。`chrome.sidePanel` は background.js だけ）
   - 引き継ぎに「`アップデート.bat` も今までどおり使える」とあったが、リポジトリにあるのは `update.bat`（`アップデート.bat` は無い。手元で名前を変えたものかもしれない）。`update.sh` の BRANCH は開発ブランチ固定なので、ブランチを変えるときは一緒に変える。GitHub Desktop で Fetch → Pull して更新するやり方も使い始めたとのこと
   - SUMADO 側の手順書: bayashievolution/sumado の `docs/v1/SUMADO対応アプリの作り方.md`
+- 2026-11-05 (v0.24.35): **SUMADO の中で録音中だと SUMADO に知らせる**ようにした（やっさんの頼み：「ディクテーションで録音中は、時計の周りを赤くしてほしい」。SUMADO 側の取り決め `recording: true`）。`setRecordingUI` の最後で `tellSumadoRecording` を呼び、SUMADO（拡張ID `bjmnpgoaodjhbkpmpiaaceibhffemmgo`）へ island の start（`glyph: 'mic'`・経過時間・`recording: true`・`ttl: 30`）/ 毎秒 update / end を `chrome.runtime.sendMessage` で送る
+  - **なぜ setRecordingUI か**: 録音の状態は Web Speech・Gemini・マイク拒否で止まった、のどの道でもここを通る。1 か所なら送り忘れがない。自動の再接続で続けて呼ばれても時間を数えなおさない（タイマーが動いていれば何もしない）
+  - **なぜ ttl 30 秒か**: 拡張が落ちて end を送れなくても、SUMADO の帯に「録音中」が残り続けないように。毎秒の update で延びる
+  - SUMADO が入っていない Chrome では届かないだけ（`lastError` を読んで捨てる）。ブラウザ版（serve.js）には `chrome.runtime.id` がないので送らない
+  - 最初は SUMADO 対応の枝（`claude/sumado-app-v024`）に v0.24.34.1 として入れたが、`update.bat` はこの枝（`claude/dictation-app-status-ra7l70`）しか更新しないので、やっさんの手元が 0.24.34 のままだった。この枝にマージして v0.24.35 にした
+  - 確かめ: SUMADO とこの拡張を両方読み込んだ Chromium（playwright）で、`tellSumadoRecording(true/false)` → SUMADO の帯の時計が赤くなる・戻るのを見た。実際に録音しての確かめはまだ
