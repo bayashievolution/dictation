@@ -3262,3 +3262,7 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - SUMADO が入っていない Chrome では届かないだけ（`lastError` を読んで捨てる）。ブラウザ版（serve.js）には `chrome.runtime.id` がないので送らない
   - 最初は SUMADO 対応の枝（`claude/sumado-app-v024`）に v0.24.34.1 として入れたが、`update.bat` はこの枝（`claude/dictation-app-status-ra7l70`）しか更新しないので、やっさんの手元が 0.24.34 のままだった。この枝にマージして v0.24.35 にした
   - 確かめ: SUMADO とこの拡張を両方読み込んだ Chromium（playwright）で、`tellSumadoRecording(true/false)` → SUMADO の帯の時計が赤くなる・戻るのを見た。実際に録音しての確かめはまだ
+- 2026-11-06 (v0.24.36): **SUMADO の中で開かれたとき、いちばん上の地の色を SUMADO に知らせる**ようにした。SUMADO はアプリの上に時刻の帯を出すようになり、その帯の色をアプリに合わせている。iframe の中は外から読めないので、ディクテーションの帯だけ白くなっていた（やっさんの実機「上が白くなってしまってる」）
+  - `window.parent !== window` のときだけ、1 秒ごとにいちばん上の要素の背景色を測り、変わったときだけ `postMessage({ sumadoStatus: 1, color }, 'chrome-extension://<SUMADO の ID>')`。単独のサイドパネルでは何もしない
+  - **関数の外**（app.js の 788 行目あたり、トップレベル）に置いた。起動時に必ず動く必要があるため（「誰がいつ呼ぶか」の事故を繰り返さない）
+  - 確かめ: SUMADO とこの拡張を両方読み込んだ Chromium で、SUMADO の中でディクテーションを開き、帯が `rgb(35, 35, 42)`・字が白になるのを見た

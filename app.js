@@ -781,6 +781,35 @@ function tellSumadoRecording(isRec) {
   }
 }
 
+// SUMADO の中（iframe）で開かれているときだけ、いちばん上の地の色を SUMADO に知らせる。
+// SUMADO はアプリの上に時刻の帯を出していて、その帯の色をこのページに合わせるため（外からはこのページの中を読めない）。
+// 1 秒ごとに測って、変わったときだけ送る（テーマを変えたときも追いかける）。
+// **関数の中に入れないこと**：ページを読み込んだときに必ず動く場所に置く（CLAUDE.md「誰がいつ呼ぶか」）
+if (typeof window !== 'undefined' && window.parent !== window) {
+  let lastTopColor = '';
+  const okColor = (bg) => bg && bg !== 'transparent' && !/rgba\(.*,\s*0\)$/.test(bg);
+  const topColor = () => {
+    for (let n = document.elementFromPoint(innerWidth / 2, 2); n; n = n.parentElement) {
+      const bg = getComputedStyle(n).backgroundColor;
+      if (okColor(bg)) return bg;
+    }
+    const root = getComputedStyle(document.documentElement).backgroundColor;
+    return okColor(root) ? root : '#ffffff';
+  };
+  const reportTopColor = () => {
+    try {
+      const c = topColor();
+      if (c === lastTopColor) return;
+      lastTopColor = c;
+      window.parent.postMessage({ sumadoStatus: 1, color: c }, `chrome-extension://${SUMADO_ID}`);
+    } catch (e) {
+      // 送れなくても、この拡張の動きには関係ない
+    }
+  };
+  window.addEventListener('load', reportTopColor);
+  setInterval(reportTopColor, 1000);
+}
+
 function hideEmptyHint() {
   if (els.emptyHint && !els.emptyHint.hidden) els.emptyHint.hidden = true;
 }
