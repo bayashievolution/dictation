@@ -3270,3 +3270,5 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - オンで SUMADO の中のとき、録音の start に `meter: true` を付け、80ms ごとに `{ action: 'level', level }` を送る（SUMADO はこれを覚えずにメーターへ流す）
   - **Web Speech のときは録音の音の流れを自分で持っていない**ので、メーターのためにマイクを別に開いて大きさだけ測る（音は送らない）。止めたらマイクも閉じる（`stopSumadoMeter`）
   - 確かめ: SUMADO とこの拡張を両方読み込んだ Chromium（試験用のマイク）で、SUMADO のアイランドの棒が動き、止めると消えるのを見た。実際の録音での確かめはまだ
+- 2026-11-06 (v0.24.38): **SUMADO の上の帯の分だけ上をあける**。SUMADO は追加アプリを画面のいちばん上から描き、時刻の帯（44px）を透明で重ねるようになった（やっさんの指定「アプリを透過して見せてほしい」）。SUMADO が `{ sumadoSafeTop: 44 }` を送ってくるので、`--sumado-safe-top` に入れ、`#app` の `padding-top: max(env(safe-area-inset-top), var(--sumado-safe-top, 0px))` であける。単独のサイドパネルでは 0
+  - 確かめ: SUMADO とこの拡張を両方読み込んだ Chromium で、帯が透明になり、ディクテーションの地が透けて、見出しは帯の下から始まるのを見た

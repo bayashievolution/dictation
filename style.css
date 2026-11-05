@@ -97,7 +97,8 @@ html, body {
   flex-direction: column;
   height: 100%;
   width: 100%;
-  padding-top: env(safe-area-inset-top);
+  /* SUMADO の中では、上の 44px が SUMADO の時刻の帯（透明で重なる）。SUMADO が --sumado-safe-top を知らせてくる（app.js） */
+  padding-top: max(env(safe-area-inset-top), var(--sumado-safe-top, 0px));
   padding-bottom: env(safe-area-inset-bottom);
   box-sizing: border-box;
 }

@@ -846,6 +846,12 @@ if (typeof window !== 'undefined' && window.parent !== window) {
   };
   window.addEventListener('load', reportTopColor);
   setInterval(reportTopColor, 1000);
+  // v0.24.38: SUMADO は、上の帯（時刻）を透明にしてページの上に重ねる。帯の高さを知らせてくるので、その分だけ上をあける（style.css の #app）
+  window.addEventListener('message', (e) => {
+    if (e.origin !== `chrome-extension://${SUMADO_ID}` || !e.data || typeof e.data.sumadoSafeTop !== 'number') return;
+    document.documentElement.style.setProperty('--sumado-safe-top', `${Math.max(0, Math.min(120, e.data.sumadoSafeTop))}px`);
+  });
+  try { window.parent.postMessage({ sumadoAskSafeTop: 1 }, `chrome-extension://${SUMADO_ID}`); } catch (e) { /* 単独のときは何もしない */ }
 }
 
 function hideEmptyHint() {
