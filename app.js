@@ -1697,6 +1697,8 @@ async function consolidateShortChunks(shortParas) {
       maxOutputTokens: Math.min(16384, Math.max(2048, rawText.length * 2)),
       // v0.24.52: 連携がオンなら Claude に回す。失敗しても Gemini には回さない
       feature: 'live-heading',
+      // v0.24.54 ①: ライブ要約の目次と見出しの言葉をそろえる
+      headingHints: liveSummaryTocTitles(inBg ? (state.recordingSessionId || state.activeId) : state.activeId),
     });
     firstPara.className = 'paragraph refined';
     setParagraphContent(firstPara, refined || rawText);
@@ -2219,12 +2221,99 @@ function liveSummarySources(session) {
   };
 }
 
-/** Markdown → 要約タブに入れる HTML（目次から本文へ飛べるようにする） */
-function renderLiveSummaryHtml(md) {
+/**
+ * Markdown → 要約タブに入れる HTML（目次から本文へ飛べるようにする）
+ * v0.24.54: 目次の項目に「始まりの発言」（data-ls-quote）と、文字起こしへ飛ぶボタンを付ける。
+ * 今回 Claude が発言を返さなかった項目は、前回の同じ見出しのものを引き継ぐ
+ */
+function renderLiveSummaryHtml(md, quotes = {}, previousHtml = '') {
   const box = document.createElement('div');
   box.innerHTML = renderMarkdown(md);
   linkLiveSummaryToc(box);
+  const prev = {};
+  if (previousHtml) {
+    const pb = document.createElement('div');
+    pb.innerHTML = previousHtml;
+    pb.querySelectorAll('li[data-ls-quote]').forEach((li) => {
+      prev[liveSummaryTextKey(cleanLiveSummaryTitle(liveSummaryTocItemText(li)))] = li.dataset.lsQuote;
+    });
+  }
+  box.querySelectorAll('li[data-ls-jump]').forEach((li) => {
+    const q = (quotes || {})[li.dataset.lsJump] || prev[liveSummaryTextKey(cleanLiveSummaryTitle(liveSummaryTocItemText(li)))];
+    if (q) li.dataset.lsQuote = q;
+  });
+  decorateLiveSummaryToc(box);
   return box.innerHTML;
+}
+
+/** 目次の項目の文字（飛ぶボタンを除く）(v0.24.54) */
+function liveSummaryTocItemText(li) {
+  const c = li.cloneNode(true);
+  c.querySelectorAll('.ls-goto').forEach((b) => b.remove());
+  return c.textContent.trim();
+}
+
+/**
+ * 目次の各項目に「文字起こしで見る」ボタンを付ける (v0.24.54・やっさん採用の案②)
+ * 前の版で作ったライブ要約にも付くよう、開くたびに呼ぶ（付いていれば何もしない）。
+ * ボタンは文字を持たないので、コピー・Notion・次の回に Claude へ渡す前回の要約には混ざらない
+ */
+function decorateLiveSummaryToc(root) {
+  if (!root) return;
+  root.querySelectorAll('ol.live-summary-toc > li[data-ls-jump]').forEach((li) => {
+    if (li.querySelector('.ls-goto')) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ls-goto';
+    b.contentEditable = 'false';
+    b.dataset.lsGoto = '1';
+    b.title = '文字起こしで見る';
+    b.setAttribute('aria-label', '文字起こしで見る');
+    b.innerHTML = typeof icon === 'function' ? icon('mic', 13) : '';
+    li.appendChild(b);
+  });
+}
+
+/** 目次の項目から、文字起こしのその話題の場所へ飛ぶ (v0.24.54) */
+function liveSummaryJumpToTranscript(li) {
+  const blocks = [], targets = [];
+  els.confirmed.querySelectorAll('.paragraph').forEach((p) => {
+    for (const c of p.children) {
+      const t = elementToPlainText(c);
+      if (!t) continue;
+      blocks.push({ kind: c.tagName === 'H2' ? 'h2' : 'p', text: t });
+      targets.push(c);
+    }
+  });
+  const r = findLiveSummaryTarget({ title: liveSummaryTocItemText(li), quote: li.dataset.lsQuote || '', blocks });
+  if (r.index < 0) {
+    statusNotice('error', '文字起こしの中で、この話題の場所を見つけられませんでした', { ms: 3500 });
+    return false;
+  }
+  const el = targets[r.index];
+  switchInnerPane('pane-transcript');
+  // タブの切り替えが済んでから（見えていない要素は scrollIntoView が効かない）
+  setTimeout(() => {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // 印は DOM に残さない（クラスを付けると、消す前に保存されて残ることがある）
+    if (el.animate) el.animate([{ backgroundColor: 'rgba(255, 196, 0, 0.35)' }, { backgroundColor: 'transparent' }], { duration: 1800, easing: 'ease-out' });
+  }, 80);
+  return true;
+}
+
+/**
+ * いまのライブ要約の目次の見出し (v0.24.54 ①)。見出し追加で言葉をそろえるのに使う
+ * ライブ要約を使っていないときは空（使っていない人のプロンプトを変えない）
+ */
+function liveSummaryTocTitles(sessionId) {
+  if (!liveSummaryActive()) return [];
+  const s = state.sessions.find((x) => x.id === sessionId);
+  const html = sessionId === state.activeId && els.liveSummary ? els.liveSummary.innerHTML : ((s && s.liveSummary) || '');
+  if (!html) return [];
+  const box = document.createElement('div');
+  box.innerHTML = html;
+  return Array.from(box.querySelectorAll('ol.live-summary-toc > li'))
+    .map((li) => cleanLiveSummaryTitle(liveSummaryTocItemText(li))).filter(Boolean);
 }
 
 /**
@@ -2275,7 +2364,8 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
     if (!norm.ok) diagLog.info('ライブ要約: 目次が見つからない形で返ってきました（そのまま表示します）');
     session = state.sessions.find((x) => x.id === sessionId);
     if (!session) return false;
-    const html = renderLiveSummaryHtml(norm.md);
+    const html = renderLiveSummaryHtml(norm.md, norm.quotes,
+      session.id === state.activeId && els.liveSummary ? els.liveSummary.innerHTML : (session.liveSummary || ''));
     if (session.id === state.activeId && elementToPlainText(els.liveSummary).trim()) {
       pushUndo(fresh ? 'ライブ要約を作り直し' : 'ライブ要約を更新', 'pane-live');
     }
@@ -8563,7 +8653,7 @@ function loadActiveSessionIntoDOM() {
   migrateMemoTaskItems();
   hydrateMemoImages(els.memo);      // v0.22.0: 画像の実物を差し込む（非同期）
   els.summary.innerHTML = s?.summary || '';
-  if (els.liveSummary) els.liveSummary.innerHTML = s?.liveSummary || '';   // v0.24.25
+  if (els.liveSummary) { els.liveSummary.innerHTML = s?.liveSummary || ''; decorateLiveSummaryToc(els.liveSummary); }   // v0.24.25 / v0.24.54
   if (els.liveSummaryEmpty) els.liveSummaryEmpty.hidden = !!(s?.liveSummary || '').replace(/<[^>]*>/g, '').trim();
   els.interim.textContent = '';
   state.pendingChunkEl = null;
@@ -9537,6 +9627,14 @@ els.summary.addEventListener('input', onEdit);
 if (els.liveSummary) {
   els.liveSummary.addEventListener('input', onEdit);
   els.liveSummary.addEventListener('click', (e) => {
+    // v0.24.54: 目次の横のボタンは、文字起こしのその話題の場所へ
+    const go = e.target.closest && e.target.closest('[data-ls-goto]');
+    if (go && els.liveSummary.contains(go)) {
+      e.preventDefault();
+      const gli = go.closest('li[data-ls-jump]');
+      if (gli) liveSummaryJumpToTranscript(gli);
+      return;
+    }
     const li = e.target.closest && e.target.closest('[data-ls-jump]');
     if (!li || !els.liveSummary.contains(li)) return;
     const sec = els.liveSummary.querySelector(`[data-ls-section="${li.dataset.lsJump}"]`);

@@ -1690,6 +1690,26 @@ mark.search-hit.current {
 #summary .live-summary-toc li[data-ls-jump]:hover, #live-summary .live-summary-toc li[data-ls-jump]:hover {
   text-decoration: underline;
 }
+/* v0.24.54: 目次の横の「文字起こしで見る」。文字起こしタブと同じマイクの絵 */
+#live-summary .live-summary-toc .ls-goto {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  margin-left: 6px;
+  padding: 2px 4px;
+  border: 1px solid var(--border, rgba(0,0,0,.15));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  line-height: 0;
+  user-select: none;
+}
+#live-summary .live-summary-toc .ls-goto:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
 
 /* ───────── Chat (NotebookLM風) ───────── */
 #pane-chat .pane-body.chat-body {

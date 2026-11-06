@@ -61,16 +61,22 @@ function buildLiveSummaryPrompt({ transcript, previous = '', memo = '', title = 
     '2. 見出し',
     '',
     '## 1. 見出し',
+    '> 始まり: 「その話題が始まった発言」',
     '- 要点',
     '- 要点',
     '',
     '## 2. 見出し',
+    '> 始まり: 「その話題が始まった発言」',
     '- 要点',
     '',
     '■ 目次の作り方',
     '- 1つの項目は、ひとまとまりの話題（目安 5〜15分ぶん）',
     '- 見出しは短く、何の話かが分かる言葉にする（「導入」「その他」のようなぼかした言葉は避ける）',
     '- 目次の番号と、本文の見出しの番号・文言を必ず一致させる',
+    // v0.24.54 ①: 文字起こしの見出し（見出し追加で付いたもの）と言葉をそろえる。やっさん採用の案①
+    '- 文字起こしの「## 」で始まる行は、文字起こしに付けてある見出し。同じ話題なら、目次の見出しもなるべくその言葉に合わせる',
+    // v0.24.54 ②: 目次から文字起こしの該当箇所へ飛ぶための手がかり。画面には出さない（normalizeLiveSummary で抜く）
+    '- 本文の各見出しのすぐ下に「> 始まり: 「…」」を1行置く。その話題が始まった発言を、文字起こしから**一字一句そのまま** 10〜20字抜き出す（読み手が文字起こしの該当箇所へ飛ぶのに使う）',
   ];
   if (prev) {
     head.push(
@@ -125,8 +131,110 @@ function normalizeLiveSummary(text) {
   const fence = s.match(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/);
   if (fence) s = fence[1].trim();
   const i = s.search(/^#{1,3}\s*目次\s*$/m);
-  if (i < 0) return { ok: false, md: s };
-  return { ok: true, md: s.slice(i).trim() };
+  if (i < 0) { const q = extractLiveSummaryQuotes(s); return { ok: false, md: q.md, quotes: q.quotes }; }
+  const q = extractLiveSummaryQuotes(s.slice(i).trim());
+  return { ok: true, md: q.md, quotes: q.quotes };
+}
+
+/**
+ * 「> 始まり: 「…」」の行を抜き出して消す (v0.24.54)
+ *
+ * 目次から文字起こしへ飛ぶための手がかりで、読み物ではないので画面にも Notion にも出さない。
+ * 何番目の節（目次の番号と同じ並び）のものかで覚える。
+ * @returns {{md:string, quotes:Object<string,string>}}  quotes は { '1': '発言', ... }
+ */
+function extractLiveSummaryQuotes(md) {
+  const quotes = {};
+  let section = 0, inToc = false;
+  const out = [];
+  for (const line of String(md || '').split('\n')) {
+    const h = /^#{1,3}\s*(.*?)\s*$/.exec(line);
+    if (h) {
+      inToc = h[1] === '目次';
+      if (!inToc) section++;
+      out.push(line);
+      continue;
+    }
+    const q = /^\s*>?\s*始まり\s*[:：]\s*(.*?)\s*$/.exec(line);
+    if (q && !inToc) {
+      const t = q[1].replace(/^[「『"“]+|[」』"”]+$/g, '').trim();
+      if (section > 0 && t && !quotes[String(section)]) quotes[String(section)] = t;
+      continue;
+    }
+    out.push(line);
+  }
+  return { md: out.join('\n').replace(/\n{3,}/g, '\n\n').trim(), quotes };
+}
+
+/** 目次の見出しから、番号と「（進行中）」を外す (v0.24.54) */
+function cleanLiveSummaryTitle(t) {
+  return String(t || '').replace(/[（(]\s*進行中\s*[)）]/g, '').replace(/^\s*\d+\s*[.．、)）]\s*/, '').trim();
+}
+
+/** 比べるための形（全角半角・空白・句読点・括弧・「## 」をそろえる）(v0.24.54) */
+function liveSummaryTextKey(s) {
+  let t = String(s || '');
+  if (t.normalize) t = t.normalize('NFKC');
+  return t.replace(/^#+\s*/gm, '').replace(/[\s、。，．,.・「」『』（）()［］\[\]【】!！?？:：;；"'“”‘’…ー〜~\-]/g, '').toLowerCase();
+}
+
+function liveSummaryBigrams(s) {
+  const set = new Set();
+  for (let i = 0; i + 1 < s.length; i++) set.add(s.slice(i, i + 2));
+  if (s.length === 1) set.add(s);
+  return set;
+}
+
+/**
+ * 目次の項目に当たる、文字起こしの場所を探す (v0.24.54・やっさん採用の案②)
+ *
+ * @param {object} o
+ * @param {string} o.title   目次の見出し
+ * @param {string} [o.quote] その話題が始まった発言（Claude が文字起こしから抜いたもの）
+ * @param {{kind:'h2'|'p', text:string}[]} o.blocks  文字起こしの見出しと本文を上から順に
+ * @returns {{index:number, by:string}}  見つからなければ index -1
+ *
+ * 1. 見出しの言葉がそのまま同じ（①で言葉をそろえているので、これが一番確か）
+ * 2. 始まりの発言が含まれている本文（聞き間違いの直しで少し変わっても拾えるよう、2文字ずつの重なりで見る）
+ * 3. 見出しの言葉が近い
+ * 同じくらい当たるものが複数あれば、上にあるほう（話題の始まり）を選ぶ。
+ */
+function findLiveSummaryTarget({ title, quote = '', blocks }) {
+  const tk = liveSummaryTextKey(cleanLiveSummaryTitle(title));
+  const list = (blocks || []).map((b) => ({ kind: b.kind, key: liveSummaryTextKey(b.text) }));
+  if (tk) {
+    const exact = list.findIndex((b) => b.kind === 'h2' && b.key === tk);
+    if (exact >= 0) return { index: exact, by: 'heading' };
+  }
+  const qk = liveSummaryTextKey(quote);
+  if (qk.length >= 4) {
+    const qb = liveSummaryBigrams(qk);
+    let best = -1, bestScore = 0;
+    list.forEach((b, i) => {
+      if (b.kind !== 'p' || !b.key) return;
+      if (b.key.includes(qk)) { if (bestScore < 1) { best = i; bestScore = 1; } return; }
+      const bb = liveSummaryBigrams(b.key);
+      let hit = 0;
+      for (const g of qb) if (bb.has(g)) hit++;
+      const score = hit / qb.size;
+      if (score > bestScore) { best = i; bestScore = score; }
+    });
+    if (best >= 0 && bestScore >= 0.6) return { index: best, by: 'quote' };
+  }
+  if (tk.length >= 2) {
+    const tb = liveSummaryBigrams(tk);
+    let best = -1, bestScore = 0;
+    list.forEach((b, i) => {
+      if (b.kind !== 'h2' || !b.key) return;
+      const bb = liveSummaryBigrams(b.key);
+      let hit = 0;
+      for (const g of tb) if (bb.has(g)) hit++;
+      const score = (2 * hit) / (tb.size + bb.size);
+      if (score > bestScore) { best = i; bestScore = score; }
+    });
+    if (best >= 0 && bestScore >= 0.5) return { index: best, by: 'similar-heading' };
+  }
+  return { index: -1, by: '' };
 }
 
 /**
@@ -161,5 +269,6 @@ function linkLiveSummaryToc(root) {
 
 if (typeof module !== 'undefined') {
   module.exports = { buildLiveSummaryPrompt, normalizeLiveSummary, linkLiveSummaryToc,
-                     clampLiveSummaryMinutes, LIVE_SUMMARY_MAX_PROMPT };
+                     clampLiveSummaryMinutes, LIVE_SUMMARY_MAX_PROMPT,
+                     extractLiveSummaryQuotes, cleanLiveSummaryTitle, liveSummaryTextKey, findLiveSummaryTarget };
 }

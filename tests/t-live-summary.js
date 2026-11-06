@@ -16,7 +16,8 @@ const eq = (label, got, want) => {
 const ls = { module: { exports: {} } };
 vm.createContext(ls);
 vm.runInContext(fs.readFileSync(path.join(SRC, 'live-summary.js'), 'utf8'), ls);
-const { buildLiveSummaryPrompt, normalizeLiveSummary, clampLiveSummaryMinutes, LIVE_SUMMARY_MAX_PROMPT } = ls.module.exports;
+const { buildLiveSummaryPrompt, normalizeLiveSummary, clampLiveSummaryMinutes, LIVE_SUMMARY_MAX_PROMPT,
+        extractLiveSummaryQuotes, cleanLiveSummaryTitle, findLiveSummaryTarget } = ls.module.exports;
 
 const T = '今日は評価論の話をします。'.repeat(30);
 
@@ -65,10 +66,44 @@ console.log('\n■ 長すぎる文字起こし');
 }
 
 console.log('\n■ 返ってきたものを整える');
-eq('前置きを落とす', normalizeLiveSummary('更新しました。\n\n## 目次\n1. a\n\n## 1. a\n- x'),
+const nl = (t) => { const r = normalizeLiveSummary(t); return { ok: r.ok, md: r.md }; };
+eq('前置きを落とす', nl('更新しました。\n\n## 目次\n1. a\n\n## 1. a\n- x'),
    { ok: true, md: '## 目次\n1. a\n\n## 1. a\n- x' });
-eq('コードブロックを外す', normalizeLiveSummary('```markdown\n## 目次\n1. a\n```'), { ok: true, md: '## 目次\n1. a' });
-eq('目次が無ければ ok:false（中身はそのまま）', normalizeLiveSummary('ただの文'), { ok: false, md: 'ただの文' });
+eq('コードブロックを外す', nl('```markdown\n## 目次\n1. a\n```'), { ok: true, md: '## 目次\n1. a' });
+eq('目次が無ければ ok:false（中身はそのまま）', nl('ただの文'), { ok: false, md: 'ただの文' });
+
+// v0.24.54 ①②: 文字起こしの見出しと言葉をそろえる・目次から文字起こしへ飛ぶ
+console.log('\n■ 文字起こしの見出しとそろえる・始まりの発言（v0.24.54）');
+{
+  const p = buildLiveSummaryPrompt({ transcript: T });
+  eq('文字起こしの「## 」の見出しに目次の言葉を合わせるよう頼む', /文字起こしの「## 」で始まる行/.test(p), true);
+  eq('各節に「始まり」の発言を一字一句そのまま付けるよう頼む', /始まり: 「…」」を1行置く/.test(p) && /一字一句そのまま/.test(p), true);
+}
+{
+  const r = normalizeLiveSummary('## 目次\n1. 評価の観点\n2. 妥当性（進行中）\n\n## 1. 評価の観点\n> 始まり: 「今日は評価論の話をします」\n- x\n\n## 2. 妥当性（進行中）\n> 始まり：まず一つ目は妥当性です\n- y');
+  eq('始まりの行は画面に出さない（抜いて覚える）', [/始まり/.test(r.md), r.md.includes('- x') && r.md.includes('- y')], [false, true]);
+  eq('何番目の節のものかで覚える（括弧は外す・全角のコロンでも）', r.quotes, { 1: '今日は評価論の話をします', 2: 'まず一つ目は妥当性です' });
+  eq('始まりが無い節は空', extractLiveSummaryQuotes('## 目次\n1. a\n\n## 1. a\n- x').quotes, {});
+}
+eq('目次の見出しから番号と（進行中）を外す', [cleanLiveSummaryTitle('2. 妥当性（進行中）'), cleanLiveSummaryTitle('評価の観点')], ['妥当性', '評価の観点']);
+{
+  const blocks = [
+    { kind: 'h2', text: '導入と自己紹介' },
+    { kind: 'p', text: 'よろしくお願いします。私は田中です。' },
+    { kind: 'h2', text: '評価の観点' },
+    { kind: 'p', text: '今日は評価論の話をします。観点は三つあります。' },
+    { kind: 'p', text: 'まず一つ目は妥当性です。測りたいものを測れているか。' },
+    { kind: 'h2', text: '信頼性について' },
+    { kind: 'p', text: '二つ目は信頼性です。' },
+  ];
+  const f = (title, quote) => findLiveSummaryTarget({ title, quote, blocks });
+  eq('見出しの言葉が同じなら、その見出しへ（①でそろえてある）', f('評価の観点', ''), { index: 2, by: 'heading' });
+  eq('（進行中）や番号が付いていても同じ見出しとみなす', f('3. 信頼性について（進行中）', '').index, 5);
+  eq('見出しが無い話題は、始まりの発言で本文を探す', f('妥当性', 'まず一つ目は妥当性です'), { index: 4, by: 'quote' });
+  eq('聞き間違いの直しで少し変わっていても拾う', f('妥当性', 'まず１つ目は、妥当性です'), { index: 4, by: 'quote' });
+  eq('見出しの言葉が近ければ、その見出しへ', f('信頼性', ''), { index: 5, by: 'similar-heading' });
+  eq('どこにも無ければ -1（違う場所へ飛ばさない）', f('まとめと宿題', '来週までにレポートを出してください'), { index: -1, by: '' });
+}
 
 console.log('\n■ 分数');
 eq('ふつう', clampLiveSummaryMinutes('15'), 15);

@@ -437,6 +437,8 @@ async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800, sk
 
 async function refineWithGemini({
   apiKey, context, newChunk, sessionContext, joinFragments = false, maxOutputTokens = 2048,
+  // v0.24.54 ①: ライブ要約の目次の見出し。見出し追加のときに言葉をそろえる（やっさん採用の案①）
+  headingHints = [],
   // v0.24.52: 録音中の整形も、連携がオンなら Claude に回す（'live-refine'）。
   // 以前は 8〜10 秒かかるので回していなかったが、effort low とセッションの使い回しで縮めた。
   // 見出し追加は 'live-heading'、全体整形は 'whole-refine' を渡してくる
@@ -478,9 +480,20 @@ async function refineWithGemini({
     '',
   ] : [];
 
+  // v0.24.54 ①: 目次と文字起こしの見出しが別々の言葉だと、目次から文字起こしの場所を探しにくい
+  // （ライブ要約の側にも「文字起こしの見出しに合わせる」と頼んでいる）
+  const hints = (headingHints || []).map((h) => String(h || '').trim()).filter(Boolean).slice(0, 30);
+  const hintBlock = hints.length ? [
+    '【見出しの候補（ライブ要約の目次）】',
+    ...hints.map((h) => `- ${h}`),
+    '見出しを付けるとき、内容がこの中のどれかに当たるなら、その言葉をそのまま使うこと。当てはまらなければ新しく付けてよい。',
+    '',
+  ] : [];
+
   const userPrompt = [
     ...(ctxBlock ? [ctxBlock, ''] : []),
     ...fragmentBlock,
+    ...hintBlock,
     '【直前の整形済み文脈】',
     context || '（なし：これが最初のチャンクです）',
     '',
