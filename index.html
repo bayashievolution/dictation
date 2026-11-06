@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.40" />
+  <link rel="stylesheet" href="style.css?v=0.24.41" />
 </head>
 <body>
   <div id="app">
@@ -255,7 +255,7 @@
           <div id="live-summary" contenteditable="true" spellcheck="false"></div>
           <div id="live-summary-empty" class="empty-hint" hidden>
             録音中、設定した間隔ごとに<strong>目次付きの要約</strong>がここにできます（Claude 連携）。<br>
-            <small>間隔は 設定 → Claude Code 連携 で変えられます</small>
+            <small>間隔は 設定 → AI機能 で変えられます</small>
           </div>
         </div>
       </div>
@@ -352,7 +352,7 @@
 
           <label class="field field-row">
             <input id="input-claude-code" type="checkbox" />
-            <span>Claude Code</span>
+            <span>Claude Code 連携</span>
           </label>
           <div class="field">
             <small class="field-hint">
@@ -390,7 +390,7 @@
             <span>ライブ整形</span>
           </label>
           <div class="field">
-            <small class="field-hint">文字起こしをしつつ、段落分けや句読点を入れて体裁を整えます（Gemini）。</small>
+            <small class="field-hint">文字起こしをしつつ、段落分けや句読点を入れて体裁を整えます。</small>
           </div>
           <label class="field">
             <span class="field-label">ライブ整形のタイミング（秒）</span>
@@ -411,11 +411,11 @@
           </label>
           <div class="field">
             <small class="field-hint">
-              文字起こしをしつつ、話題を順に端的にまとめます（Claude Code）。
+              文字起こしをしつつ、話題を順に端的にまとめます。
               「要約」の左に「ライブ要約」タブが出て、目次の項目を押すとその節へ飛びます。
               Claude に回せなかったときは Gemini には切り替えず、その回の更新を見送ります。
             </small>
-            <small id="live-summary-note" class="field-hint warn-hint">上の「Claude Code」をオンにすると選べます。</small>
+            <small id="live-summary-note" class="field-hint warn-hint">上の「Claude Code 連携」をオンにすると選べます。</small>
           </div>
           <label class="field">
             <span class="field-label">ライブ要約の間隔（分）</span>
@@ -461,7 +461,7 @@
               要約・質問・タイトル・全体整形・メモの整形を Claude Code で処理します。
               音声を処理する必要がある、文字起こし・話者判別・ライブ整形は Gemini API で処理します。
             </small>
-            <small id="claude-route-note" class="field-hint warn-hint">上の「Claude Code」をオンにすると選べます。</small>
+            <small id="claude-route-note" class="field-hint warn-hint">上の「Claude Code 連携」をオンにすると選べます。</small>
           </div>
         </div>
 
@@ -1039,16 +1039,16 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.40"></script>
-  <script src="gemini.js?v=0.24.40"></script>
-  <script src="notion.js?v=0.24.40"></script>
-  <script src="audio-store.js?v=0.24.40"></script>
-  <script src="claude-bridge.js?v=0.24.40"></script>
-  <script src="claude-installer.js?v=0.24.40"></script>
-  <script src="live-summary.js?v=0.24.40"></script>
-  <script src="image-store.js?v=0.24.40"></script>
-  <script src="gemini-files.js?v=0.24.40"></script>
-  <script src="term-dicts.js?v=0.24.40"></script>
-  <script src="app.js?v=0.24.40"></script>
+  <script src="icons.js?v=0.24.41"></script>
+  <script src="gemini.js?v=0.24.41"></script>
+  <script src="notion.js?v=0.24.41"></script>
+  <script src="audio-store.js?v=0.24.41"></script>
+  <script src="claude-bridge.js?v=0.24.41"></script>
+  <script src="claude-installer.js?v=0.24.41"></script>
+  <script src="live-summary.js?v=0.24.41"></script>
+  <script src="image-store.js?v=0.24.41"></script>
+  <script src="gemini-files.js?v=0.24.41"></script>
+  <script src="term-dicts.js?v=0.24.41"></script>
+  <script src="app.js?v=0.24.41"></script>
 </body>
 </html>
