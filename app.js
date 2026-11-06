@@ -109,6 +109,9 @@ window.diagLog = diagLog; // gemini.js 等から info() を呼べるように公
 const DEFAULT_SETTINGS = {
   apiKey: '',
   silenceSec: 3,
+  // v0.24.51: 見出し追加（ミドル整形＝溜まった文字起こしをまとめ直して見出しを付ける）のタイミング（秒）。
+  // 以前は「3段落たまったら、または60秒」で、段落の数の条件はやっさんの指定でなくした
+  midConsolidateSec: 300,
   aiEnabled: true,
   autoStopSec: 120,
   autoStopEnabled: true,
@@ -489,6 +492,7 @@ const els = {
   btnSilenceContinue: document.getElementById('btn-silence-continue'),
   inputApiKey: document.getElementById('input-api-key'),
   inputSilenceSec: document.getElementById('input-silence-sec'),
+  inputMidConsolidateSec: document.getElementById('input-mid-consolidate-sec'),   // v0.24.51
   inputAiEnabled: document.getElementById('input-ai-enabled'),
   inputAutoStop: document.getElementById('input-auto-stop'),
   inputAutoStopSec: document.getElementById('input-auto-stop-sec'),
@@ -1590,8 +1594,12 @@ async function refineByChunks(fullText, progressTargetEl) {
  * 誤字が残ることがある。3段落溜まるか 60秒経ったら refineWithGemini で
  * 文脈込みに統合 + 見出し追加 で整形しなおす。 */
 
-const MID_CHUNK_THRESHOLD = 3;      // 何段落溜まったら発火
-const MID_TIME_THRESHOLD_MS = 60000; // 最初の短チャンクから何ms経ったら発火
+// v0.24.51: 段落の数で発火するのをやめ、設定の秒数（midConsolidateSec）だけで発火する。
+// 以前の「3段落 or 60秒」だと、チャンクが20秒前後で来るので実質1分ごとに見出しが付いていた
+function midConsolidateMs() {
+  const n = Number(state.settings.midConsolidateSec);
+  return (Number.isFinite(n) ? Math.max(30, Math.min(1800, n)) : 300) * 1000;
+}
 
 /**
  * 送信中の音声チャンクが全部確定するまで黙って待つ (v0.18.6)
@@ -1638,7 +1646,7 @@ function maybeConsolidateShortChunks() {
   const firstTs = parseInt(shortParas[0].dataset.shortTs || '0', 10);
   const elapsed = firstTs ? Date.now() - firstTs : 0;
 
-  if (shortParas.length < MID_CHUNK_THRESHOLD && elapsed < MID_TIME_THRESHOLD_MS) return;
+  if (elapsed < midConsolidateMs()) return;
 
   consolidateShortChunks(shortParas);
 }
@@ -1653,8 +1661,10 @@ async function consolidateShortChunks(shortParas) {
   const rawText = shortParas.map(p => p.innerText.trim()).filter(Boolean).join('\n\n');
 
   // 先頭を refining に、2つ目以降は削除
+  // v0.24.51: 待っている間も元の文字を出しておく（.refining で薄く見える）。以前は「（文脈整形中…）」の
+  // 1行に置き換えていたが、5分ぶんまとめるようになって、その間に5分ぶんが見えなくなるため
   firstPara.className = 'paragraph refining';
-  setParagraphContent(firstPara, '（文脈整形中…）');
+  setParagraphContent(firstPara, rawText);
   for (let i = 1; i < shortParas.length; i++) {
     shortParas[i].remove();
   }
@@ -1672,6 +1682,8 @@ async function consolidateShortChunks(shortParas) {
       // v0.17.2: ここに集まるのは同じ発話を機械的に切った断片の並び。
       // 文の途中で切れているものを繋ぎ直させる
       joinFragments: true,
+      // v0.24.51: 5分ぶんまとめると数千字になり、既定の 2048 では返事が途中で切れる。量に合わせて広げる
+      maxOutputTokens: Math.min(16384, Math.max(2048, rawText.length * 2)),
     });
     firstPara.className = 'paragraph refined';
     setParagraphContent(firstPara, refined || rawText);
@@ -7584,6 +7596,7 @@ function openSettings() {
   els.inputApiKey.value = state.settings.apiKey;
   syncNotionSettingsUi();
   els.inputSilenceSec.value = state.settings.silenceSec;
+  if (els.inputMidConsolidateSec) els.inputMidConsolidateSec.value = midConsolidateMs() / 1000;   // v0.24.51
   if (els.inputLiveSummary) els.inputLiveSummary.checked = !!state.settings.liveSummary;
   if (els.inputLiveSummaryMin) els.inputLiveSummaryMin.value = clampLiveSummaryMinutes(state.settings.liveSummaryMin);
   els.inputAiEnabled.checked = state.settings.aiEnabled;
@@ -7667,6 +7680,9 @@ function saveSettingsFromForm() {
   if (els.inputNotionEnabled) state.settings.notionEnabled = els.inputNotionEnabled.checked;   // v0.24.50
   updateActionButtons();   // v0.24.50: Notion 連携のオン/オフで保存ボタンの押せる/押せないが変わる
   state.settings.silenceSec = Math.max(1, Math.min(30, Number(els.inputSilenceSec.value) || 3));
+  if (els.inputMidConsolidateSec) {
+    state.settings.midConsolidateSec = Math.max(30, Math.min(1800, Number(els.inputMidConsolidateSec.value) || 300));
+  }
   // v0.24.39: 「Claude Code」がオフで押せないときは、前の値を残す（オンに戻したら元どおり）
   if (els.inputLiveSummary && !els.inputLiveSummary.disabled) state.settings.liveSummary = els.inputLiveSummary.checked;
   if (els.inputLiveSummaryMin) state.settings.liveSummaryMin = clampLiveSummaryMinutes(els.inputLiveSummaryMin.value);
