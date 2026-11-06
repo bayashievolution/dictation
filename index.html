@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.46" />
+  <link rel="stylesheet" href="style.css?v=0.24.47" />
 </head>
 <body>
   <div id="app">
@@ -419,8 +419,10 @@
               <div class="field">
                 <small class="field-hint">Gemini の結果が返るまでの間、Web Speech が聞き取った文字を「未確定」として表示します。</small>
               </div>
+              <!-- v0.24.47: Gemini に送る音声まわりを「音声チャンク」にまとめた（やっさんの指定） -->
+              <span class="field-label" style="font-weight:600">音声チャンク</span>
               <label class="field">
-                <span class="field-label">音声チャンク（秒）</span>
+                <span class="field-label">チャンク長（秒）</span>
                 <div class="number-stepper">
                   <input id="input-chunk-sec" type="number" min="5" max="60" step="1" />
                   <div class="number-stepper-btns">
@@ -432,17 +434,13 @@
               </label>
               <label class="field field-row">
                 <input id="input-silence-cut" type="checkbox" />
-                <span>無音の切れ目で区切る</span>
+                <span>無音の切れ目で送信</span>
               </label>
               <div class="field">
-                <small class="field-hint">
-                  最短秒数を過ぎたあと、話が途切れたところを狙って区切ります。
-                  文の途中で切れなくなるので、言っていない言葉が足される不具合が起きにくくなります。
-                  オフにすると、従来どおり最短秒数ちょうどで区切ります。
-                </small>
+                <small class="field-hint">話が途切れたところを狙って区切り、音声をGeminiに送信します。オフにすると、設定したチャンク長で送信します。</small>
               </div>
               <label class="field">
-                <span class="field-label">最長何秒まで待つか（秒）</span>
+                <span class="field-label">最長待ち時間（秒）</span>
                 <div class="number-stepper">
                   <input id="input-chunk-max-sec" type="number" min="7" max="90" step="1" />
                   <div class="number-stepper-btns">
@@ -450,7 +448,7 @@
                     <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-max-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
                   </div>
                 </div>
-                <small class="field-hint">ずっと喋り続けて無音が来ない場合、この秒数で諦めて区切ります。既定 20 秒。</small>
+                <small class="field-hint">話が途切れない場合、この秒数で強制的に区切って送信します。</small>
               </label>
               <label class="field">
                 <span class="field-label">音声送信しきい値（バイト）</span>
@@ -461,7 +459,7 @@
                     <button type="button" class="number-stepper-btn" data-stepper-target="input-min-chunk-bytes" data-stepper-delta="-50" tabindex="-1"><span data-icon="chevron-down"></span></button>
                   </div>
                 </div>
-                <small class="field-hint">このサイズ未満の音声チャンクは無音とみなしてスキップ。小声も拾いたいなら下げる（既定 400）／無駄送信を減らすなら上げる。</small>
+                <small class="field-hint">このサイズ未満の音声チャンクは無音とみなしてスキップします。</small>
               </label>
               <label class="field">
                 <span class="field-label">音質（kbps）</span>
@@ -471,8 +469,11 @@
                   <option value="96000">96 — 高め（90分で約65MB）</option>
                   <option value="128000">128 — 従来（90分で約86MB）</option>
                 </select>
-                <small class="field-hint">音声認識用途では 64kbps で十分です。下げると送信量と保管サイズが減ります。</small>
+                <small class="field-hint">送信用音声ファイルの音質です。</small>
               </label>
+              <div class="field">
+                <button type="button" id="btn-chunk-defaults" class="btn btn-ghost btn-sm">既定値に戻す</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1020,16 +1021,16 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.46"></script>
-  <script src="gemini.js?v=0.24.46"></script>
-  <script src="notion.js?v=0.24.46"></script>
-  <script src="audio-store.js?v=0.24.46"></script>
-  <script src="claude-bridge.js?v=0.24.46"></script>
-  <script src="claude-installer.js?v=0.24.46"></script>
-  <script src="live-summary.js?v=0.24.46"></script>
-  <script src="image-store.js?v=0.24.46"></script>
-  <script src="gemini-files.js?v=0.24.46"></script>
-  <script src="term-dicts.js?v=0.24.46"></script>
-  <script src="app.js?v=0.24.46"></script>
+  <script src="icons.js?v=0.24.47"></script>
+  <script src="gemini.js?v=0.24.47"></script>
+  <script src="notion.js?v=0.24.47"></script>
+  <script src="audio-store.js?v=0.24.47"></script>
+  <script src="claude-bridge.js?v=0.24.47"></script>
+  <script src="claude-installer.js?v=0.24.47"></script>
+  <script src="live-summary.js?v=0.24.47"></script>
+  <script src="image-store.js?v=0.24.47"></script>
+  <script src="gemini-files.js?v=0.24.47"></script>
+  <script src="term-dicts.js?v=0.24.47"></script>
+  <script src="app.js?v=0.24.47"></script>
 </body>
 </html>

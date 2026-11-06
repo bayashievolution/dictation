@@ -10525,6 +10525,19 @@ if (els.inputClaudeCode) {
     applyLiveSummaryAvailability();
   });
 }
+// v0.24.47: 音声チャンクの5つを既定値に戻す（やっさんの指定）。欄に入れるだけで、
+// ほかの設定と同じく「保存」を押したときに反映される（押し間違えても、キャンセルで元に戻せる）
+{
+  const btn = document.getElementById('btn-chunk-defaults');
+  if (btn) btn.addEventListener('click', () => {
+    const d = DEFAULT_SETTINGS;
+    if (els.inputChunkSec) els.inputChunkSec.value = d.audioChunkSec;
+    if (els.inputSilenceCut) els.inputSilenceCut.checked = d.audioSilenceCut !== false;
+    if (els.inputChunkMaxSec) els.inputChunkMaxSec.value = d.audioChunkMaxSec;
+    if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = d.audioMinChunkBytes;
+    if (els.inputAudioBitrate) els.inputAudioBitrate.value = String(d.audioBitrate);
+  });
+}
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });
 }
