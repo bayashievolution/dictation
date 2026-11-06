@@ -37,6 +37,65 @@ const SYSTEM_PROMPT = `あなたは講義・会議の音声認識結果を読み
  * 中身が何も無ければ空文字列を返す（不要な前置きを増やさない）。
  * @param {object} [ctx] - { field, speakers, terms, topicPath, flow }
  */
+/**
+ * 直前の文脈を、末尾から max 字に縮める (v0.24.55・Gemini のトークン節約)
+ *
+ * 文字起こしの「直前の文脈」は表記の参考にしか使わない（続きを書かせない）のに、
+ * 直近3段落をそのまま送っていた。v0.24.51 で見出し追加が5分ぶんをまとめるようになり、
+ * そのうち1段落が数千字になる。**それを音声のかたまりごと（12〜20秒ごと）に毎回送っていた。**
+ * 文の途中から始まらないよう、前半に句点があればそこから。
+ */
+function tailForContextHint(text, max) {
+  const t = String(text || '').trim();
+  if (!max || t.length <= max) return t;
+  let s = t.slice(-max);
+  const cut = s.search(/[。！？!?\n]/);
+  if (cut >= 0 && cut < max * 0.5) s = s.slice(cut + 1);
+  return s.trim();
+}
+
+/**
+ * Gemini の使用量を、処理ごとに数える (v0.24.55)
+ *
+ * やっさん「Geminiのトークン節約を工夫してほしい」。何にどれだけ使っているかが分からないと
+ * 工夫の当たり外れも分からない。返事の usageMetadata（Gemini が数えた実数）を足していき、
+ * 録音を止めたときに診断ログへ1行で出す。料金には換算しない（単価は変わるので、言い切れない）。
+ */
+const _geminiUsage = {};
+function geminiUsageAdd(feature, meta) {
+  if (!meta) return;
+  const k = feature || 'other';
+  const u = _geminiUsage[k] || (_geminiUsage[k] = { calls: 0, input: 0, audio: 0, output: 0 });
+  u.calls++;
+  u.input += Number(meta.promptTokenCount) || 0;
+  u.output += (Number(meta.candidatesTokenCount) || 0) + (Number(meta.thoughtsTokenCount) || 0);
+  for (const d of meta.promptTokensDetails || []) {
+    if (d && d.modality === 'AUDIO') u.audio += Number(d.tokenCount) || 0;
+  }
+}
+function geminiUsageReset() { for (const k of Object.keys(_geminiUsage)) delete _geminiUsage[k]; }
+function geminiUsageSnapshot() { return JSON.parse(JSON.stringify(_geminiUsage)); }
+
+const GEMINI_USAGE_LABELS = {
+  transcribe: '文字起こし', diarize: '話者判別', 'context-extract': '文脈', 'live-refine': 'ライブ整形',
+  'live-heading': '見出し追加', 'whole-refine': '全体整形', summary: '要約', title: 'タイトル', chat: '質問',
+  osd: '字幕', 'memo-refine': 'メモ整形', other: 'その他',
+};
+/** 診断ログに出す1行。使っていなければ空 */
+function formatGeminiUsage(snap) {
+  const keys = Object.keys(snap || {}).filter((k) => snap[k] && snap[k].calls);
+  if (!keys.length) return '';
+  const n = (x) => Number(x || 0).toLocaleString('en-US');
+  let ti = 0, to = 0;
+  const parts = keys.map((k) => {
+    const u = snap[k];
+    ti += u.input; to += u.output;
+    const audio = u.audio ? `（うち音声 ${n(u.audio)}）` : '';
+    return `${GEMINI_USAGE_LABELS[k] || k} ${u.calls}回 入力 ${n(u.input)}${audio} / 出力 ${n(u.output)}`;
+  });
+  return `Gemini の使用量（トークン）: 合計 入力 ${n(ti)} / 出力 ${n(to)} ― ${parts.join('、')}`;
+}
+
 function buildContextBlock(ctx) {
   if (!ctx) return '';
   const lines = [];
@@ -396,6 +455,7 @@ async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800, sk
         throw err;
       }
       const data = await res.json();
+      if (typeof geminiUsageAdd === 'function') geminiUsageAdd(feature, data && data.usageMetadata);   // v0.24.55
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
       const reason = data?.candidates?.[0]?.finishReason || '';
       if (!text) {
@@ -920,7 +980,7 @@ async function transcribeAudioWithGemini({ apiKey, audioBlob, contextHint, sessi
   // 音声文字起こしは finishReason 空＝本当に無音の場合があるので、
   // _callGemini の「空レスでリトライ」を無効化して即空文字列を返す
   try {
-    const text = await _callGemini(body, apiKey, { maxRetries: 1 });
+    const text = await _callGemini(body, apiKey, { maxRetries: 1, feature: 'transcribe' });
     return (text || '').trim();
   } catch (e) {
     // finishReason 空のとき（純粋な無音）は空文字列扱い
@@ -1114,7 +1174,9 @@ function parseContextJson(raw) {
 }
 
 async function extractContextWithGemini({ apiKey, transcript, memoOutline, knownTerms }) {
-  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  // v0.24.55: 連携がオンなら Claude に頼むので、Gemini のキーは要らない
+  const useClaude = typeof claudeBridgeIsEnabled === 'function' && claudeBridgeIsEnabled();
+  if (!apiKey && !useClaude) throw new Error('Gemini API キーが設定されていません');
   const body_text = (transcript || '').trim();
   if (body_text.length < 200) return { terms: [], topicPath: [], flow: '' };
 
@@ -1164,7 +1226,24 @@ async function extractContextWithGemini({ apiKey, transcript, memoOutline, known
     },
   };
 
-  const raw = await _callGemini(body, apiKey, { maxRetries: 1, skipSanitize: true });
+  // v0.24.55: 連携がオンなら Claude に頼む（2分ごとに4000字を送るので、Gemini の文字の処理では一番多かった）。
+  // _callGemini を通さないのは、JSON 指定の body は Claude に回さない決まり（claudeBridgeBodyIsTextOnly）を
+  // 崩さずに済むから。文面は同じで、返事は parseContextJson がコードフェンスごと読める。
+  // **失敗しても Gemini には回さない**（ライブ整形と同じ。文脈は無くても文字起こしは続けられる）。
+  let raw;
+  if (useClaude) {
+    const broken = typeof claudeBridgeBrokenReason === 'function' ? claudeBridgeBrokenReason() : '';
+    if (broken) return { terms: [], topicPath: [], flow: '' };
+    const r = await claudeBridgeRun(claudeBridgePromptFromBody(body), { effort: 'low', timeoutMs: 120000, session: true });
+    if (!r.ok) {
+      if (window.diagLog) window.diagLog.info(`文脈を Claude で拾えませんでした（Gemini には回していません）: ${r.error}`);
+      if (typeof claudeBridgeIsFatal === 'function' && claudeBridgeIsFatal(r.error)) claudeBridgeMarkBroken(r.error);
+      return { terms: [], topicPath: [], flow: '' };
+    }
+    raw = r.text;
+  } else {
+    raw = await _callGemini(body, apiKey, { maxRetries: 1, skipSanitize: true, feature: 'context-extract' });
+  }
   const parsed = parseContextJson(raw);
   if (!parsed.ok) {
     console.warn('[context] JSON として読めませんでした:', (raw || '').slice(0, 200));
@@ -1186,6 +1265,9 @@ async function extractContextWithGemini({ apiKey, transcript, memoOutline, known
 }
 
 window.extractContextWithGemini = extractContextWithGemini;
+window.geminiUsageReset = geminiUsageReset;
+window.geminiUsageSnapshot = geminiUsageSnapshot;
+window.formatGeminiUsage = formatGeminiUsage;
 window.refineWithGemini = refineWithGemini;
 window.summarizeWithGemini = summarizeWithGemini;
 window.generateTitleWithGemini = generateTitleWithGemini;

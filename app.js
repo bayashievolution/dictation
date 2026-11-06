@@ -1235,12 +1235,16 @@ function appendRawChunk(text) {
   }
 }
 
-function getContextForGemini() {
-  // 録音対象コンテナから直近の整形済み3段落を使う（BG録音中はBG側から）
+/**
+ * 直前の文脈（録音対象コンテナの直近の整形済み3段落・BG録音中はBG側から）
+ * v0.24.55: 長さに上限を付けた。5分ぶんをまとめた段落が入ると数千字になり、それを毎回送っていた。
+ * 整形（ライブ整形・見出し追加）は前の流れを読むので 800字、文字起こしは表記の参考だけなので 300字
+ */
+function getContextForGemini(maxChars = 800) {
   const container = getWriteContainer();
   const paragraphs = container.querySelectorAll('.paragraph:not(.raw):not(.refining)');
   const last = Array.from(paragraphs).slice(-3);
-  return last.map(p => p.innerText.trim()).filter(Boolean).join('\n\n');
+  return tailForContextHint(last.map(p => p.innerText.trim()).filter(Boolean).join('\n\n'), maxChars);
 }
 
 /**
@@ -2023,6 +2027,8 @@ function stopContextExtractTimer() {
 }
 
 async function startRecording() {
+  // v0.24.55: この録音のあいだに Gemini をどれだけ使ったかを数え直す（止めたときに診断ログへ）
+  if (typeof geminiUsageReset === 'function') geminiUsageReset();
   if (state.settings.inputMode === 'gemini-audio') {
     return startGeminiAudioRecording();
   }
@@ -2111,6 +2117,11 @@ function stopRecording() {
     const remainingShort = Array.from(container.querySelectorAll('.paragraph.short-refined'));
     if (remainingShort.length > 0 && liveRefineReady()) {
       await consolidateShortChunks(remainingShort);
+    }
+    // v0.24.55: 録音中に Gemini をどれだけ使ったか（要約・タイトルはこのあとなので含まない）
+    if (typeof formatGeminiUsage === 'function') {
+      const line = formatGeminiUsage(geminiUsageSnapshot());
+      if (line) diagLog.info(line + '（録音中の分）');
     }
     // BGモードの場合、flushPendingToGemini は bgTranscriptEl に書き込んだ後 syncBgToSession で
     // session.transcript に反映済み。foreground なら snapshot が必要。
@@ -3980,7 +3991,7 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
       apiKey: state.settings.apiKey,
       sessionContext: getSessionContextForAi(),
       audioBlob: blob,
-      contextHint: getContextForGemini(),
+      contextHint: getContextForGemini(300),   // v0.24.55: 表記の参考だけなので短く
       edges,
     });
     if (text && text.trim() && isFillerOnly(text) && isFillerOnly(previousParagraphText(targetEl))) {
@@ -7466,7 +7477,7 @@ function getMemoOutlineText() {
  */
 async function refreshAutoContext(opts = {}) {
   if (contextExtractInFlight) return;
-  if (!state.settings.aiEnabled || !state.settings.apiKey) return;
+  if (!liveRefineReady()) return;   // v0.24.55: 連携がオンなら Claude が拾うので、Gemini のキーが無くてもよい
 
   const session = getActiveSession();
   if (!session) return;
