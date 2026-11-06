@@ -47,6 +47,10 @@ const eq = (label, got, want) => {
   });
 
   console.log('■ 名前と並び（やっさんの指定）');
+  eq('Web Speech の欄の名前（v0.24.49）', await page.evaluate(() => {
+    const t = document.getElementById('settings-modal').textContent;
+    return t.includes('Web Speech チャンク長（秒）') && !t.includes('6（既定）') && t.includes('字幕用設定（開発中）');
+  }), true);
   eq('見出しと欄の名前', await page.evaluate(() => {
     const t = document.getElementById('settings-modal').textContent;
     return ['音声チャンク', 'チャンク長（秒）', '無音の切れ目で送信', '最長待ち時間（秒）', '音声送信しきい値（バイト）', '音質（kbps）', '既定値に戻す']
@@ -61,6 +65,25 @@ const eq = (label, got, want) => {
   await page.evaluate(() => saveSettingsFromForm());
   await page.waitForTimeout(200);
   eq('保存すると既定値になる', await saved(), [12, true, 20, 400, 64000]);
+
+  console.log('■ ライブ整形のタイミング: 黙るのを待たず、設定した秒数で送る（v0.24.49）');
+  {
+    // やっさん「無音ではなく設定した秒数で送信するよう変更」。以前は聞き取るたびに掛け直していたので、
+    // 話し続けている間はいつまでも送られなかった
+    const r = await page.evaluate(async () => {
+      state.settings.silenceSec = 1;
+      const sent = [];
+      const orig = window.flushPendingToGemini;
+      window.flushPendingToGemini = () => { sent.push(Date.now()); };
+      const t0 = Date.now();
+      // 0.2秒ごとに聞き取りが続く（話し続けている）状態を 1.6 秒
+      for (let i = 0; i < 8; i++) { resetSilenceTimer(); await new Promise(res => setTimeout(res, 200)); }
+      await new Promise(res => setTimeout(res, 300));
+      window.flushPendingToGemini = orig;
+      return sent.map(x => x - t0);
+    });
+    eq('話し続けていても1秒前後で1回送る', r.length >= 1 && r[0] >= 900 && r[0] < 1400, true);
+  }
 
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\n✓ すべて通過');

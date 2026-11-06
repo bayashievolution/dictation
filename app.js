@@ -1684,8 +1684,17 @@ async function consolidateShortChunks(shortParas) {
 
 /* ───────── Silence timers ───────── */
 
+/**
+ * ライブ整形のタイミング（Web Speech モード）
+ *
+ * v0.24.49: 「黙ってから◯秒」をやめ、「聞き取り始めてから◯秒」で送る（やっさんの指定
+ * 「無音ではなく設定した秒数で送信するよう変更」）。以前は聞き取るたびにタイマーを
+ * 掛け直していたので、話し続けている間はいつまでも送られなかった。
+ * いまは、走っていなければ掛けるだけで、掛け直さない。
+ * 名前（resetSilenceTimer / silenceSec）は呼び出し元と保存のキーに合わせて据え置き。
+ */
 function resetSilenceTimer() {
-  if (state.silenceTimer) clearTimeout(state.silenceTimer);
+  if (state.silenceTimer) return;
   state.silenceTimer = setTimeout(() => {
     state.silenceTimer = null;
     flushPendingToGemini();

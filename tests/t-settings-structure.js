@@ -29,7 +29,7 @@ for (const m of seg.matchAll(/<(\/?)div\b[^>]*>(\s*<h3 class="field-group-title"
 
 const top = groups.filter((g) => g.depth === 1).map((g) => g.title);
 eq('欄はすべて設定の入れ物の直下に並ぶ（途中で入れ物が閉じていない）', top,
-   ['音声入力', 'AI機能', 'SUMADO', '録音の保持', '停止条件', '表示', 'Notion 連携', '診断ログ']);
+   ['音声入力', 'AI機能', '字幕用設定（開発中）', 'SUMADO', '録音の保持', '停止条件', '表示', 'Notion 連携', '診断ログ']);
 eq('音声入力が一番上（やっさんの指定）', top[0], '音声入力');
 eq('入れ物は最後の欄（診断ログ）より後ろで閉じる', closedAt > seg.indexOf('診断ログ'), true);
 

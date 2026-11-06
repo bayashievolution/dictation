@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.48" />
+  <link rel="stylesheet" href="style.css?v=0.24.49" />
 </head>
 <body>
   <div id="app">
@@ -356,54 +356,17 @@
                    （v0.13.20 撤去ミスで判明）。N 秒ごとに recognition.stop() を呼んで
                    字幕の「ちょうどいい塊感」を作る。話し手のリズムで調整可能。-->
               <label class="field">
-                <span class="field-label">Web Speech チャンク間隔（秒）</span>
+                <span class="field-label">Web Speech チャンク長（秒）</span>
                 <select id="input-webspeech-commit-sec">
                   <option value="0">OFF（WebSpeech 任せ）</option>
-                  <option value="6" selected>6（既定）</option>
+                  <option value="6" selected>6</option>
                   <option value="8">8</option>
                   <option value="10">10</option>
                 </select>
-                <small class="field-hint">文字起こしを下書きから確定するまでの時間</small>
+                <small class="field-hint">設定した秒数で文字起こしを下書きから確定します。</small>
               </label>
 
-              <!-- v0.13.31: ここから下は字幕／オーバーレイ用設定。文字起こしペインは触らない。
-                   完全分離（dictation:liveCaption キー経由）。 -->
-              <h3 class="field-group-title">字幕用設定</h3>
 
-              <!-- v0.13.31: 真の「改行」方式。recognition.stop() を呼ばずに、
-                   interim を N 字単位にカットして新段落として字幕／オーバーレイに流す。
-                   stop しない＝Web Speech は走り続ける＝ブロック間の言葉が失われない。
-                   v0.13.30 の「stop で final 化」誤翻訳のやり直し。
-                   ↑↓ は design-system principles.md「ネイティブ装飾は appearance:none」に従い、
-                   汎用 .number-stepper（wireNumberSteppers）を使う。 -->
-              <label class="field">
-                <span class="field-label">字幕一行あたりの最大文字数（10〜100）</span>
-                <div class="number-stepper">
-                  <input type="number" id="input-webspeech-slice-chars" min="10" max="100" step="1" value="30">
-                  <div class="number-stepper-btns">
-                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
-                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
-                  </div>
-                </div>
-                <small class="field-hint">文字起こしの下書きがこの字数になると字幕エリアに表示される。話者のリズム・読みやすさで調整（既定 30）</small>
-              </label>
-
-              <!-- v0.13.31: 無音 stop。30 字に達しない短い発話を、
-                   既存の時間ベース 6 秒を待たずに字幕へ流すための補完。
-                   interim の「中身」が変化していない時間で判定するので、
-                   v0.13.30 の誤発火（喋り中も onresult が空く問題）は起きない。
-                   0=OFF。 -->
-              <label class="field">
-                <span class="field-label">強制字幕表示時間（秒、0=OFF）</span>
-                <div class="number-stepper">
-                  <input type="number" id="input-webspeech-silence-stop-sec" min="0" max="10" step="1" value="3">
-                  <div class="number-stepper-btns">
-                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
-                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
-                  </div>
-                </div>
-                <small class="field-hint">文字起こしの下書きが指定文字数に足りず、無言の場合、強制的に字幕エリアに表示するまでの時間。0 で OFF</small>
-              </label>
             </div>
           </div>
           <div class="field-conditional is-hidden" id="gemini-only-fields">
@@ -532,12 +495,14 @@
             </small>
           </div>
 
+          <!-- v0.24.49: ライブ整形はここ（AI機能）。Web Speech モードでは文字起こしを、Gemini Audio モードでは
+               文字起こしの結果を Gemini に送り直してまとめ直す（見出しを付ける）。タイミングは「黙ってから」ではなく「◯秒ごと」 -->
           <label class="field field-row">
             <input id="input-ai-enabled" type="checkbox" />
             <span>ライブ整形</span>
           </label>
           <div class="field">
-            <small class="field-hint">文字起こしをしつつ、段落分けや句読点を入れて体裁を整えます。</small>
+            <small class="field-hint">文字起こしをGeminiに送信し、段落分けや見出し、句読点を入れて体裁を整えます。</small>
           </div>
           <label class="field">
             <span class="field-label">ライブ整形のタイミング（秒）</span>
@@ -548,7 +513,6 @@
                 <button type="button" class="number-stepper-btn" data-stepper-target="input-silence-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
               </div>
             </div>
-            <small class="field-hint">無音状態が設定した秒数継続したら、発話を Gemini に送って整形</small>
           </label>
 
           <!-- v0.24.22: ライブ要約（Claude Code 連携のみ。v0.24.27 までの名前はリアルタイム要約／RT要約） -->
@@ -593,6 +557,49 @@
               <span><strong>概要</strong> — 重要なキーワードのみを用いて要約（最もシンプル）</span>
             </label>
           </div>
+        </div>
+
+        <!-- v0.24.49: 字幕用設定は開発中。音声入力の中から独立させ、SUMADO の上に置いた（やっさんの指定） -->
+        <div class="field-group">
+          <h3 class="field-group-title">字幕用設定（開発中）</h3>
+        <!-- v0.13.31: ここから下は字幕／オーバーレイ用設定。文字起こしペインは触らない。
+             完全分離（dictation:liveCaption キー経由）。 -->
+        
+
+        <!-- v0.13.31: 真の「改行」方式。recognition.stop() を呼ばずに、
+             interim を N 字単位にカットして新段落として字幕／オーバーレイに流す。
+             stop しない＝Web Speech は走り続ける＝ブロック間の言葉が失われない。
+             v0.13.30 の「stop で final 化」誤翻訳のやり直し。
+             ↑↓ は design-system principles.md「ネイティブ装飾は appearance:none」に従い、
+             汎用 .number-stepper（wireNumberSteppers）を使う。 -->
+        <label class="field">
+          <span class="field-label">字幕一行あたりの最大文字数（10〜100）</span>
+          <div class="number-stepper">
+            <input type="number" id="input-webspeech-slice-chars" min="10" max="100" step="1" value="30">
+            <div class="number-stepper-btns">
+              <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
+              <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
+            </div>
+          </div>
+          <small class="field-hint">文字起こしの下書きがこの字数になると字幕エリアに表示される。話者のリズム・読みやすさで調整（既定 30）</small>
+        </label>
+
+        <!-- v0.13.31: 無音 stop。30 字に達しない短い発話を、
+             既存の時間ベース 6 秒を待たずに字幕へ流すための補完。
+             interim の「中身」が変化していない時間で判定するので、
+             v0.13.30 の誤発火（喋り中も onresult が空く問題）は起きない。
+             0=OFF。 -->
+        <label class="field">
+          <span class="field-label">強制字幕表示時間（秒、0=OFF）</span>
+          <div class="number-stepper">
+            <input type="number" id="input-webspeech-silence-stop-sec" min="0" max="10" step="1" value="3">
+            <div class="number-stepper-btns">
+              <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
+              <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
+            </div>
+          </div>
+          <small class="field-hint">文字起こしの下書きが指定文字数に足りず、無言の場合、強制的に字幕エリアに表示するまでの時間。0 で OFF</small>
+        </label>
         </div>
 
         <div class="field-group">
@@ -1010,16 +1017,16 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.48"></script>
-  <script src="gemini.js?v=0.24.48"></script>
-  <script src="notion.js?v=0.24.48"></script>
-  <script src="audio-store.js?v=0.24.48"></script>
-  <script src="claude-bridge.js?v=0.24.48"></script>
-  <script src="claude-installer.js?v=0.24.48"></script>
-  <script src="live-summary.js?v=0.24.48"></script>
-  <script src="image-store.js?v=0.24.48"></script>
-  <script src="gemini-files.js?v=0.24.48"></script>
-  <script src="term-dicts.js?v=0.24.48"></script>
-  <script src="app.js?v=0.24.48"></script>
+  <script src="icons.js?v=0.24.49"></script>
+  <script src="gemini.js?v=0.24.49"></script>
+  <script src="notion.js?v=0.24.49"></script>
+  <script src="audio-store.js?v=0.24.49"></script>
+  <script src="claude-bridge.js?v=0.24.49"></script>
+  <script src="claude-installer.js?v=0.24.49"></script>
+  <script src="live-summary.js?v=0.24.49"></script>
+  <script src="image-store.js?v=0.24.49"></script>
+  <script src="gemini-files.js?v=0.24.49"></script>
+  <script src="term-dicts.js?v=0.24.49"></script>
+  <script src="app.js?v=0.24.49"></script>
 </body>
 </html>
