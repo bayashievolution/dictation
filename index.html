@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.49" />
+  <link rel="stylesheet" href="style.css?v=0.24.50" />
 </head>
 <body>
   <div id="app">
@@ -716,37 +716,36 @@
           </div>
         </div>
 
+        <!-- v0.24.50: やっさんの指定で整理。「Notion 連携」トグルを足し、横に接続の状態を自動で出す
+             （オンにしたとき・アクセストークンを入れ直したとき・アプリを立ち上げたとき）。「接続テスト」ボタンは外した -->
         <div class="field-group" id="notion-settings-group">
           <h3 class="field-group-title">Notion 連携</h3>
+          <div class="field toggle-with-status">
+            <label class="field-row">
+              <input id="input-notion-enabled" type="checkbox" />
+              <span>Notion 連携</span>
+            </label>
+            <span id="notion-test-result" class="field-hint notion-test-result"></span>
+          </div>
+          <div class="field">
+            <small class="field-hint">文字起こしや要約など全てのタブをNotionに送信します。</small>
+          </div>
           <label class="field">
             <span class="field-label">アクセストークン</span>
             <input id="input-notion-token" type="password" placeholder="ntn_..." autocomplete="off" spellcheck="false" />
             <span class="field-hint">
-              <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">Notion の開発者ツール → コネクション</a>
-              でコネクトを開き（「+ 新規コネクト」で作っても、既存のものでも可）、
-              「設定」タブの<strong>「インテグレーショントークン」→「アクセストークン」</strong>をコピーしてここに貼ります。
-              コネクトの権限に「コンテンツを挿入」が必要です。
-              そのあと <strong>保存先にしたいデータベースのページを開き、「…」→「コネクト」からそのコネクトを接続</strong>してください。
-              接続していないデータベースは保存先の一覧に出てきません。
+              <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">Notionコネクション</a>で取得
             </span>
           </label>
-          <div class="field">
-            <div class="diag-log-actions">
-              <button type="button" id="btn-notion-test" class="pane-btn" title="トークンが有効か確かめる">
-                <span data-icon="check"></span><span>接続テスト</span>
-              </button>
-              <span id="notion-test-result" class="field-hint notion-test-result"></span>
-            </div>
-          </div>
           <div class="field">
             <span class="field-label">前回の保存先</span>
             <div class="diag-log-actions">
               <span id="notion-last-target" class="field-hint">（まだありません）</span>
               <button type="button" id="btn-notion-forget" class="pane-btn" title="記憶している保存先を忘れる">
-                <span data-icon="trash"></span><span>忘れる</span>
+                <span data-icon="trash"></span><span>リセット</span>
               </button>
             </div>
-            <small class="field-hint">アップロード時はこの保存先が最初から選ばれた状態で確認ダイアログが出ます</small>
+            <small class="field-hint">アップロード時はこの保存先が最初から選ばれた状態で確認ダイアログが出ます。</small>
           </div>
         </div>
 
@@ -1017,16 +1016,16 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.49"></script>
-  <script src="gemini.js?v=0.24.49"></script>
-  <script src="notion.js?v=0.24.49"></script>
-  <script src="audio-store.js?v=0.24.49"></script>
-  <script src="claude-bridge.js?v=0.24.49"></script>
-  <script src="claude-installer.js?v=0.24.49"></script>
-  <script src="live-summary.js?v=0.24.49"></script>
-  <script src="image-store.js?v=0.24.49"></script>
-  <script src="gemini-files.js?v=0.24.49"></script>
-  <script src="term-dicts.js?v=0.24.49"></script>
-  <script src="app.js?v=0.24.49"></script>
+  <script src="icons.js?v=0.24.50"></script>
+  <script src="gemini.js?v=0.24.50"></script>
+  <script src="notion.js?v=0.24.50"></script>
+  <script src="audio-store.js?v=0.24.50"></script>
+  <script src="claude-bridge.js?v=0.24.50"></script>
+  <script src="claude-installer.js?v=0.24.50"></script>
+  <script src="live-summary.js?v=0.24.50"></script>
+  <script src="image-store.js?v=0.24.50"></script>
+  <script src="gemini-files.js?v=0.24.50"></script>
+  <script src="term-dicts.js?v=0.24.50"></script>
+  <script src="app.js?v=0.24.50"></script>
 </body>
 </html>

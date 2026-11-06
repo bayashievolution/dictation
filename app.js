@@ -187,6 +187,8 @@ const DEFAULT_SETTINGS = {
   // notionLastDataSourceId / Title は「前回の保存先」を覚えておくためのもの。
   // 保存先は毎回聞くが、前回の場所が最初から選ばれた状態で出る（やっさん指示）。
   notionToken: '',
+  // v0.24.50: Notion 連携を使うか。未設定（それ以前の設定）は loadSettings でトークンの有無から決める
+  notionEnabled: undefined,
   notionLastDataSourceId: '',
   notionLastDataSourceTitle: '',
   // v0.15.0: 録音日時を入れる日付プロパティ名。'' なら使わない（タイトルに日時が残る）
@@ -475,7 +477,8 @@ const els = {
   btnContextAdoptAuto: document.getElementById('btn-context-adopt-auto'),
   notionSettingsGroup: document.getElementById('notion-settings-group'),
   inputNotionToken: document.getElementById('input-notion-token'),
-  btnNotionTest: document.getElementById('btn-notion-test'),
+  btnNotionTest: document.getElementById('btn-notion-test'),   // v0.24.50 で画面から外した（無ければ何もしない）
+  inputNotionEnabled: document.getElementById('input-notion-enabled'),   // v0.24.50
   notionTestResult: document.getElementById('notion-test-result'),
   notionLastTarget: document.getElementById('notion-last-target'),
   btnNotionForget: document.getElementById('btn-notion-forget'),
@@ -562,6 +565,8 @@ function loadSettings() {
   if (Array.isArray(state.settings.paneOrder) && !state.settings.paneOrder.includes('pane-chat')) {
     state.settings.paneOrder.push('pane-chat');
   }
+  // v0.24.50: 「Notion 連携」トグルを足した。トークンを入れていた人はオンのまま始める
+  if (state.settings.notionEnabled === undefined) state.settings.notionEnabled = !!state.settings.notionToken;
   // v0.24.39: 「Claude Code」（連携を使う）を足した。前の設定で Claude に任せるかライブ要約を
   // オンにしていた人は、オンのまま始める（オフから始めると、どちらも黙って止まる）
   if (state.settings.claudeCode === undefined) {
@@ -1005,8 +1010,11 @@ function updateActionButtons() {
   // v0.14.2: Notion アップロードは拡張版のみ。HTML 版では押せないようにしておく
   if (els.btnNotionUpload) {
     const usable = notionIsAvailable();
-    els.btnNotionUpload.disabled = !has || !usable;
+    // v0.24.50: 「Notion 連携」がオフなら押せない
+    const enabled = !!state.settings.notionEnabled;
+    els.btnNotionUpload.disabled = !has || !usable || !enabled;
     if (!usable) els.btnNotionUpload.title = 'Notion保存はChrome拡張版でのみ使えます';
+    else if (!enabled) els.btnNotionUpload.title = 'Notion 連携がオフです（設定 → Notion 連携）';
   }
 }
 
@@ -7506,7 +7514,7 @@ function setNotionTestResult(msg, kind = 'note') {
 function syncNotionSettingsUi() {
   if (!els.inputNotionToken) return;
   els.inputNotionToken.value = state.settings.notionToken || '';
-  setNotionTestResult('');
+  if (els.inputNotionEnabled) els.inputNotionEnabled.checked = !!state.settings.notionEnabled;
 
   if (els.notionLastTarget) {
     const t = state.settings.notionLastDataSourceTitle;
@@ -7520,33 +7528,47 @@ function syncNotionSettingsUi() {
   // HTML 版では api.notion.com が CORS で叩けない。設定はできるが使えない旨を出す。
   if (!notionIsAvailable()) {
     setNotionTestResult('HTML版では利用できません（Chrome拡張版で使えます）', 'note');
-    if (els.btnNotionTest) els.btnNotionTest.disabled = true;
-  } else if (els.btnNotionTest) {
-    els.btnNotionTest.disabled = false;
+  } else if (els.inputNotionEnabled && !els.inputNotionEnabled.checked) {
+    setNotionTestResult('');
   }
+  // オンのときの状態は、立ち上げたときの自動の確認（またはオンにしたとき）の結果をそのまま残す
 }
 
-async function testNotionConnection() {
-  const token = els.inputNotionToken.value.trim();
-  if (!token) {
-    setNotionTestResult('トークンを入力してください', 'ng');
+/**
+ * Notion に繋がるか確かめて、「Notion 連携」トグルの横に出す
+ *
+ * v0.24.50: 「接続テスト」ボタンをやめ、オンにしたとき・アクセストークンを入れ直したとき・
+ * アプリを立ち上げたとき（連携がオンなら）に自動で確かめる（Claude Code 連携と同じ形。やっさんの指定）。
+ * @param {string} [tokenArg] 省略時は設定画面の入力欄の値
+ */
+let notionTestSeq = 0;   // v0.24.50: いちばん新しい確認の番号。古い確認の結果では上書きしない
+async function testNotionConnection(tokenArg) {
+  const my = ++notionTestSeq;
+  if (!notionIsAvailable()) {
+    setNotionTestResult('HTML版では利用できません（Chrome拡張版で使えます）', 'note');
     return;
   }
-  els.btnNotionTest.disabled = true;
+  const token = (typeof tokenArg === 'string' ? tokenArg : (els.inputNotionToken.value || '')).trim();
+  if (!token) {
+    setNotionTestResult('アクセストークンを入力してください', 'ng');
+    return;
+  }
   setNotionTestResult('確認中…', 'note');
   try {
     const name = await notionTestConnection(token);
     const list = await notionListDataSources(token);
+    // 確かめている間にオフにされた・入れ直された（もっと新しい確認が始まった）なら、何も書かない。
+    // 書くと、消したはずの表示があとから戻ってくる（テストで見つけた）
+    if (my !== notionTestSeq) return;
     if (list.length === 0) {
       setNotionTestResult(`${name} に接続できましたが、保存先に使えるデータベースが 0 件です。Notion 側でデータベースを「コネクト」してください`, 'ng');
     } else {
       setNotionTestResult(`OK: ${name} — 保存先に使えるデータベース ${list.length} 件`, 'ok');
     }
   } catch (e) {
+    if (my !== notionTestSeq) return;
     setNotionTestResult('NG: ' + e.message, 'ng');
     console.warn('[notion] 接続テスト失敗:', e.message); // console.warn は diagLog に記録される
-  } finally {
-    els.btnNotionTest.disabled = false;
   }
 }
 
@@ -7642,6 +7664,8 @@ function closeSettings() {
 function saveSettingsFromForm() {
   state.settings.apiKey = els.inputApiKey.value.trim();
   if (els.inputNotionToken) state.settings.notionToken = els.inputNotionToken.value.trim();
+  if (els.inputNotionEnabled) state.settings.notionEnabled = els.inputNotionEnabled.checked;   // v0.24.50
+  updateActionButtons();   // v0.24.50: Notion 連携のオン/オフで保存ボタンの押せる/押せないが変わる
   state.settings.silenceSec = Math.max(1, Math.min(30, Number(els.inputSilenceSec.value) || 3));
   // v0.24.39: 「Claude Code」がオフで押せないときは、前の値を残す（オンに戻したら元どおり）
   if (els.inputLiveSummary && !els.inputLiveSummary.disabled) state.settings.liveSummary = els.inputLiveSummary.checked;
@@ -9192,7 +9216,24 @@ if (els.btnContext) {
     b.addEventListener('click', closeContextModal);
   });
 }
-if (els.btnNotionTest) els.btnNotionTest.addEventListener('click', testNotionConnection);
+if (els.btnNotionTest) els.btnNotionTest.addEventListener('click', () => testNotionConnection());
+// v0.24.50: 「Notion 連携」をオンにしたら、その場で確かめる。オフにしたら横の表示を消す
+if (els.inputNotionEnabled) {
+  els.inputNotionEnabled.addEventListener('change', () => {
+    if (els.inputNotionEnabled.checked) testNotionConnection();
+    else {
+      notionTestSeq++;   // 走りかけの確認を取り消す（あとから結果が届いても書かない）
+      setNotionTestResult(notionIsAvailable() ? '' : 'HTML版では利用できません（Chrome拡張版で使えます）', 'note');
+    }
+  });
+}
+// アクセストークンを入れ直したら、連携がオンなら確かめ直す（ボタンが無いので、ここで確かめる）
+if (els.inputNotionToken) {
+  els.inputNotionToken.addEventListener('change', () => {
+    if (els.inputNotionEnabled && els.inputNotionEnabled.checked) testNotionConnection();
+  });
+}
+
 if (els.btnNotionForget) els.btnNotionForget.addEventListener('click', forgetNotionTarget);
 
 /* ───────── Onboarding ───────── */
@@ -10521,6 +10562,11 @@ applyClaudeBridgeSetting();
 // （「接続を確認」ボタンは外した。やっさんの指定）。ここでは結果を出すだけで、設定は変えない
 // （立ち上げた瞬間だけ繋がらないこともあるので、オフに戻したりはしない）
 if (state.settings.claudeCode) testClaudeBridge();
+// v0.24.50: Notion 連携も同じく、オンなら立ち上げたときに確かめて横に出す（結果を出すだけで設定は変えない）。
+// **loadSettings() より後でないといけない**（最初はその前に書いてしまい、設定が空のまま判断していた）
+if (state.settings.notionEnabled && state.settings.notionToken && notionIsAvailable()) {
+  testNotionConnection(state.settings.notionToken);
+}
 // v0.24.9: オンにしたその場でログインを見る
 if (els.inputClaudeBridge) {
   els.inputClaudeBridge.addEventListener('change', () => { applyLiveSummaryAvailability(); });
