@@ -4178,8 +4178,9 @@ function sessionHasContentForNotion(session) {
 
 function applyClaudeBridgeSetting() {
   if (typeof claudeBridgeSetEnabled === 'function') {
-    // v0.24.39: 振り分け（一部を Claude Code で処理する）は「Claude Code」がオンのときだけ効く
-    claudeBridgeSetEnabled(!!(state.settings.claudeCode && state.settings.useClaudeBridge));
+    // v0.24.44: 振り分け（要約・質問などを Claude に回す）は「Claude Code 連携」と同時に有効
+    // （v0.24.39〜43 は「一部を Claude Code で処理する」という別のトグルがあった）
+    claudeBridgeSetEnabled(!!state.settings.claudeCode);
   }
 }
 
@@ -7663,10 +7664,11 @@ function saveSettingsFromForm() {
   if (els.inputAudioRetention) state.settings.audioRetention = els.inputAudioRetention.value || 'close';
   if (els.inputSumadoMeter) state.settings.sumadoIslandMeter = els.inputSumadoMeter.checked;
   // v0.24.0: Claude Code 連携。gemini.js 側はこの値を claude-bridge.js 経由で見る
-  if (els.inputClaudeCode) state.settings.claudeCode = els.inputClaudeCode.checked;   // v0.24.39
-  if (els.inputClaudeBridge) {
-    // 「Claude Code」がオフのときは押せず外れているが、前の値は残しておく（オンに戻したら元どおり）
-    if (!els.inputClaudeBridge.disabled) state.settings.useClaudeBridge = els.inputClaudeBridge.checked;
+  if (els.inputClaudeCode) {
+    state.settings.claudeCode = els.inputClaudeCode.checked;   // v0.24.39
+    // v0.24.44: 「一部を Claude Code で処理する」は画面から外し、連携と同時に有効にした（やっさんの指定）。
+    // 保存のキー useClaudeBridge は残し、連携と同じ値にそろえておく（前の版に戻しても食い違わないように）
+    state.settings.useClaudeBridge = state.settings.claudeCode;
     applyClaudeBridgeSetting();
   }
   if (els.inputChunkMaxSec) {
@@ -10503,16 +10505,25 @@ sweepStoredImages();
 // **起動のたびに必ずやる。** claude-bridge.js 側の旗は false から始まるので、
 // ここを通さないと、設定画面で入れてあっても連携が切れたままになる
 applyClaudeBridgeSetting();
-if (els.btnClaudeBridgeTest) {
-  els.btnClaudeBridgeTest.addEventListener('click', () => { testClaudeBridge(); });
-}
+// v0.24.44: 連携がオンなら、立ち上げたときに接続とログインを自動で確かめて、トグルの横に出す
+// （「接続を確認」ボタンは外した。やっさんの指定）。ここでは結果を出すだけで、設定は変えない
+// （立ち上げた瞬間だけ繋がらないこともあるので、オフに戻したりはしない）
+if (state.settings.claudeCode) testClaudeBridge();
 // v0.24.9: オンにしたその場でログインを見る
 if (els.inputClaudeBridge) {
   els.inputClaudeBridge.addEventListener('change', () => { applyLiveSummaryAvailability(); });
 }
 // v0.24.39: 「Claude Code」（連携を使う）。オンにしたその場で接続とログインを確かめる
 if (els.inputClaudeCode) {
-  els.inputClaudeCode.addEventListener('change', () => { verifyClaudeBridgeToggle(); applyLiveSummaryAvailability(); });
+  els.inputClaudeCode.addEventListener('change', () => {
+    // オフにしたら、横の状態の表示も消す（オフなのに「使えます」と出ていると紛らわしい）
+    if (!els.inputClaudeCode.checked && els.claudeBridgeStatus) {
+      els.claudeBridgeStatus.textContent = '';
+      els.claudeBridgeStatus.className = 'field-hint';
+    }
+    verifyClaudeBridgeToggle();
+    applyLiveSummaryAvailability();
+  });
 }
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });

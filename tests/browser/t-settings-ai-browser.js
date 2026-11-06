@@ -48,9 +48,8 @@ async function open(browser, settings) {
 const form = (page) => page.evaluate(() => {
   const g = (id) => { const e = document.getElementById(id); return { checked: e.checked, disabled: e.disabled }; };
   return {
-    code: g('input-claude-code'), live: g('input-live-summary'), route: g('input-claude-bridge'),
+    code: g('input-claude-code'), live: g('input-live-summary'),
     liveNote: !document.getElementById('live-summary-note').hidden,
-    routeNote: !document.getElementById('claude-route-note').hidden,
   };
 });
 const openSettings = async (page) => { await page.evaluate(() => document.getElementById('btn-settings').click()); await page.waitForTimeout(250); };
@@ -88,43 +87,49 @@ const clickCode = async (page) => { await page.click('#input-claude-code'); awai
     await ctx.close();
   }
 
-  console.log('■ 「Claude Code」がオフなら、ライブ要約と「一部を Claude Code で処理する」は押せない');
+  // v0.24.44: 「一部を Claude Code で処理する」は画面から外し、「Claude Code 連携」と同時に有効
+  console.log('■ 「一部を Claude Code で処理する」は出さない');
   {
-    const { ctx, page } = await open(browser, { apiKey: 'AIza-test', claudeCode: false, useClaudeBridge: true, liveSummary: true });
+    const { ctx, page } = await open(browser, { apiKey: 'AIza-test' });
     await openSettings(page);
-    eq('押せず、理由が出る（前の値はオンでも、オフに見せる）', await form(page), {
-      code: { checked: false, disabled: false },
-      live: { checked: false, disabled: true }, route: { checked: false, disabled: true },
-      liveNote: true, routeNote: true,
+    eq('トグルが無い', await page.evaluate(() => !document.getElementById('input-claude-bridge')), true);
+    eq('「接続を確認」ボタンも無い（状態はトグルの横に自動で出す）', await page.evaluate(() => !document.getElementById('btn-claude-bridge-test')), true);
+    await ctx.close();
+  }
+
+  console.log('■ 「Claude Code 連携」がオフなら、ライブ要約は押せず、要約などは Gemini');
+  {
+    const { ctx, page } = await open(browser, { apiKey: 'AIza-test', claudeCode: false, liveSummary: true });
+    await openSettings(page);
+    eq('ライブ要約は押せず、理由が出る（前の値はオンでも、オフに見せる）', await form(page), {
+      code: { checked: false, disabled: false }, live: { checked: false, disabled: true }, liveNote: true,
     });
     eq('振り分けは効いていない', await page.evaluate(() => claudeBridgeIsEnabled()), false);
+    eq('横の状態は空（立ち上げても確かめない）', (await page.textContent('#claude-bridge-status')).trim(), '');
     eq('ライブ要約のタブも出ない', await page.evaluate(() => !!document.querySelector('.inner-tab[data-pane="pane-live"]')), false);
     await clickCode(page);
     eq('オンにすると押せて、前の値（オン）に戻る', await form(page), {
-      code: { checked: true, disabled: false },
-      live: { checked: true, disabled: false }, route: { checked: true, disabled: false },
-      liveNote: false, routeNote: false,
+      code: { checked: true, disabled: false }, live: { checked: true, disabled: false }, liveNote: false,
     });
-    await ctx.close();
-  }
-
-  console.log('■ ライブ要約は「Claude Code」だけで動く（「一部を Claude Code で処理する」はオフでよい）');
-  {
-    const { ctx, page } = await open(browser, { apiKey: 'AIza-test', claudeCode: true, useClaudeBridge: false, liveSummary: true });
-    eq('ライブ要約は使える', await page.evaluate(() => liveSummaryActive()), true);
-    eq('要約などは Gemini のまま', await page.evaluate(() => claudeBridgeIsEnabled()), false);
-    await ctx.close();
-  }
-
-  console.log('■ 「Claude Code」をオフにして保存しても、ほかの選択は覚えている');
-  {
-    const { ctx, page } = await open(browser, { apiKey: 'AIza-test', claudeCode: true, useClaudeBridge: true, liveSummary: true });
-    await openSettings(page);
-    await clickCode(page);   // オフに
+    eq('オンにしたその場で接続を確かめて横に出す', (await page.textContent('#claude-bridge-status')).includes('使えます'), true);
     await page.evaluate(() => saveSettingsFromForm());
     await page.waitForTimeout(200);
-    eq('保存された値', await page.evaluate(() => [state.settings.claudeCode, state.settings.useClaudeBridge, state.settings.liveSummary]), [false, true, true]);
-    eq('オフの間は振り分けもライブ要約も止まる', await page.evaluate(() => [claudeBridgeIsEnabled(), liveSummaryActive()]), [false, false]);
+    eq('保存すると、要約なども Claude に回る（連携と同時に有効）', await page.evaluate(() => [claudeBridgeIsEnabled(), state.settings.useClaudeBridge]), [true, true]);
+    await ctx.close();
+  }
+
+  console.log('■ 「Claude Code 連携」がオンなら、立ち上げたときに自動で確かめる');
+  {
+    const { ctx, page } = await open(browser, { apiKey: 'AIza-test', claudeCode: true });
+    await page.waitForTimeout(500);
+    eq('設定を開かなくても、横に状態が出ている', (await page.textContent('#claude-bridge-status')).includes('使えます'), true);
+    eq('要約なども Claude に回る', await page.evaluate(() => claudeBridgeIsEnabled()), true);
+    await openSettings(page);
+    await clickCode(page);   // オフに
+    eq('オフにすると横の状態は消える', (await page.textContent('#claude-bridge-status')).trim(), '');
+    await page.evaluate(() => saveSettingsFromForm());
+    await page.waitForTimeout(200);
+    eq('保存した値（ライブ要約の選択は覚えている）', await page.evaluate(() => [state.settings.claudeCode, state.settings.useClaudeBridge, claudeBridgeIsEnabled(), liveSummaryActive()]), [false, false, false, false]);
     await ctx.close();
   }
 

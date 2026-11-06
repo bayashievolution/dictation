@@ -3037,6 +3037,15 @@ body.chat-active #dict-bar {
 .audio-usage-row > .field-hint {
   min-width: 0;
 }
+/* v0.24.44: トグルの横に状態を出す（Claude Code 連携の接続状態） */
+.toggle-with-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.toggle-with-status > .field-row { margin: 0; }
+.toggle-with-status > .field-hint { min-width: 0; }
 /* 送信先についての注意書き。既存の --danger を使う（新しい色を増やさない） */
 .field-hint.warn-hint {
   display: block;

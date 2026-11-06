@@ -32,14 +32,14 @@ const eq = (label, got, want) => {
 
 const SETTINGS_KEY = 'dictation:settings';
 
-async function open(browser, { useClaudeBridge = false, blockHealth = false } = {}) {
+async function open(browser, { useClaudeBridge = false, blockHealth = false, claudeCode } = {}) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   // 設定を先に置いてから読み込む（起動時に読まれるかを見たいので）
   await page.goto(URL);
   await page.evaluate(([k, v]) => localStorage.setItem(k, JSON.stringify(v)),
-                      [SETTINGS_KEY, { useClaudeBridge }]);
+                      [SETTINGS_KEY, { useClaudeBridge, ...(claudeCode !== undefined ? { claudeCode } : {}) }]);
   if (blockHealth) await page.route('**/api/claude/health', r => r.abort());
   await page.reload();
   await page.waitForTimeout(900);
@@ -51,13 +51,17 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
 (async () => {
   const browser = await chromium.launch();
 
-  console.log('■ 「接続を確認」を押したときに文言が変わるか');
+  // v0.24.44: 「接続を確認」ボタンは外し、連携がオンなら立ち上げたときに自動で確かめる
+  console.log('■ 連携がオフなら、立ち上げても確かめない（横の表示は空）');
   {
     const { ctx, page } = await open(browser);
-    eq('押す前は「未確認」', (await status(page)).startsWith('未確認'), true);
-    await page.evaluate(() => { document.getElementById('btn-settings').click(); });
-    await page.waitForTimeout(300);
-    await page.evaluate(() => { document.getElementById('btn-claude-bridge-test').click(); });
+    eq('空', (await status(page)).trim(), '');
+    await ctx.close();
+  }
+
+  console.log('■ 連携がオンなら、立ち上げたときに自動で確かめて横に出す');
+  {
+    const { ctx, page } = await open(browser, { claudeCode: true });
     await page.waitForTimeout(1200);
     const t = await status(page);
     // v0.24.9: 中継が生きているだけでは「使えます」と言わない。
@@ -71,10 +75,7 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
 
   console.log('\n■ 中継に繋がらないときは、そう言う（黙らない）');
   {
-    const { ctx, page } = await open(browser, { blockHealth: true });
-    await page.evaluate(() => { document.getElementById('btn-settings').click(); });
-    await page.waitForTimeout(300);
-    await page.evaluate(() => { document.getElementById('btn-claude-bridge-test').click(); });
+    const { ctx, page } = await open(browser, { blockHealth: true, claudeCode: true });
     await page.waitForTimeout(1500);
     const t = await status(page);
     eq('繋がらないと出る', /繋がりません/.test(t), true);
@@ -93,10 +94,8 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
     // チェックボックスは openSettings() で埋める作りなので、開いてから見る
     await page.evaluate(() => { document.getElementById('btn-settings').click(); });
     await page.waitForTimeout(300);
-    eq('設定を開けばチェックボックスにも入っている',
-       await page.evaluate(() => document.getElementById('input-claude-bridge').checked), true);
-    // v0.24.39: 前の版の設定（claudeCode が無い）から、「Claude Code」もオンで引き継ぐ
-    eq('「Claude Code」（連携を使う）もオンで引き継ぐ',
+    // v0.24.39: 前の版の設定（claudeCode が無い）から、「Claude Code 連携」もオンで引き継ぐ
+    eq('「Claude Code 連携」もオンで引き継ぐ',
        await page.evaluate(() => document.getElementById('input-claude-code').checked), true);
     await ctx.close();
   }
@@ -284,8 +283,9 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
   {
     const { ctx, page } = await open(browser);
     const r = await page.evaluate(() => {
-      const ids = ['input-api-key', 'input-claude-code', 'btn-claude-bridge-test', 'input-ai-enabled', 'input-live-summary',
-                   'input-auto-summarize', 'summary-detail-low', 'input-claude-bridge'];
+      // v0.24.44: 状態はトグルの横、「一部を Claude Code で処理する」と「接続を確認」は外した
+      const ids = ['input-api-key', 'input-claude-code', 'claude-bridge-status', 'btn-claude-install', 'input-ai-enabled',
+                   'input-live-summary', 'input-auto-summarize', 'summary-detail-low'];
       const els = ids.map((id) => document.getElementById(id));
       const inOrder = els.every((el, i) => i === 0 || !!(els[i - 1].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING));
       const group = els[0].closest('.field-group');

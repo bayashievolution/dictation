@@ -25,7 +25,7 @@ const eq = (label, got, want) => {
   if (!ok) fail++;
 };
 
-async function open(browser, { extension, nativeReply, nativeError } = {}) {
+async function open(browser, { extension, nativeReply, nativeError, settings } = {}) {
   const ctx = await browser.newContext({ acceptDownloads: true });
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
@@ -47,6 +47,13 @@ async function open(browser, { extension, nativeReply, nativeError } = {}) {
         },
       };
     }, [ID, nativeReply || null, nativeError || '']);
+  }
+  if (settings) {
+    await page.addInitScript((s) => {
+      if (sessionStorage.getItem('seeded')) return;
+      sessionStorage.setItem('seeded', '1');
+      localStorage.setItem('dictation:settings', JSON.stringify(s));
+    }, settings);
   }
   await page.route('**/api/claude/**', r => r.abort());
   await page.route('**/api/claude', r => r.abort());
@@ -92,9 +99,10 @@ const visible = (page, sel) => page.evaluate((s) => {
     eq('CRLF', bat.includes('\r\n'), true);
     eq('保存したと言う', (await page.textContent('#claude-bridge-status')).startsWith('dictation-claude-setup.bat を保存しました'), true);
 
-    await page.click('#btn-claude-bridge-test');
-    await page.waitForTimeout(600);
-    eq('「接続を確認」は未インストールと言う（start.bat とは言わない）',
+    // v0.24.44: 「接続を確認」ボタンは外した。連携をオンにしたときに確かめる
+    await page.click('#input-claude-code');
+    await page.waitForTimeout(700);
+    eq('連携をオンにすると、未インストールと言う（start.bat とは言わない）',
        (await page.textContent('#claude-bridge-status')).startsWith('Claude 連携がインストールされていません'), true);
     eq('インストール式の口に問い合わせている',
        (await page.evaluate(() => window.__native)).some(([n, t]) => n === 'com.dictation.helper' && t === 'health'), true);
@@ -103,9 +111,9 @@ const visible = (page, sel) => page.evaluate((s) => {
 
   console.log('■ 拡張でインストール済み');
   {
-    const { ctx, page } = await open(browser, { extension: true,
+    const { ctx, page } = await open(browser, { extension: true, settings: { claudeCode: true },
       nativeReply: { ok: true, version: '9.9.9', invocation: 'wsl', via: 'native', features: ['effort', 'timeout'], auth: { ok: true, loggedIn: true } } });
-    await page.click('#btn-claude-bridge-test');
+    // v0.24.44: 連携がオンなら、立ち上げたときに自動で確かめて横に出す
     await page.waitForTimeout(600);
     eq('使えると言う', await page.textContent('#claude-bridge-status'), '使えます（ログイン済み / wsl / 連携 9.9.9）');
     await ctx.close();
