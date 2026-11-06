@@ -36,12 +36,17 @@ const on = (feature, body = TEXT) => use({ enabled: true, feature, body });
 console.log('■ 回してよいもの（後処理）');
 for (const f of ['whole-refine', 'summary', 'chat', 'title', 'memo-refine']) eq(f, on(f), true);
 
+// v0.24.52: やっさん「文字整形も項目付けもライブ要約もClaudeで」。連携がオンなら録音中の整形も回す
+console.log('\n■ 録音中の整形・見出し付けも回す（v0.24.52）');
+eq('ライブ整形', on('live-refine'), true);
+eq('見出し追加', on('live-heading'), true);
+
 console.log('\n■ 回してはいけないもの');
 // 音声は Claude の API に入らない
 eq('文字起こし', on('transcribe'), false);
 eq('話者判別', on('diarize'), false);
-// 実測で8〜10秒。12〜20秒ごとのチャンクには間に合わない
-eq('録音中のチャンク整形', on('chunk-refine'), false);
+// 旧名。v0.24.52 で live-refine に改めた。どこかに残っていても黙って回さない
+eq('旧名 chunk-refine', on('chunk-refine'), false);
 eq('字幕のリアルタイム整形', on('osd'), false);
 eq('文脈の自動抽出（JSON）', on('context-extract'), false);
 eq('名前が無いものは回さない', on(''), false);
@@ -144,7 +149,6 @@ console.log('\n■ Gemini に戻したときの文言（理由を言い分ける
   is('理由が空なら断定しない', m(''), 'Claude で処理できなかったので Gemini で処理しました');
   is('空白だけでも同じ', m('   '), 'Claude で処理できなかったので Gemini で処理しました');
   is('null', m(null), 'Claude で処理できなかったので Gemini で処理しました');
-
   // 文言が状態表示に収まるか（max-width: 360px）は**実測しないと分からない**。
   // 文字数では測れない（半角は細いので、36字でも 327px で収まる）。
   // 切れていないことの検査は tests/browser/t-claude-bridge-browser.js にある。
@@ -159,6 +163,29 @@ console.log('\n■ Gemini に戻したときの文言（理由を言い分ける
     console.log(`${ok ? '✓' : '✕'} Gemini に戻したと必ず言う: ${t}`);
     if (!ok) fail++;
   }
+}
+
+
+/* v0.24.52: 録音中の整形は Gemini に回さない。「Gemini で処理」と出すと嘘になる */
+vm.runInContext(grab(src, 'claudeBridgeNoFallbackMessage') + '\n' + grab(src, 'claudeBridgeNoFallback')
+  + '\n' + (/const CLAUDE_BRIDGE_NO_FALLBACK = new Set\(\[[\s\S]*?\]\);/.exec(src) || ['const CLAUDE_BRIDGE_NO_FALLBACK = new Set();'])[0]
+  .replace('const ', 'var '), ctx);
+console.log('\n■ Gemini に回さなかったときの文言（v0.24.52）');
+{
+  const m = (e) => ctx.claudeBridgeNoFallbackMessage(e);
+  const is = (label, got, want) => {
+    const ok = got === want;
+    console.log(`${ok ? '✓' : '✕'} ${label}: ${JSON.stringify(got)}`);
+    if (!ok) { console.log(`    期待 ${JSON.stringify(want)}`); fail++; }
+  };
+  is('ログイン切れ', m('Failed to authenticate: OAuth session expired'), 'Claude のログインが切れているので整形せずに残しました');
+  is('中継（括弧の手がかりは残す）', m('Claude Code の中継に繋がりません'), '中継に繋がらないので整形せずに残しました（start.bat を起動）');
+  is('知らないエラー', m('終了コード 1'), 'Claude で処理できなかったので整形せずに残しました');
+  is('時間切れ', m('60秒待っても返事がありませんでした'), 'Claude が時間内に返さないので整形せずに残しました');
+  is('「Gemini で処理」とは言わない', /Gemini で処理/.test(m('x') + m('') + m('spawn claude ENOENT')), false);
+  is('ライブ整形は戻さない', ctx.claudeBridgeNoFallback('live-refine'), true);
+  is('見出し追加も戻さない', ctx.claudeBridgeNoFallback('live-heading'), true);
+  is('要約は従来どおり戻す', ctx.claudeBridgeNoFallback('summary'), false);
 }
 
 /* ───────── v0.24.9: ログインまで見る ─────────

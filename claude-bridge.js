@@ -51,7 +51,21 @@ const CLAUDE_BRIDGE_FEATURES = new Set([
   'chat',           // 質問ペイン
   'title',          // タイトル生成
   'memo-refine',    // メモの選択範囲整形
+  'live-refine',    // ライブ整形（録音中の数十秒ぶん）v0.24.52
+  'live-heading',   // 見出し追加（数分ぶんをまとめ直して見出しを付ける）v0.24.52
 ]);
+
+/**
+ * Claude で失敗しても Gemini に回さない処理 (v0.24.52)
+ *
+ * やっさん「切替はせずに行こう　これまで通りエラーは出してもらう」
+ * 「とにかく料金はこれ以上高くなるのは避けたい」「最低限Geminiでの文字起こしができていればなんとかなる」。
+ * 録音中は数十秒ごとに呼ぶので、連携が切れたまま Gemini に戻すと気づかないうちに課金が積み上がる。
+ * 整形できなかった段落は生の文字のまま「再試行待ち」で残り、あとで「今すぐ整形」できる。
+ * 要約などは従来どおり Gemini に戻す（1回きりで、無いと困るため）。
+ */
+const CLAUDE_BRIDGE_NO_FALLBACK = new Set(['live-refine', 'live-heading']);
+function claudeBridgeNoFallback(feature) { return CLAUDE_BRIDGE_NO_FALLBACK.has(feature); }
 
 let _claudeBridgeEnabled = false;
 
@@ -290,6 +304,18 @@ async function claudeBridgeRunHttp(prompt, { url = CLAUDE_BRIDGE_URL, signal, tu
  * 数えられる原因については短い言い切りに置き換える。
  * 生の理由は診断ログに残るので失われない。
  */
+/**
+ * Gemini に回さなかったときの文言 (v0.24.52)
+ * 理由の部分は claudeBridgeFallbackMessage と同じにして、言い回しがずれないようにする。
+ * 「Gemini で処理」と出すと、実際には処理していないので嘘になる
+ */
+function claudeBridgeNoFallbackMessage(error) {
+  const m = claudeBridgeFallbackMessage(error);
+  const hit = m.match(/^(.*?)ので\s*Gemini で処理(?:しました)?(（[^）]*）)?$/);
+  if (!hit) return `${m}（Gemini には回していません）`;
+  return `${hit[1]}ので整形せずに残しました${hit[2] || ''}`;
+}
+
 function claudeBridgeFallbackMessage(error) {
   const e = String(error == null ? '' : error);
   if (!e.trim()) return 'Claude で処理できなかったので Gemini で処理しました';

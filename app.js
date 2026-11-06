@@ -1243,6 +1243,17 @@ function getContextForGemini() {
   return last.map(p => p.innerText.trim()).filter(Boolean).join('\n\n');
 }
 
+/**
+ * ライブ整形・見出し追加を回せるか (v0.24.52)
+ * 連携がオンなら Claude が受けるので、Gemini のキーが無くても回せる
+ * （Web Speech モードなら Gemini を一度も使わずに済む）。
+ */
+function liveRefineReady() {
+  if (!state.settings.aiEnabled) return false;
+  if (state.settings.apiKey) return true;
+  return typeof claudeBridgeIsEnabled === 'function' && claudeBridgeIsEnabled();
+}
+
 async function flushPendingToGemini() {
   if (!state.pendingChunkEl || !state.pendingChunkText.trim()) return;
 
@@ -1259,7 +1270,7 @@ async function flushPendingToGemini() {
     persistSessions();
   };
 
-  if (!state.settings.aiEnabled || !state.settings.apiKey) {
+  if (!liveRefineReady()) {
     targetEl.className = 'paragraph';
     setParagraphContent(targetEl, rawText);
     persist();
@@ -1359,7 +1370,7 @@ async function refineUnstructuredInTranscript({ force = false, showFeedback = tr
  * 「今すぐ整形」ボタン押下時に呼ばれる。
  */
 async function retryPendingRefinements({ showFeedback = true } = {}) {
-  if (!state.settings.apiKey) return { tried: 0, ok: 0, failed: 0 };
+  if (!state.settings.apiKey && !(typeof claudeBridgeIsEnabled === 'function' && claudeBridgeIsEnabled())) return { tried: 0, ok: 0, failed: 0 };
   const pending = Array.from(els.confirmed.querySelectorAll('.paragraph.needs-retry'));
   if (pending.length === 0) return { tried: 0, ok: 0, failed: 0 };
   let ok = 0, failed = 0;
@@ -1630,7 +1641,7 @@ async function waitForAudioSettled(timeoutMs = 30000) {
 
 function maybeConsolidateShortChunks() {
   if (state.isConsolidatingShortChunks) return; // 多重実行防止
-  if (!state.settings.aiEnabled || !state.settings.apiKey) return;
+  if (!liveRefineReady()) return;
   // v0.18.9: 停止処理中は、最後のチャンクまで揃えてから一度にまとめたい。
   // ここで先に発火すると、最後の1つが取り残されて別立てで整形される:
   //   19:00:07 ミドル整形開始 3段落・224字   ← 3つ溜まって発火
@@ -1684,6 +1695,8 @@ async function consolidateShortChunks(shortParas) {
       joinFragments: true,
       // v0.24.51: 5分ぶんまとめると数千字になり、既定の 2048 では返事が途中で切れる。量に合わせて広げる
       maxOutputTokens: Math.min(16384, Math.max(2048, rawText.length * 2)),
+      // v0.24.52: 連携がオンなら Claude に回す。失敗しても Gemini には回さない
+      feature: 'live-heading',
     });
     firstPara.className = 'paragraph refined';
     setParagraphContent(firstPara, refined || rawText);
@@ -2094,7 +2107,7 @@ function stopRecording() {
     const container = (state.bgTranscriptEl && recSessionId !== state.activeId)
       ? state.bgTranscriptEl : els.confirmed;
     const remainingShort = Array.from(container.querySelectorAll('.paragraph.short-refined'));
-    if (remainingShort.length > 0 && state.settings.aiEnabled && state.settings.apiKey) {
+    if (remainingShort.length > 0 && liveRefineReady()) {
       await consolidateShortChunks(remainingShort);
     }
     // BGモードの場合、flushPendingToGemini は bgTranscriptEl に書き込んだ後 syncBgToSession で

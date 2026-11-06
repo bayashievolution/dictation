@@ -295,26 +295,40 @@ async function _tryClaudeBridge(body, feature) {
   // v0.24.9: もう駄目だと分かっているときは呼びに行かない。
   // 録音を止めると要約とタイトルを続けて回すので、ログイン切れだと
   // **確実に失敗する呼び出しをもう一度**やっていた。ただし**黙っては戻さない**。
+  // v0.24.52: 録音中の整形・見出し付けは、失敗しても Gemini に回さない（やっさん「切替はせずに行こう」）
+  const strict = typeof claudeBridgeNoFallback === 'function' && claudeBridgeNoFallback(feature);
+  const sayFail = (error) => strict ? claudeBridgeNoFallbackMessage(error) : claudeBridgeFallbackMessage(error);
+  const giveUp = (error) => {
+    if (!strict) return null;
+    const e = new Error(`Claude で処理できませんでした（${feature}・Gemini には回していません）: ${error}`);
+    e.claudeNoFallback = true;
+    throw e;
+  };
+
   const broken = typeof claudeBridgeBrokenReason === 'function' ? claudeBridgeBrokenReason() : '';
   if (broken) {
     if (window.statusNotice) {
-      window.statusNotice('error', claudeBridgeFallbackMessage(broken), {
+      window.statusNotice('error', sayFail(broken), {
         detail: `Claude Code を使えない状態が続いています\n\n${broken}\n\n`
           + '── 直し方 ──\n'
           + claudeLoginHowTo() + '\n'
           + '設定の「接続を確認」を押してください。',
       });
     }
-    return null;
+    return giveUp(broken);
   }
 
-  const r = await claudeBridgeRun(prompt);
+  // v0.24.52: 録音中に数十秒ごとに呼ぶものは考え込ませない（effort low）。
+  // 待ち時間の上限も短くし、詰まったら次の回に譲る（溜まって何本も並ばないように）
+  const r = await claudeBridgeRun(prompt, strict ? { effort: 'low', timeoutMs: 120000 } : {});
   if (r.ok && r.text) {
     if (window.diagLog) window.diagLog.info(`Claude Code で処理しました（${feature} / ${r.seconds}秒）`);
     return r.text;
   }
   if (window.diagLog) {
-    window.diagLog.info(`Claude Code に回せなかったので Gemini で処理します（${feature}）: ${r.error}`);
+    window.diagLog.info(strict
+      ? `Claude Code で処理できませんでした。Gemini には回しません（${feature}）: ${r.error}`
+      : `Claude Code に回せなかったので Gemini で処理します（${feature}）: ${r.error}`);
   }
   // 待っても直らない種類（ログイン切れ等）は覚えて、次から呼ばない (v0.24.9)
   if (typeof claudeBridgeIsFatal === 'function' && claudeBridgeIsFatal(r.error)
@@ -325,7 +339,7 @@ async function _tryClaudeBridge(body, feature) {
   // 「繋がらない」と言うのは嘘で、start.bat を見に行っても直らない
   // v0.24.7: 出しっぱなしにしない。しばらくしたら消え、詳細は押したときだけ出す
   const msg = typeof claudeBridgeFallbackMessage === 'function'
-    ? claudeBridgeFallbackMessage(r.error)
+    ? sayFail(r.error)
     : 'Claude で処理できなかったので Gemini で処理しました';
   // ログイン切れは放っておいて治らないので、詳細に直し方を添える (v0.24.8)
   const fix = /authenticat|OAuth|session expired|unauthorized|401/i.test(String(r.error || ''))
@@ -337,7 +351,7 @@ async function _tryClaudeBridge(body, feature) {
   const detail = `Claude Code に回せませんでした（${feature}）\n\n${r.error}${fix}`;
   if (window.statusNotice) window.statusNotice('error', msg, { detail });
   else if (window.setStatus) window.setStatus('error', msg, detail);
-  return null;
+  return giveUp(r.error);
 }
 
 async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800, skipSanitize = false, feature = '', onEngine = null } = {}) {
@@ -422,11 +436,15 @@ async function _callGemini(body, apiKey, { maxRetries = 2, retryBaseMs = 800, sk
 
 async function refineWithGemini({
   apiKey, context, newChunk, sessionContext, joinFragments = false, maxOutputTokens = 2048,
-  // v0.24.0: 録音中のチャンク整形は Claude に回さない（8〜10秒かかり間に合わない）。
-  // 全体整形だけが 'whole-refine' を渡してくる
-  feature = 'chunk-refine',
+  // v0.24.52: 録音中の整形も、連携がオンなら Claude に回す（'live-refine'）。
+  // 以前は 8〜10 秒かかるので回していなかったが、effort low とセッションの使い回しで縮めた。
+  // 見出し追加は 'live-heading'、全体整形は 'whole-refine' を渡してくる
+  feature = 'live-refine',
 }) {
-  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  // Claude に回るなら Gemini のキーは要らない（Web Speech モードは Gemini を一度も使わずに済む）
+  const viaClaude = typeof claudeBridgeIsEnabled === 'function' && claudeBridgeIsEnabled()
+    && typeof claudeBridgeFeatureAllowed === 'function' && claudeBridgeFeatureAllowed(feature);
+  if (!apiKey && !viaClaude) throw new Error('Gemini API キーが設定されていません');
   if (!newChunk || !newChunk.trim()) return '';
 
   // 極端に短いチャンク（15文字未満）はそのまま生テキストを返す。
