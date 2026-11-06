@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.44" />
+  <link rel="stylesheet" href="style.css?v=0.24.45" />
 </head>
 <body>
   <div id="app">
@@ -336,6 +336,147 @@
       </div>
       <div class="modal-body">
 
+        <!-- v0.24.45: 音声入力を設定の一番上に（やっさんの指定） -->
+        <div class="field-group">
+          <h3 class="field-group-title">音声入力</h3>
+          <div class="field">
+            <span class="field-label">文字起こしのモード</span>
+            <label class="field-row" style="margin-bottom:4px">
+              <input type="radio" name="input-mode" id="mode-webspeech" value="web-speech" />
+              <span><strong>Web Speech</strong><small class="field-hint" style="display:block">高速・システム既定マイクのみ</small></span>
+            </label>
+            <label class="field-row" style="margin-bottom:0">
+              <input type="radio" name="input-mode" id="mode-gemini" value="gemini-audio" />
+              <span><strong>Gemini Audio</strong><small class="field-hint" style="display:block">小さい声に強い・10〜15秒遅延・任意のデバイス選択可</small></span>
+            </label>
+          </div>
+          <div class="field-conditional is-hidden" id="webspeech-only-fields">
+            <div class="field-conditional-inner">
+              <!-- v0.13.22: Web Speech チャンク間隔（強制 commit）は望む動作達成の鍵
+                   （v0.13.20 撤去ミスで判明）。N 秒ごとに recognition.stop() を呼んで
+                   字幕の「ちょうどいい塊感」を作る。話し手のリズムで調整可能。-->
+              <label class="field">
+                <span class="field-label">Web Speech チャンク間隔（秒）</span>
+                <select id="input-webspeech-commit-sec">
+                  <option value="0">OFF（WebSpeech 任せ）</option>
+                  <option value="6" selected>6（既定）</option>
+                  <option value="8">8</option>
+                  <option value="10">10</option>
+                </select>
+                <small class="field-hint">文字起こしを下書きから確定するまでの時間</small>
+              </label>
+
+              <!-- v0.13.31: ここから下は字幕／オーバーレイ用設定。文字起こしペインは触らない。
+                   完全分離（dictation:liveCaption キー経由）。 -->
+              <h3 class="field-group-title">字幕用設定</h3>
+
+              <!-- v0.13.31: 真の「改行」方式。recognition.stop() を呼ばずに、
+                   interim を N 字単位にカットして新段落として字幕／オーバーレイに流す。
+                   stop しない＝Web Speech は走り続ける＝ブロック間の言葉が失われない。
+                   v0.13.30 の「stop で final 化」誤翻訳のやり直し。
+                   ↑↓ は design-system principles.md「ネイティブ装飾は appearance:none」に従い、
+                   汎用 .number-stepper（wireNumberSteppers）を使う。 -->
+              <label class="field">
+                <span class="field-label">字幕一行あたりの最大文字数（10〜100）</span>
+                <div class="number-stepper">
+                  <input type="number" id="input-webspeech-slice-chars" min="10" max="100" step="1" value="30">
+                  <div class="number-stepper-btns">
+                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
+                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">文字起こしの下書きがこの字数になると字幕エリアに表示される。話者のリズム・読みやすさで調整（既定 30）</small>
+              </label>
+
+              <!-- v0.13.31: 無音 stop。30 字に達しない短い発話を、
+                   既存の時間ベース 6 秒を待たずに字幕へ流すための補完。
+                   interim の「中身」が変化していない時間で判定するので、
+                   v0.13.30 の誤発火（喋り中も onresult が空く問題）は起きない。
+                   0=OFF。 -->
+              <label class="field">
+                <span class="field-label">強制字幕表示時間（秒、0=OFF）</span>
+                <div class="number-stepper">
+                  <input type="number" id="input-webspeech-silence-stop-sec" min="0" max="10" step="1" value="3">
+                  <div class="number-stepper-btns">
+                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
+                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">文字起こしの下書きが指定文字数に足りず、無言の場合、強制的に字幕エリアに表示するまでの時間。0 で OFF</small>
+              </label>
+            </div>
+          </div>
+          <div class="field-conditional is-hidden" id="gemini-only-fields">
+            <div class="field-conditional-inner">
+              <label class="field">
+                <span class="field-label">音声入力デバイス</span>
+                <select id="input-audio-device"></select>
+              </label>
+              <label class="field field-row">
+                <input id="input-gemini-live-display" type="checkbox" />
+                <span>リアルタイム表示を使う（Web Speech を並走）</span>
+              </label>
+              <div class="field">
+                <small class="field-hint">Gemini の結果が返るまでの間、Web Speech が聞き取った文字を「未確定」として表示します。</small>
+              </div>
+              <label class="field">
+                <span class="field-label">最短何秒で区切るか（秒）</span>
+                <div class="number-stepper">
+                  <input id="input-chunk-sec" type="number" min="5" max="60" step="1" />
+                  <div class="number-stepper-btns">
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">この秒数<strong>より前では切りません</strong>。長いほど精度アップ・遅延増、短いほど反応速い。既定 12 秒。</small>
+              </label>
+              <label class="field field-row">
+                <input id="input-silence-cut" type="checkbox" />
+                <span>無音の切れ目で区切る</span>
+              </label>
+              <div class="field">
+                <small class="field-hint">
+                  最短秒数を過ぎたあと、話が途切れたところを狙って区切ります。
+                  文の途中で切れなくなるので、言っていない言葉が足される不具合が起きにくくなります。
+                  オフにすると、従来どおり最短秒数ちょうどで区切ります。
+                </small>
+              </div>
+              <label class="field">
+                <span class="field-label">最長何秒まで待つか（秒）</span>
+                <div class="number-stepper">
+                  <input id="input-chunk-max-sec" type="number" min="7" max="90" step="1" />
+                  <div class="number-stepper-btns">
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-max-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-max-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">ずっと喋り続けて無音が来ない場合、この秒数で諦めて区切ります。既定 20 秒。</small>
+              </label>
+              <label class="field">
+                <span class="field-label">音声送信しきい値（バイト）</span>
+                <div class="number-stepper">
+                  <input id="input-min-chunk-bytes" type="number" min="100" max="5000" step="50" />
+                  <div class="number-stepper-btns">
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-min-chunk-bytes" data-stepper-delta="50" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-min-chunk-bytes" data-stepper-delta="-50" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">このサイズ未満の音声チャンクは無音とみなしてスキップ。小声も拾いたいなら下げる（既定 400）／無駄送信を減らすなら上げる。</small>
+              </label>
+              <label class="field">
+                <span class="field-label">音質（kbps）</span>
+                <select id="input-audio-bitrate">
+                  <option value="32000">32 — 最小（90分で約21MB）</option>
+                  <option value="64000">64 — 標準（90分で約43MB）</option>
+                  <option value="96000">96 — 高め（90分で約65MB）</option>
+                  <option value="128000">128 — 従来（90分で約86MB）</option>
+                </select>
+                <small class="field-hint">音声認識用途では 64kbps で十分です。下げると送信量と保管サイズが減ります。</small>
+              </label>
+            </div>
+          </div>
+        </div>
+
         <!-- v0.24.39: AI まわりの設定を1つにまとめ、やっさんの指定した順に並べた。
              「ライブ整形」と「要約・タイトル生成」は独立（以前はライブ整形をオフにすると要約も止まっていた）。
              Claude Code は「連携を使う（Claude Code）」と「一部を Claude Code で処理する」の2つに分けた。
@@ -450,156 +591,6 @@
               <input type="radio" name="summary-detail" id="summary-detail-high" value="high" />
               <span><strong>概要</strong> — 重要なキーワードのみを用いて要約（最もシンプル）</span>
             </label>
-          </div>
-
-        </div>
-        </div>
-
-        <div class="field-group">
-          <h3 class="field-group-title">音声入力</h3>
-          <div class="field">
-            <span class="field-label">入力モード</span>
-            <label class="field-row" style="margin-bottom:4px">
-              <input type="radio" name="input-mode" id="mode-webspeech" value="web-speech" />
-              <span><strong>Web Speech</strong> — 速い・無料・システム既定マイクのみ</span>
-            </label>
-            <label class="field-row" style="margin-bottom:0">
-              <input type="radio" name="input-mode" id="mode-gemini" value="gemini-audio" />
-              <span><strong>Gemini Audio</strong> — 小さい声に強い・10〜15秒遅延・任意のデバイス選択可</span>
-            </label>
-            <small class="field-hint" style="margin-top:8px;display:block">
-              Zoom/Meet の音声を取り込むには
-              <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener">VB-Cable</a>
-              などの仮想オーディオケーブルをインストール
-            </small>
-          </div>
-          <div class="field-conditional is-hidden" id="webspeech-only-fields">
-            <div class="field-conditional-inner">
-              <!-- v0.13.22: Web Speech チャンク間隔（強制 commit）は望む動作達成の鍵
-                   （v0.13.20 撤去ミスで判明）。N 秒ごとに recognition.stop() を呼んで
-                   字幕の「ちょうどいい塊感」を作る。話し手のリズムで調整可能。-->
-              <label class="field">
-                <span class="field-label">Web Speech チャンク間隔（秒）</span>
-                <select id="input-webspeech-commit-sec">
-                  <option value="0">OFF（WebSpeech 任せ）</option>
-                  <option value="6" selected>6（既定）</option>
-                  <option value="8">8</option>
-                  <option value="10">10</option>
-                </select>
-                <small class="field-hint">文字起こしを下書きから確定するまでの時間</small>
-              </label>
-
-              <!-- v0.13.31: ここから下は字幕／オーバーレイ用設定。文字起こしペインは触らない。
-                   完全分離（dictation:liveCaption キー経由）。 -->
-              <h3 class="field-group-title">字幕用設定</h3>
-
-              <!-- v0.13.31: 真の「改行」方式。recognition.stop() を呼ばずに、
-                   interim を N 字単位にカットして新段落として字幕／オーバーレイに流す。
-                   stop しない＝Web Speech は走り続ける＝ブロック間の言葉が失われない。
-                   v0.13.30 の「stop で final 化」誤翻訳のやり直し。
-                   ↑↓ は design-system principles.md「ネイティブ装飾は appearance:none」に従い、
-                   汎用 .number-stepper（wireNumberSteppers）を使う。 -->
-              <label class="field">
-                <span class="field-label">字幕一行あたりの最大文字数（10〜100）</span>
-                <div class="number-stepper">
-                  <input type="number" id="input-webspeech-slice-chars" min="10" max="100" step="1" value="30">
-                  <div class="number-stepper-btns">
-                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
-                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
-                  </div>
-                </div>
-                <small class="field-hint">文字起こしの下書きがこの字数になると字幕エリアに表示される。話者のリズム・読みやすさで調整（既定 30）</small>
-              </label>
-
-              <!-- v0.13.31: 無音 stop。30 字に達しない短い発話を、
-                   既存の時間ベース 6 秒を待たずに字幕へ流すための補完。
-                   interim の「中身」が変化していない時間で判定するので、
-                   v0.13.30 の誤発火（喋り中も onresult が空く問題）は起きない。
-                   0=OFF。 -->
-              <label class="field">
-                <span class="field-label">強制字幕表示時間（秒、0=OFF）</span>
-                <div class="number-stepper">
-                  <input type="number" id="input-webspeech-silence-stop-sec" min="0" max="10" step="1" value="3">
-                  <div class="number-stepper-btns">
-                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
-                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
-                  </div>
-                </div>
-                <small class="field-hint">文字起こしの下書きが指定文字数に足りず、無言の場合、強制的に字幕エリアに表示するまでの時間。0 で OFF</small>
-              </label>
-            </div>
-          </div>
-          <div class="field-conditional is-hidden" id="gemini-only-fields">
-            <div class="field-conditional-inner">
-              <label class="field">
-                <span class="field-label">音声入力デバイス</span>
-                <select id="input-audio-device"></select>
-              </label>
-              <label class="field field-row">
-                <input id="input-gemini-live-display" type="checkbox" />
-                <span>リアルタイム表示を使う（Web Speech を並走）</span>
-              </label>
-              <div class="field">
-                <small class="field-hint">
-                  Gemini の結果が返るまでの間、Web Speech が聞き取った文字を「未確定」として表示します。
-                  確定するとその場が Gemini の文字起こしに置き換わります。マイクは同時に使えることを実機で確認済みです。
-                </small>
-              </div>
-              <label class="field">
-                <span class="field-label">最短何秒で区切るか（秒）</span>
-                <div class="number-stepper">
-                  <input id="input-chunk-sec" type="number" min="5" max="60" step="1" />
-                  <div class="number-stepper-btns">
-                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
-                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
-                  </div>
-                </div>
-                <small class="field-hint">この秒数<strong>より前では切りません</strong>。長いほど精度アップ・遅延増、短いほど反応速い。既定 12 秒。</small>
-              </label>
-              <label class="field field-row">
-                <input id="input-silence-cut" type="checkbox" />
-                <span>無音の切れ目で区切る</span>
-              </label>
-              <div class="field">
-                <small class="field-hint">
-                  最短秒数を過ぎたあと、話が途切れたところを狙って区切ります。
-                  文の途中で切れなくなるので、言っていない言葉が足される不具合が起きにくくなります。
-                  オフにすると、従来どおり最短秒数ちょうどで区切ります。
-                </small>
-              </div>
-              <label class="field">
-                <span class="field-label">最長何秒まで待つか（秒）</span>
-                <div class="number-stepper">
-                  <input id="input-chunk-max-sec" type="number" min="7" max="90" step="1" />
-                  <div class="number-stepper-btns">
-                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-max-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
-                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-max-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
-                  </div>
-                </div>
-                <small class="field-hint">ずっと喋り続けて無音が来ない場合、この秒数で諦めて区切ります。既定 20 秒。</small>
-              </label>
-              <label class="field">
-                <span class="field-label">音声送信しきい値（バイト）</span>
-                <div class="number-stepper">
-                  <input id="input-min-chunk-bytes" type="number" min="100" max="5000" step="50" />
-                  <div class="number-stepper-btns">
-                    <button type="button" class="number-stepper-btn" data-stepper-target="input-min-chunk-bytes" data-stepper-delta="50" tabindex="-1"><span data-icon="chevron-up"></span></button>
-                    <button type="button" class="number-stepper-btn" data-stepper-target="input-min-chunk-bytes" data-stepper-delta="-50" tabindex="-1"><span data-icon="chevron-down"></span></button>
-                  </div>
-                </div>
-                <small class="field-hint">このサイズ未満の音声チャンクは無音とみなしてスキップ。小声も拾いたいなら下げる（既定 400）／無駄送信を減らすなら上げる。</small>
-              </label>
-              <label class="field">
-                <span class="field-label">音質（kbps）</span>
-                <select id="input-audio-bitrate">
-                  <option value="32000">32 — 最小（90分で約21MB）</option>
-                  <option value="64000">64 — 標準（90分で約43MB）</option>
-                  <option value="96000">96 — 高め（90分で約65MB）</option>
-                  <option value="128000">128 — 従来（90分で約86MB）</option>
-                </select>
-                <small class="field-hint">音声認識用途では 64kbps で十分です。下げると送信量と保管サイズが減ります。</small>
-              </label>
-            </div>
           </div>
         </div>
 
@@ -1029,16 +1020,16 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.44"></script>
-  <script src="gemini.js?v=0.24.44"></script>
-  <script src="notion.js?v=0.24.44"></script>
-  <script src="audio-store.js?v=0.24.44"></script>
-  <script src="claude-bridge.js?v=0.24.44"></script>
-  <script src="claude-installer.js?v=0.24.44"></script>
-  <script src="live-summary.js?v=0.24.44"></script>
-  <script src="image-store.js?v=0.24.44"></script>
-  <script src="gemini-files.js?v=0.24.44"></script>
-  <script src="term-dicts.js?v=0.24.44"></script>
-  <script src="app.js?v=0.24.44"></script>
+  <script src="icons.js?v=0.24.45"></script>
+  <script src="gemini.js?v=0.24.45"></script>
+  <script src="notion.js?v=0.24.45"></script>
+  <script src="audio-store.js?v=0.24.45"></script>
+  <script src="claude-bridge.js?v=0.24.45"></script>
+  <script src="claude-installer.js?v=0.24.45"></script>
+  <script src="live-summary.js?v=0.24.45"></script>
+  <script src="image-store.js?v=0.24.45"></script>
+  <script src="gemini-files.js?v=0.24.45"></script>
+  <script src="term-dicts.js?v=0.24.45"></script>
+  <script src="app.js?v=0.24.45"></script>
 </body>
 </html>
