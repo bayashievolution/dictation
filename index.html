@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.39" />
+  <link rel="stylesheet" href="style.css?v=0.24.40" />
 </head>
 <body>
   <div id="app">
@@ -361,18 +361,10 @@
               <span data-claude-web-only>ブラウザ版では <code>start.bat</code> でサーバーを起動しておく必要があります。</span>
             </small>
           </div>
-          <!-- v0.24.21: インストール式（拡張のときだけ出す） -->
+          <!-- v0.24.21: インストール式（拡張のときだけ出す）。説明文は v0.24.40 で外した（やっさん「消してOK」）。
+               手順・前提（Windows・Node.js・警告が出ること・外し方）は UPDATE.md の 5 節にある -->
           <div class="field" data-claude-native-only>
-            <div class="audio-usage-row">
-              <span class="field-hint">最初に一度だけ</span>
-              <button type="button" id="btn-claude-install" class="btn btn-ghost btn-sm">連携アプリをダウンロード</button>
-            </div>
-            <small class="field-hint">
-              保存された <code>dictation-claude-setup.bat</code> を<strong>ダブルクリック</strong>するとインストールされます
-              （Windows 用・管理者の権限は不要・Node.js が必要）。ログインしていなければ、そのままサインインまで進めます。
-              ダウンロード時にブラウザが「危険なファイル」と警告することがあります（.bat なので）。
-              外すときは <code>%LOCALAPPDATA%\dictation-helper\uninstall.bat</code>。
-            </small>
+            <button type="button" id="btn-claude-install" class="btn btn-ghost btn-sm">連携アプリをダウンロード</button>
           </div>
           <!-- v0.24.12: 中継に必要なファイル（ブラウザ版のときだけ出す） -->
           <div class="field" data-claude-web-only>
@@ -1047,16 +1039,16 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.39"></script>
-  <script src="gemini.js?v=0.24.39"></script>
-  <script src="notion.js?v=0.24.39"></script>
-  <script src="audio-store.js?v=0.24.39"></script>
-  <script src="claude-bridge.js?v=0.24.39"></script>
-  <script src="claude-installer.js?v=0.24.39"></script>
-  <script src="live-summary.js?v=0.24.39"></script>
-  <script src="image-store.js?v=0.24.39"></script>
-  <script src="gemini-files.js?v=0.24.39"></script>
-  <script src="term-dicts.js?v=0.24.39"></script>
-  <script src="app.js?v=0.24.39"></script>
+  <script src="icons.js?v=0.24.40"></script>
+  <script src="gemini.js?v=0.24.40"></script>
+  <script src="notion.js?v=0.24.40"></script>
+  <script src="audio-store.js?v=0.24.40"></script>
+  <script src="claude-bridge.js?v=0.24.40"></script>
+  <script src="claude-installer.js?v=0.24.40"></script>
+  <script src="live-summary.js?v=0.24.40"></script>
+  <script src="image-store.js?v=0.24.40"></script>
+  <script src="gemini-files.js?v=0.24.40"></script>
+  <script src="term-dicts.js?v=0.24.40"></script>
+  <script src="app.js?v=0.24.40"></script>
 </body>
 </html>
