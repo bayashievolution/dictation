@@ -3205,7 +3205,7 @@ async function runDiarization() {
         ? `※ 設定にしたがって、保管していた録音（${formatBytes(swept.deletedBytes)}）を消しました。\n`
           + `　 録音からの書き起こし直しはもうできませんが、**この結果はタブに保存してあります**。\n`
           + `　 間違って消しても、同じボタンから貼り直せます。\n`
-          + `　 別の設定で試し直したいときは、次の録音の前に「いつ消すか」を変えてください。`
+          + `　 別の設定で試し直したいときは、次の録音の前に「音声ファイルの取り扱い」を変えてください。`
         : `※ 保管した録音は設定にしたがって残してあります。もう一度かけ直せます。`));
 }
 
@@ -3305,7 +3305,7 @@ function explainNoAudioForDiarization({ keepRecording, retention, repassDoneAt }
     const base = `この録音は ${when} に話者判別が済んでいて、音声はもう消えています。\n\n`;
     return retention === 'repass'
       ? base
-        + '設定「いつ消すか」が『話者判別が終わったら消す』なので、'
+        + '設定「音声ファイルの取り扱い」が『話者判別処理が終わったら消す』なので、'
         + '1回かけた時点で消しています。\n\n'
         + 'もう一度かけられるようにしたいときは、次の録音の前に'
         + '『タブを閉じたら消す』などに変えてください。\n'
@@ -3936,6 +3936,9 @@ function applyGeminiOnlyVisibility(animated = true) {
   const el = document.getElementById('gemini-only-fields');
   if (!el) return;
   const isGemini = els.modeGemini && els.modeGemini.checked;
+  // v0.24.48: 「録音の保持」（話者判別）も Gemini モードのときだけ出す（やっさんの指定）
+  const keep = document.getElementById('keep-recording-group');
+  if (keep) keep.hidden = !isGemini;
   if (!animated) {
     // モーダル開いた直後はトランジション無しで確定状態に
     const prev = el.style.transition;

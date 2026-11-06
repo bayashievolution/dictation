@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.47" />
+  <link rel="stylesheet" href="style.css?v=0.24.48" />
 </head>
 <body>
   <div id="app">
@@ -602,25 +602,20 @@
             <span>録音中、SUMADO のアイランドに声の大きさのメーターを出す</span>
           </label>
           <div class="field">
-            <small class="field-hint">SUMADO の中で使っているときだけ働きます。メーターのために、マイクの音の大きさを別に測ります（音そのものは SUMADO に送りません）。</small>
+            <small class="field-hint">SUMADO の中で使っているときだけ働きます。</small>
           </div>
         </div>
 
-        <div class="field-group">
+        <!-- v0.24.48: 話者判別は Gemini モードの録音を使うので、Gemini モードのときだけ出す（やっさんの指定）。
+             保存のキー（keepRecording / audioRetention）は変えていない -->
+        <div class="field-group" id="keep-recording-group">
           <h3 class="field-group-title">録音の保持</h3>
           <label class="field field-row">
             <input id="input-keep-recording" type="checkbox" />
-            <span>録音を端末に一時保存する（話者判別用）</span>
+            <span>話者判別機能を有効にする</span>
           </label>
           <div class="field">
-            <small class="field-hint">
-              録音が終わったあとで、<strong>保管した録音をまとめて Gemini に通し、話者付きで書き起こす</strong>ための機能です。
-              文字起こしタブの
-              <span class="inline-icon" data-icon="users" data-icon-size="14"></span>
-              ボタンから実行します。
-              live の文字起こしは12〜20秒ごとに送るので話者を区別できませんが、
-              話者判別は約10分ずつまとめて送るため、誰が話したかを付けられます。
-            </small>
+            <small class="field-hint">話者判別機能が有効になり、それに伴い音声ファイルが端末に一時保存されます。</small>
           </div>
           <div class="field">
             <small class="field-hint warn-hint">
@@ -633,21 +628,15 @@
             </small>
           </div>
           <label class="field">
-            <span class="field-label">いつ消すか</span>
+            <span class="field-label">音声ファイルの取り扱い</span>
             <select id="input-audio-retention">
               <option value="close">タブを閉じたら消す（推奨）</option>
-              <option value="repass">話者判別が終わったら消す（24時間で自動失効）</option>
+              <option value="repass">話者判別処理が終わったら消す（24時間で自動失効）</option>
               <option value="1d">1日たったら消す</option>
               <option value="7d">7日たったら消す</option>
               <option value="manual">手動で消すまで残す</option>
             </select>
-            <small class="field-hint">
-              どの設定でも<strong>タブを閉じた時点でその録音は消えます</strong>。
-              起動のたびに期限切れを掃除するので、途中でブラウザが落ちても残りません。
-              『話者判別が終わったら消す』はいちばん早く消えますが、
-              <strong>同じ録音に2回目をかけられなくなります</strong>
-              （結果そのものはタブに残るので、貼り直しはいつでもできます）。
-            </small>
+            <small class="field-hint">音声ファイルが残っていれば話者判別をやり直すことができます。どの設定でもタブを閉じた時点でその録音は削除されます。</small>
           </label>
           <div class="field">
             <div class="audio-usage-row">
@@ -1021,16 +1010,16 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.47"></script>
-  <script src="gemini.js?v=0.24.47"></script>
-  <script src="notion.js?v=0.24.47"></script>
-  <script src="audio-store.js?v=0.24.47"></script>
-  <script src="claude-bridge.js?v=0.24.47"></script>
-  <script src="claude-installer.js?v=0.24.47"></script>
-  <script src="live-summary.js?v=0.24.47"></script>
-  <script src="image-store.js?v=0.24.47"></script>
-  <script src="gemini-files.js?v=0.24.47"></script>
-  <script src="term-dicts.js?v=0.24.47"></script>
-  <script src="app.js?v=0.24.47"></script>
+  <script src="icons.js?v=0.24.48"></script>
+  <script src="gemini.js?v=0.24.48"></script>
+  <script src="notion.js?v=0.24.48"></script>
+  <script src="audio-store.js?v=0.24.48"></script>
+  <script src="claude-bridge.js?v=0.24.48"></script>
+  <script src="claude-installer.js?v=0.24.48"></script>
+  <script src="live-summary.js?v=0.24.48"></script>
+  <script src="image-store.js?v=0.24.48"></script>
+  <script src="gemini-files.js?v=0.24.48"></script>
+  <script src="term-dicts.js?v=0.24.48"></script>
+  <script src="app.js?v=0.24.48"></script>
 </body>
 </html>
