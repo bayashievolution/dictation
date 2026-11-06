@@ -130,7 +130,9 @@ const summary = (page) => page.evaluate(() => ({
     eq('最終版では（進行中）を付けさせない', lives[1].includes('「（進行中）」は付けない'), true);
     eq('（進行中）が消えた', (await summary(page)).secs, ['1. 評価の観点', '2. ルーブリック']);
     eq('Gemini は使っていない', seen.gemini, 0);
-    eq('要約タブには書いていない（別のタブ）', (await page.textContent('#summary')).trim(), '');
+    // v0.24.39: 「要約・タイトル生成」はライブ整形（aiEnabled）と独立したので、普通の要約は作られる。
+    // 見るのは、目次付きのライブ要約が要約タブに入っていないこと
+    eq('ライブ要約は要約タブに書いていない（別のタブ）', await page.evaluate(() => !document.querySelector('#summary .live-summary-toc')), true);
 
     console.log('■ リアルタイム要約タブの「最初から要約し直す」');
     await page.evaluate(() => { switchInnerPane('pane-live'); });
@@ -164,7 +166,8 @@ const summary = (page) => page.evaluate(() => ({
       note: !document.getElementById('live-summary-note').hidden,
     }));
     eq('押せない・理由が出る', await st(), { disabled: true, note: true });
-    await page.evaluate(() => { const b = document.getElementById('input-claude-bridge'); b.checked = true; b.dispatchEvent(new Event('change')); });
+    // v0.24.39: ライブ要約の前提は「Claude Code」（連携を使う）のトグル
+    await page.evaluate(() => { const b = document.getElementById('input-claude-code'); b.checked = true; b.dispatchEvent(new Event('change')); });
     await page.waitForTimeout(300);
     eq('Claude 連携をオンにすると押せる', await st(), { disabled: false, note: false });
     await ctx.close();

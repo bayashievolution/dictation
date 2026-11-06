@@ -42,7 +42,7 @@ const CLAUDE_BRIDGE_URL = 'http://127.0.0.1:8765/api/claude';
 const CLAUDE_NATIVE_HOST = 'com.dictation.helper';
 
 /** インストールされていないときの文言。fallback / health の両方で使う */
-const CLAUDE_NOT_INSTALLED = 'Claude 連携がインストールされていません（設定の「インストーラーを保存」から入れてください）';
+const CLAUDE_NOT_INSTALLED = 'Claude 連携がインストールされていません（設定の「連携アプリをダウンロード」から入れてください）';
 
 /** Claude に回してよい処理。ここに無いものは必ず Gemini */
 const CLAUDE_BRIDGE_FEATURES = new Set([
@@ -193,7 +193,7 @@ function claudeNativeErrorKind(message) {
 function claudeNativeErrorText(kind, raw) {
   if (kind === 'not-installed') return CLAUDE_NOT_INSTALLED;
   if (kind === 'other-extension') {
-    return 'Claude 連携が別の場所の拡張用に入っています（設定の「インストーラーを保存」から入れ直してください）';
+    return 'Claude 連携が別の場所の拡張用に入っています（設定の「連携アプリをダウンロード」から入れ直してください）';
   }
   return 'Claude 連携の補助プログラムが動きませんでした（Node.js が消えた等。入れ直すと直ることがあります）: ' + String(raw || '');
 }
@@ -356,7 +356,7 @@ function claudeBridgeHealthMessage(health) {
     const stale = !(Array.isArray(h.features) && h.features.includes('effort'));
     const fix = !stale ? ''
       : h.via === 'native'
-        ? '。連携が古い版です。ライブ要約を速くするため、インストーラーを保存して入れ直してください'
+        ? '。連携が古い版です。ライブ要約を速くするため、「連携アプリをダウンロード」から入れ直してください'
         : '。サーバーが古い版です。ライブ要約を速くするため、start.bat を起動し直してください';
     return { ok: true, needsLogin: false, unknown: false, stale,
              text: `使えます（ログイン済み${parts.length ? ' / ' + parts.join(' / ') : ''}）${fix}` };
@@ -364,7 +364,7 @@ function claudeBridgeHealthMessage(health) {
   if (a.ok && a.loggedIn === false) {
     return { ok: false, needsLogin: true, unknown: false,
              text: h.via === 'native'
-               ? 'Claude にログインしていません。インストーラーをもう一度ダブルクリックするとサインインできます'
+               ? 'Claude にログインしていません。連携アプリ（dictation-claude-setup.bat）をもう一度ダブルクリックするとサインインできます'
                : 'Claude にログインしていません。login.bat でサインインしてください' };
   }
   // 応答に auth が無い = 古い serve.js が動いたまま (v0.24.10)

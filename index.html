@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.38" />
+  <link rel="stylesheet" href="style.css?v=0.24.39" />
 </head>
 <body>
   <div id="app">
@@ -336,23 +336,70 @@
       </div>
       <div class="modal-body">
 
+        <!-- v0.24.39: AI まわりの設定を1つにまとめ、やっさんの指定した順に並べた。
+             「ライブ整形」と「要約・タイトル生成」は独立（以前はライブ整形をオフにすると要約も止まっていた）。
+             Claude Code は「連携を使う（Claude Code）」と「一部を Claude Code で処理する」の2つに分けた。
+             名前のすみ分け（v0.24.29）: ライブ○○ ＝ AI が録音中に処理するもの／リアルタイム表示 ＝ Web Speech をそのまま出すもの -->
         <div class="field-group">
-          <h3 class="field-group-title">Gemini API</h3>
+          <h3 class="field-group-title">AI機能</h3>
           <label class="field">
             <span class="field-label">Gemini API キー</span>
             <input id="input-api-key" type="password" placeholder="AIza..." autocomplete="off" spellcheck="false" />
             <span class="field-hint">
-              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で取得（無料枠内で運用できます）
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で取得
             </span>
           </label>
-          <!-- v0.24.29: 名前のすみ分け（やっさんの案）
-               ライブ○○       … AI（Gemini / Claude）が録音中に処理しているもの（ライブ整形・ライブ要約）
-               リアルタイム表示 … ブラウザの音声認識（Web Speech）の結果を手を加えずに出しているもの -->
+
+          <label class="field field-row">
+            <input id="input-claude-code" type="checkbox" />
+            <span>Claude Code</span>
+          </label>
+          <div class="field">
+            <small class="field-hint">
+              Claude Code のターミナル版が入っている場合、連携アプリをインストールすることで有効にできます。
+              Gemini の API ではなく<strong>お使いの Claude のサブスクで動きます</strong>。
+              <span data-claude-web-only>ブラウザ版では <code>start.bat</code> でサーバーを起動しておく必要があります。</span>
+            </small>
+          </div>
+          <!-- v0.24.21: インストール式（拡張のときだけ出す） -->
+          <div class="field" data-claude-native-only>
+            <div class="audio-usage-row">
+              <span class="field-hint">最初に一度だけ</span>
+              <button type="button" id="btn-claude-install" class="btn btn-ghost btn-sm">連携アプリをダウンロード</button>
+            </div>
+            <small class="field-hint">
+              保存された <code>dictation-claude-setup.bat</code> を<strong>ダブルクリック</strong>するとインストールされます
+              （Windows 用・管理者の権限は不要・Node.js が必要）。ログインしていなければ、そのままサインインまで進めます。
+              ダウンロード時にブラウザが「危険なファイル」と警告することがあります（.bat なので）。
+              外すときは <code>%LOCALAPPDATA%\dictation-helper\uninstall.bat</code>。
+            </small>
+          </div>
+          <!-- v0.24.12: 中継に必要なファイル（ブラウザ版のときだけ出す） -->
+          <div class="field" data-claude-web-only>
+            <div class="audio-usage-row">
+              <span class="field-hint">中継用のファイルが手元に無いとき</span>
+              <button type="button" id="btn-save-bridge-files" class="btn btn-ghost btn-sm">中継用ファイルを保存</button>
+            </div>
+            <small class="field-hint">
+              ブラウザ版からはパソコンのプログラムを起動できないので、中継役の <code>serve.js</code> を動かしてもらう必要があります。
+              <code>serve.js</code> ・<code>claude-runner.js</code> ・<code>start.bat</code> ・<code>login.bat</code> の4つを保存し、
+              <strong>同じフォルダに置いて</strong> <code>start.bat</code> をダブルクリックしてください（Node.js が必要）。
+            </small>
+          </div>
+          <div class="field">
+            <div class="audio-usage-row">
+              <span id="claude-bridge-status" class="field-hint">未確認（オンにするとログインを確かめます）</span>
+              <button type="button" id="btn-claude-bridge-test" class="btn btn-ghost btn-sm">接続を確認</button>
+            </div>
+          </div>
+
           <label class="field field-row">
             <input id="input-ai-enabled" type="checkbox" />
-            <span>ライブ整形（録音中に AI が段落分け・句読点を整える）</span>
+            <span>ライブ整形</span>
           </label>
-          <small class="field-hint">オフにすると、<strong>録音停止時の自動要約・タイトル付けも止まります</strong>（この設定が AI の後処理全体のスイッチを兼ねているため）。</small>
+          <div class="field">
+            <small class="field-hint">文字起こしをしつつ、段落分けや句読点を入れて体裁を整えます（Gemini）。</small>
+          </div>
           <label class="field">
             <span class="field-label">ライブ整形のタイミング（秒）</span>
             <div class="number-stepper">
@@ -364,10 +411,38 @@
             </div>
             <small class="field-hint">無音状態が設定した秒数継続したら、発話を Gemini に送って整形</small>
           </label>
+
+          <!-- v0.24.22: ライブ要約（Claude Code 連携のみ。v0.24.27 までの名前はリアルタイム要約／RT要約） -->
+          <label class="field field-row">
+            <input id="input-live-summary" type="checkbox" />
+            <span>ライブ要約</span>
+          </label>
+          <div class="field">
+            <small class="field-hint">
+              文字起こしをしつつ、話題を順に端的にまとめます（Claude Code）。
+              「要約」の左に「ライブ要約」タブが出て、目次の項目を押すとその節へ飛びます。
+              Claude に回せなかったときは Gemini には切り替えず、その回の更新を見送ります。
+            </small>
+            <small id="live-summary-note" class="field-hint warn-hint">上の「Claude Code」をオンにすると選べます。</small>
+          </div>
+          <label class="field">
+            <span class="field-label">ライブ要約の間隔（分）</span>
+            <div class="number-stepper">
+              <input id="input-live-summary-min" type="number" min="1" max="60" step="1" />
+              <div class="number-stepper-btns">
+                <button type="button" class="number-stepper-btn" data-stepper-target="input-live-summary-min" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button type="button" class="number-stepper-btn" data-stepper-target="input-live-summary-min" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+              </div>
+            </div>
+          </label>
+
           <label class="field field-row">
             <input id="input-auto-summarize" type="checkbox" />
-            <span>録音停止時にAI要約・タイトル生成</span>
+            <span>要約・タイトル生成</span>
           </label>
+          <div class="field">
+            <small class="field-hint">録音停止時に要約・タイトルを生成します。</small>
+          </div>
           <div class="field">
             <span class="field-label">要約の詳しさ</span>
             <label class="field-row" style="margin-bottom:4px">
@@ -383,89 +458,18 @@
               <span><strong>概要</strong> — 重要なキーワードのみを用いて要約（最もシンプル）</span>
             </label>
           </div>
-        </div>
 
-        <!-- v0.24.0: 後処理だけ、利用者自身の Claude Code に回せる -->
-        <div class="field-group">
-          <h3 class="field-group-title">Claude Code 連携</h3>
+          <!-- v0.24.0: 後処理だけ Claude Code に回す（保存のキーは useClaudeBridge のまま） -->
           <label class="field field-row">
             <input id="input-claude-bridge" type="checkbox" />
-            <span>要約・質問・整形を Claude Code に任せる</span>
+            <span>一部を Claude Code で処理する</span>
           </label>
           <div class="field">
             <small class="field-hint">
-              Claude Code の<strong>ターミナル版</strong>が入っていれば、そちらで処理します。
-              Gemini の API トークンではなく<strong>お使いの Claude のサブスクで動きます</strong>。
-              <span data-claude-native-only>最初に一度だけ、下の「インストーラーを保存」から連携を入れてください。</span>
-              <span data-claude-web-only><code>start.bat</code> でサーバーを起動しておく必要があります。</span>
+              要約・質問・タイトル・全体整形・メモの整形を Claude Code で処理します。
+              音声を処理する必要がある、文字起こし・話者判別・ライブ整形は Gemini API で処理します。
             </small>
-          </div>
-          <div class="field">
-            <small class="field-hint warn-hint">
-              <strong>文字起こしと話者判別は Gemini のままです。</strong>
-              Claude は音声を受け取れません。録音中のライブ整形も、
-              <strong>1回あたり8〜10秒かかって間に合わない</strong>ので Gemini のままです。
-              回るのは<strong>要約・質問・タイトル・全体整形・メモの整形</strong>の5つです。
-            </small>
-          </div>
-          <!-- v0.24.22: ライブ要約（Claude 連携のみ。v0.24.27 までの名前はリアルタイム要約／RT要約） -->
-          <label class="field field-row">
-            <input id="input-live-summary" type="checkbox" />
-            <span>ライブ要約（録音中に目次付きで要約を更新）</span>
-          </label>
-          <label class="field">
-            <span class="field-label">ライブ要約の間隔（分）</span>
-            <div class="number-stepper">
-              <input id="input-live-summary-min" type="number" min="1" max="60" step="1" />
-              <div class="number-stepper-btns">
-                <button type="button" class="number-stepper-btn" data-stepper-target="input-live-summary-min" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
-                <button type="button" class="number-stepper-btn" data-stepper-target="input-live-summary-min" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
-              </div>
-            </div>
-            <small class="field-hint">
-              オンにすると<strong>「要約」の左に「ライブ要約」タブが出て</strong>、録音中はこの間隔で目次付きの要約が更新されます。
-              普通の「要約」タブはこれまでどおりで、録音を止めたときは両方が作られます。オフにするとタブは隠れます（中身は消えません）。
-              目次の項目を押すとその節へ飛びます（Notion に送ったときも目次にリンクを付けます）。
-              タブの「最初から要約し直す」で、講義全体を見て目次を組み直せます。
-              Claude に回せなかったときは Gemini には切り替えず、その回の更新を見送ります。
-              タブを手で直した内容は、次の更新で前回の要約として渡ります。
-            </small>
-            <small id="live-summary-note" class="field-hint warn-hint">上の「Claude Code に任せる」をオンにすると選べます。</small>
-          </label>
-          <div class="field">
-            <div class="audio-usage-row">
-              <span id="claude-bridge-status" class="field-hint">未確認（オンにするとログインを確かめます）</span>
-              <button type="button" id="btn-claude-bridge-test" class="btn btn-ghost btn-sm">接続を確認</button>
-            </div>
-          </div>
-          <!-- v0.24.21: インストール式（拡張のときだけ出す） -->
-          <div class="field" data-claude-native-only>
-            <div class="audio-usage-row">
-              <span class="field-hint">連携を入れる（一度だけ）</span>
-              <button type="button" id="btn-claude-install" class="btn btn-ghost btn-sm">インストーラーを保存</button>
-            </div>
-            <small class="field-hint">
-              保存された <code>dictation-claude-setup.bat</code> を<strong>ダブルクリック</strong>するだけです。
-              黒い窓を開いたままにしておく必要はありません（要約などを頼んだときだけ、裏で Claude を呼びます）。
-              ログインしていなければ、そのままサインインまで進めます。
-              Windows 用・管理者の権限は不要・<strong>Node.js が入っていることが前提</strong>です。
-              ダウンロード時にブラウザが「危険なファイル」と警告することがあります（.bat なので）。
-              外すときは <code>%LOCALAPPDATA%\dictation-helper\uninstall.bat</code> を実行してください。
-            </small>
-          </div>
-          <!-- v0.24.12: 中継に必要なファイルをここから出せるようにする -->
-          <div class="field" data-claude-web-only>
-            <div class="audio-usage-row">
-              <span class="field-hint">中継用のファイルが手元に無いとき</span>
-              <button type="button" id="btn-save-bridge-files" class="btn btn-ghost btn-sm">中継用ファイルを保存</button>
-            </div>
-            <small class="field-hint">
-              <strong>ブラウザ版（localhost で開いたとき）からは、パソコンのプログラムを起動できません</strong>（ブラウザの制限）。
-              そのため、中継役の <code>serve.js</code> をパソコンで動かしてもらう必要があります。
-              このボタンで <code>serve.js</code> ・<code>claude-runner.js</code> ・<code>start.bat</code> ・<code>login.bat</code> の4つを保存し、
-              <strong>同じフォルダに置いて</strong> <code>start.bat</code> をダブルクリックしてください。
-              （Node.js が入っていることが前提です）
-            </small>
+            <small id="claude-route-note" class="field-hint warn-hint">上の「Claude Code」をオンにすると選べます。</small>
           </div>
         </div>
 
@@ -1043,16 +1047,16 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.38"></script>
-  <script src="gemini.js?v=0.24.38"></script>
-  <script src="notion.js?v=0.24.38"></script>
-  <script src="audio-store.js?v=0.24.38"></script>
-  <script src="claude-bridge.js?v=0.24.38"></script>
-  <script src="claude-installer.js?v=0.24.38"></script>
-  <script src="live-summary.js?v=0.24.38"></script>
-  <script src="image-store.js?v=0.24.38"></script>
-  <script src="gemini-files.js?v=0.24.38"></script>
-  <script src="term-dicts.js?v=0.24.38"></script>
-  <script src="app.js?v=0.24.38"></script>
+  <script src="icons.js?v=0.24.39"></script>
+  <script src="gemini.js?v=0.24.39"></script>
+  <script src="notion.js?v=0.24.39"></script>
+  <script src="audio-store.js?v=0.24.39"></script>
+  <script src="claude-bridge.js?v=0.24.39"></script>
+  <script src="claude-installer.js?v=0.24.39"></script>
+  <script src="live-summary.js?v=0.24.39"></script>
+  <script src="image-store.js?v=0.24.39"></script>
+  <script src="gemini-files.js?v=0.24.39"></script>
+  <script src="term-dicts.js?v=0.24.39"></script>
+  <script src="app.js?v=0.24.39"></script>
 </body>
 </html>

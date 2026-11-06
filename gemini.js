@@ -281,7 +281,7 @@ function aiEngineName(feature) {
 function claudeLoginHowTo() {
   const native = typeof claudeNativeAvailable === 'function' && claudeNativeAvailable();
   return native
-    ? 'Claude 連携のインストーラー（dictation-claude-setup.bat）をもう一度ダブルクリックしてサインインし、'
+    ? '連携アプリ（dictation-claude-setup.bat）をもう一度ダブルクリックしてサインインし、'
     : 'dictation フォルダの login.bat をダブルクリックしてサインインし、';
 }
 

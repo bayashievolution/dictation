@@ -153,7 +153,10 @@ const DEFAULT_SETTINGS = {
   audioRetention: 'close',   // close / repass / 1d / 7d / manual
   // v0.24.0: 後処理を利用者自身の Claude Code に回す。既定はオフ
   //（Gemini は置き換えない。持っている人だけが使う足し算の機能）
-  useClaudeBridge: false,
+  useClaudeBridge: false,   // v0.24.39 から画面の名前は「一部を Claude Code で処理する」（キーは据え置き）
+  // v0.24.39: Claude Code 連携そのものを使うか（ライブ要約と、上の振り分けの前提）。
+  // 未設定（それ以前の設定）は loadSettings で useClaudeBridge / liveSummary から引き継ぐ
+  claudeCode: undefined,
   // 音声認識用途では 128kbps は過剰。64kbps なら 90分で約43MB
   audioBitrate: 64000,
   // v0.13.24: 旧 webspeechInterimDebounceMs / webspeechInterimOpacity (v0.13.9) は撤去。
@@ -227,7 +230,8 @@ const PANE_META = {
  * 出ているタブだけを載せる（隠れているものが知らないうちに送られないように）。
  */
 function paneVisible(id) {
-  if (id === 'pane-live') return !!state.settings.liveSummary;
+  // v0.24.39: 「Claude Code」がオフならライブ要約は動かないので、タブも出さない
+  if (id === 'pane-live') return !!(state.settings.liveSummary && state.settings.claudeCode);
   return true;
 }
 function visiblePaneOrder() {
@@ -499,7 +503,9 @@ const els = {
   inputKeepRecording: document.getElementById('input-keep-recording'),
   inputSumadoMeter: document.getElementById('input-sumado-meter'),
   inputAudioRetention: document.getElementById('input-audio-retention'),
-  inputClaudeBridge: document.getElementById('input-claude-bridge'),          // v0.24.0
+  inputClaudeBridge: document.getElementById('input-claude-bridge'),          // v0.24.0（v0.24.39 から「一部を Claude Code で処理する」）
+  inputClaudeCode: document.getElementById('input-claude-code'),              // v0.24.39: 連携を使う
+  claudeRouteNote: document.getElementById('claude-route-note'),              // v0.24.39
   claudeBridgeStatus: document.getElementById('claude-bridge-status'),        // v0.24.0
   btnClaudeBridgeTest: document.getElementById('btn-claude-bridge-test'),     // v0.24.0
   btnSaveBridgeFiles: document.getElementById('btn-save-bridge-files'),      // v0.24.12
@@ -555,6 +561,11 @@ function loadSettings() {
   // Migration: add pane-chat to paneOrder if missing
   if (Array.isArray(state.settings.paneOrder) && !state.settings.paneOrder.includes('pane-chat')) {
     state.settings.paneOrder.push('pane-chat');
+  }
+  // v0.24.39: 「Claude Code」（連携を使う）を足した。前の設定で Claude に任せるかライブ要約を
+  // オンにしていた人は、オンのまま始める（オフから始めると、どちらも黙って止まる）
+  if (state.settings.claudeCode === undefined) {
+    state.settings.claudeCode = !!(state.settings.useClaudeBridge || state.settings.liveSummary);
   }
   // v0.24.25: ライブ要約のタブ。保存済みの並びに無ければ、要約のすぐ左に入れる（v0.24.26 で左に）
   if (Array.isArray(state.settings.paneOrder) && !state.settings.paneOrder.includes('pane-live')) {
@@ -2074,7 +2085,9 @@ function stopRecording() {
     if (liveSummaryActive()) {
       await runLiveSummary({ sessionId: recSessionId, final: true });
     }
-    if (state.settings.autoSummarize && state.settings.aiEnabled && state.settings.apiKey) {
+    // v0.24.39: 「要約・タイトル生成」はライブ整形（aiEnabled）と独立。以前はライブ整形をオフにすると
+    // 要約も止まっていた（やっさん「ここに矛盾がある。独立させてほしい」）
+    if (state.settings.autoSummarize && state.settings.apiKey) {
       await generateSummary({ silent: true, sessionId: recSessionId });
       await autoGenerateTitle({ sessionId: recSessionId });
     }
@@ -2125,7 +2138,9 @@ const LIVE_SUMMARY_TIMEOUT_MS = 600000;
 /** いま使える状態か。設定がオンで、Claude 連携がオンで、ログイン切れ等で止まっていない */
 function liveSummaryActive() {
   if (!state.settings.liveSummary) return false;
-  if (typeof claudeBridgeIsEnabled !== 'function' || !claudeBridgeIsEnabled()) return false;
+  // v0.24.39: 見るのは「Claude Code」（連携を使う）。「一部を Claude Code で処理する」はオフでもよい
+  // （ライブ要約は Claude、普通の要約は Gemini、という使い方ができる）
+  if (!state.settings.claudeCode) return false;
   if (typeof claudeBridgeBrokenReason === 'function' && claudeBridgeBrokenReason()) return false;
   return true;
 }
@@ -4163,7 +4178,8 @@ function sessionHasContentForNotion(session) {
 
 function applyClaudeBridgeSetting() {
   if (typeof claudeBridgeSetEnabled === 'function') {
-    claudeBridgeSetEnabled(!!state.settings.useClaudeBridge);
+    // v0.24.39: 振り分け（一部を Claude Code で処理する）は「Claude Code」がオンのときだけ効く
+    claudeBridgeSetEnabled(!!(state.settings.claudeCode && state.settings.useClaudeBridge));
   }
 }
 
@@ -4318,13 +4334,22 @@ function applyLiveSummaryTab() {
  * オフのときはチェックを外して押せなくし、なぜ押せないかを書く
  */
 function applyLiveSummaryAvailability() {
-  const box = els.inputLiveSummary;
-  if (!box) return;
-  const claudeOn = !!(els.inputClaudeBridge && els.inputClaudeBridge.checked);
-  box.disabled = !claudeOn;
-  if (els.inputLiveSummaryMin) els.inputLiveSummaryMin.disabled = !claudeOn;
-  if (!claudeOn) box.checked = false;
-  if (els.liveSummaryNote) els.liveSummaryNote.hidden = claudeOn;
+  // v0.24.39: ライブ要約と「一部を Claude Code で処理する」は、どちらも「Claude Code」がオンのときだけ選べる
+  const claudeOn = !!(els.inputClaudeCode && els.inputClaudeCode.checked);
+  for (const [box, note, extra] of [
+    [els.inputLiveSummary, els.liveSummaryNote, els.inputLiveSummaryMin],
+    [els.inputClaudeBridge, els.claudeRouteNote, null],
+  ]) {
+    if (!box) continue;
+    // 押せなかったものを押せるようにするときは、覚えている値に戻す（オフにして戻したら元どおり）
+    if (claudeOn && box.disabled) {
+      box.checked = box === els.inputLiveSummary ? !!state.settings.liveSummary : !!state.settings.useClaudeBridge;
+    }
+    box.disabled = !claudeOn;
+    if (extra) extra.disabled = !claudeOn;
+    if (!claudeOn) box.checked = false;
+    if (note) note.hidden = claudeOn;
+  }
 }
 
 /**
@@ -4348,7 +4373,8 @@ function applyClaudeBridgeMode() {
  * 使えなければチェックを戻す（動かないものをオンにしておかない）。
  */
 async function verifyClaudeBridgeToggle() {
-  const box = els.inputClaudeBridge;
+  // v0.24.39: 接続を確かめるのは「Claude Code」（連携を使う）をオンにしたとき
+  const box = els.inputClaudeCode;
   if (!box || !box.checked) return;
   const r = await testClaudeBridge();
   // 途中で自分でオフに戻していたら、古い結果で上書きしない
@@ -6506,8 +6532,8 @@ async function autoGenerateTitle({ silent = true, force = false, sessionId = nul
     if (!silent) { alert('Gemini API キーが未設定です。設定から登録してください。'); openSettings(); }
     return;
   }
-  // auto（録音停止時等）は aiEnabled に従う。手動再生成（force）は常に実行。
-  if (!force && !state.settings.aiEnabled) return;
+  // v0.24.39: ここでライブ整形（aiEnabled）を見るのをやめた。呼ぶかどうかは呼び出し側が決める
+  // （録音停止時は「要約・タイトル生成」、手で要約を作ったあと、タイトルの作り直しボタン）
   // 対象セッションが現在表示中ならDOMから、そうでなければストアHTMLから読む
   const transcript = (targetId === state.activeId)
     ? getConfirmedText()
@@ -7546,6 +7572,7 @@ function openSettings() {
   if (els.inputKeepRecording) els.inputKeepRecording.checked = !!state.settings.audioKeepRecording;
   if (els.inputSumadoMeter) els.inputSumadoMeter.checked = !!state.settings.sumadoIslandMeter;
   if (els.inputAudioRetention) els.inputAudioRetention.value = state.settings.audioRetention || 'close';
+  if (els.inputClaudeCode) els.inputClaudeCode.checked = !!state.settings.claudeCode;              // v0.24.39
   if (els.inputClaudeBridge) els.inputClaudeBridge.checked = !!state.settings.useClaudeBridge;   // v0.24.0
   // v0.24.22: Claude 連携のチェックを入れた**あと**で見る。先に見ると、連携オフと読み違えて
   // リアルタイム要約のチェックを外してしまい、そのまま保存するとオフになる（テストで見つけた）
@@ -7603,7 +7630,8 @@ function saveSettingsFromForm() {
   state.settings.apiKey = els.inputApiKey.value.trim();
   if (els.inputNotionToken) state.settings.notionToken = els.inputNotionToken.value.trim();
   state.settings.silenceSec = Math.max(1, Math.min(30, Number(els.inputSilenceSec.value) || 3));
-  if (els.inputLiveSummary) state.settings.liveSummary = els.inputLiveSummary.checked && !!(els.inputClaudeBridge && els.inputClaudeBridge.checked);
+  // v0.24.39: 「Claude Code」がオフで押せないときは、前の値を残す（オンに戻したら元どおり）
+  if (els.inputLiveSummary && !els.inputLiveSummary.disabled) state.settings.liveSummary = els.inputLiveSummary.checked;
   if (els.inputLiveSummaryMin) state.settings.liveSummaryMin = clampLiveSummaryMinutes(els.inputLiveSummaryMin.value);
   applyLiveSummaryTab();   // v0.24.25: オン/オフでタブを出し入れする
   state.settings.aiEnabled = els.inputAiEnabled.checked;
@@ -7635,8 +7663,10 @@ function saveSettingsFromForm() {
   if (els.inputAudioRetention) state.settings.audioRetention = els.inputAudioRetention.value || 'close';
   if (els.inputSumadoMeter) state.settings.sumadoIslandMeter = els.inputSumadoMeter.checked;
   // v0.24.0: Claude Code 連携。gemini.js 側はこの値を claude-bridge.js 経由で見る
+  if (els.inputClaudeCode) state.settings.claudeCode = els.inputClaudeCode.checked;   // v0.24.39
   if (els.inputClaudeBridge) {
-    state.settings.useClaudeBridge = els.inputClaudeBridge.checked;
+    // 「Claude Code」がオフのときは押せず外れているが、前の値は残しておく（オンに戻したら元どおり）
+    if (!els.inputClaudeBridge.disabled) state.settings.useClaudeBridge = els.inputClaudeBridge.checked;
     applyClaudeBridgeSetting();
   }
   if (els.inputChunkMaxSec) {
@@ -10478,7 +10508,11 @@ if (els.btnClaudeBridgeTest) {
 }
 // v0.24.9: オンにしたその場でログインを見る
 if (els.inputClaudeBridge) {
-  els.inputClaudeBridge.addEventListener('change', () => { verifyClaudeBridgeToggle(); applyLiveSummaryAvailability(); });
+  els.inputClaudeBridge.addEventListener('change', () => { applyLiveSummaryAvailability(); });
+}
+// v0.24.39: 「Claude Code」（連携を使う）。オンにしたその場で接続とログインを確かめる
+if (els.inputClaudeCode) {
+  els.inputClaudeCode.addEventListener('change', () => { verifyClaudeBridgeToggle(); applyLiveSummaryAvailability(); });
 }
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });

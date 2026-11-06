@@ -95,6 +95,9 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
     await page.waitForTimeout(300);
     eq('設定を開けばチェックボックスにも入っている',
        await page.evaluate(() => document.getElementById('input-claude-bridge').checked), true);
+    // v0.24.39: 前の版の設定（claudeCode が無い）から、「Claude Code」もオンで引き継ぐ
+    eq('「Claude Code」（連携を使う）もオンで引き継ぐ',
+       await page.evaluate(() => document.getElementById('input-claude-code').checked), true);
     await ctx.close();
   }
   {
@@ -198,23 +201,24 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
     }));
     await page.evaluate(() => { document.getElementById('btn-settings').click(); });
     await page.waitForTimeout(250);
+    // v0.24.39: 接続を確かめるのは「Claude Code」（連携を使う）のトグルに移った
     // dispatchEvent ではなく**本物のクリック**で操作する。
     // やっさんが踏んだのは実際に指で押したときの振る舞い
-    await page.click('#input-claude-bridge');
+    await page.click('#input-claude-code');
     await page.waitForTimeout(900);
     const r = await page.evaluate(() => ({
-      checked: document.getElementById('input-claude-bridge').checked,
+      checked: document.getElementById('input-claude-code').checked,
       text: document.getElementById('claude-bridge-status').textContent,
     }));
     eq(`${label} → チェック`, r.checked, wantChecked);
     eq(`${label} → 理由を出す`, r.text.includes(wantText), true);
     // オフ→オンをもう一度やって、同じ結果になるか（関じ込められないか）
-    await page.click('#input-claude-bridge');
+    await page.click('#input-claude-code');
     await page.waitForTimeout(300);
-    await page.click('#input-claude-bridge');
+    await page.click('#input-claude-code');
     await page.waitForTimeout(900);
     eq(`${label} → オフ→オンし直せる`,
-       await page.evaluate(() => document.getElementById('input-claude-bridge').checked), wantChecked);
+       await page.evaluate(() => document.getElementById('input-claude-code').checked), wantChecked);
     await ctx.close();
   }
 
@@ -273,24 +277,28 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
     await ctx.close();
   }
 
-  console.log('\n■ 設定の並び (v0.24.12)');
-  // やっさんの要望「設定メニューの Claude code 連携メニューは、
-  // 録音停止時に AI 要約・・・の下に移動してほしい」
+  console.log('\n■ 設定の並び (v0.24.39)');
+  // やっさんの指定: AI機能 ＞ Gemini API キー ＞ Claude Code ＞ ライブ整形 ＞ ライブ要約 ＞
+  // 要約・タイトル生成 ＞ 要約の詳しさ ＞ 一部を Claude Code で処理する
+  // （v0.24.12 の「Claude 連携は録音停止時の要約設定の下」は、この並びに置き換わった）
   {
     const { ctx, page } = await open(browser);
-    const order = await page.evaluate(() =>
-      Array.from(document.querySelectorAll('.field-group-title')).map((h) => h.textContent.trim()));
-    const gemini = order.indexOf('Gemini API');
-    const claude = order.indexOf('Claude Code 連携');
-    eq('Claude 連携は Gemini API のあと', claude > gemini && gemini >= 0, true);
-    eq('録音停止時の要約設定よりあとにある',
-       await page.evaluate(() => {
-         const box = document.getElementById('input-auto-summarize');
-         const head = Array.from(document.querySelectorAll('.field-group-title'))
-           .find((h) => h.textContent.trim() === 'Claude Code 連携');
-         // 文書順で box のあとに head があるか
-         return !!(box.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING);
-       }), true);
+    const r = await page.evaluate(() => {
+      const ids = ['input-api-key', 'input-claude-code', 'btn-claude-bridge-test', 'input-ai-enabled', 'input-live-summary',
+                   'input-auto-summarize', 'summary-detail-low', 'input-claude-bridge'];
+      const els = ids.map((id) => document.getElementById(id));
+      const inOrder = els.every((el, i) => i === 0 || !!(els[i - 1].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING));
+      const group = els[0].closest('.field-group');
+      return {
+        missing: ids.filter((id, i) => !els[i]),
+        inOrder,
+        oneGroup: els.every((el) => el.closest('.field-group') === group),
+        title: group.querySelector('.field-group-title').textContent.trim(),
+      };
+    });
+    eq('全部ある', r.missing, []);
+    eq('指定どおりの順番', r.inOrder, true);
+    eq('1つの見出し「AI機能」の中', [r.oneGroup, r.title], [true, 'AI機能']);
     await ctx.close();
   }
 

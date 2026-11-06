@@ -109,7 +109,7 @@ function load({ native, http }) {
     // v0.24.21〜22 で入れた補助プログラムは調整（effort / timeout）を知らない
     const { ctx } = load({ native: { reply: { ok: true, version: '0.24.21', invocation: 'wsl', via: 'native', auth: { ok: true, loggedIn: true } } }, http: 'down' });
     const m = ctx.claudeBridgeHealthMessage(await ctx.claudeBridgeHealth());
-    eq('古い補助プログラム → 使えるが、インストーラーで入れ直してと言う', [m.ok, m.stale, /インストーラーを保存して入れ直して/.test(m.text)], [true, true, true]);
+    eq('古い補助プログラム → 使えるが、「連携アプリをダウンロード」から入れ直してと言う', [m.ok, m.stale, /連携アプリをダウンロード」から入れ直して/.test(m.text)], [true, true, true]);
   }
 
   console.log('\n■ リアルタイム要約の調整（effort / timeout）が届く');
@@ -127,8 +127,8 @@ function load({ native, http }) {
   {
     const { ctx } = load({ native: { reply: { ok: true, version: '0.24.21', invocation: 'claude', via: 'native', auth: { ok: true, loggedIn: false } } }, http: 'down' });
     const m = ctx.claudeBridgeHealthMessage(await ctx.claudeBridgeHealth());
-    eq('ログインしていない → インストーラーからサインインできると言う（login.bat ではなく）',
-       [m.needsLogin, /インストーラー/.test(m.text), /login\.bat/.test(m.text)], [true, true, false]);
+    eq('ログインしていない → 連携アプリからサインインできると言う（login.bat ではなく）',
+       [m.needsLogin, /連携アプリ/.test(m.text), /login\.bat/.test(m.text)], [true, true, false]);
   }
   {
     const { ctx } = load({ native: { lastError: 'Specified native messaging host not found.' }, http: 'down' });
