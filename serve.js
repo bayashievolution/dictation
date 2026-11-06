@@ -10,6 +10,7 @@ const { exec } = require('child_process');
 // v0.24.21: claude を呼ぶ部分は claude-runner.js に切り出した（拡張のホストと共有する）
 const {
   CLAUDE_MAX_CHARS, runClaude, checkClaudeAuth, claudeInvocationName, setLogger,
+  runClaudeSession,
 } = require('./claude-runner.js');
 setLogger((msg) => console.log('  ' + msg));
 
@@ -85,7 +86,7 @@ async function handleClaudeApi(req, res, urlPath) {
       invocation: claudeInvocationName(),
       version: SERVER_VERSION,
       auth,
-      features: ['effort', 'timeout'],   // v0.24.23
+      features: ['effort', 'timeout', 'session'],   // v0.24.23 / session は v0.24.53
     });
     return true;
   }
@@ -111,10 +112,12 @@ async function handleClaudeApi(req, res, urlPath) {
 
   const started = Date.now();
   // v0.24.23: リアルタイム要約は考える量を減らし、長く待つ（claude-runner.js の claudeRunOptions）
-  const r = await runClaude(prompt, { effort: payload.effort, timeoutMs: payload.timeoutMs });
+  // v0.24.53: ライブ整形は会話を切らずに呼ぶ（serve.js は立ちっぱなしなので、そのまま claude を待たせておける）
+  const opts = { effort: payload.effort, timeoutMs: payload.timeoutMs };
+  const r = payload.session ? await runClaudeSession(prompt, opts) : await runClaude(prompt, opts);
   const sec = ((Date.now() - started) / 1000).toFixed(1);
   if (r.ok) {
-    console.log(`  [claude] ${prompt.length}字 → ${r.text.length}字 (${sec}秒)`);
+    console.log(`  [claude] ${prompt.length}字 → ${r.text.length}字 (${sec}秒${r.session ? "・会話を続けて" : ""})`);
     sendJson(res, 200, { ok: true, text: r.text, seconds: Number(sec) });
   } else {
     console.warn(`  [claude] 失敗 (${sec}秒): ${r.error}`);

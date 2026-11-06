@@ -27,8 +27,19 @@ const eq = (label, got, want) => {
 (async () => {
   const udd = fs.mkdtempSync(path.join(os.tmpdir(), 'dict-udd-'));
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'dict-bin-'));
+  // v0.24.53: stream-json（会話を切らずに使う）で呼ばれたら、1行ごとに「何回目@pid:中身」を返す
+  fs.writeFileSync(path.join(bin, 'session.js'), `
+let n = 0, buf = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (d) => { buf += d; let i;
+  while ((i = buf.indexOf('\\n')) >= 0) { const c = JSON.parse(buf.slice(0, i)).message.content; buf = buf.slice(i + 1); n++;
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'S' + n + '@' + process.pid + ':' + c }) + '\\n'); } });
+process.stdin.on('end', () => process.exit(0));
+`);
   fs.writeFileSync(path.join(bin, 'claude'),
-    "#!/bin/sh\nif [ \"$1\" = auth ]; then echo '{\"loggedIn\": true}'; exit 0; fi\nprintf 'E2E:'; cat\n", { mode: 0o755 });
+    "#!/bin/sh\nif [ \"$1\" = auth ]; then echo '{\"loggedIn\": true}'; exit 0; fi\n"
+    + `case "$*" in *stream-json*) exec "${process.execPath}" "${bin}/session.js";; esac\n`
+    + "printf 'E2E:'; cat\n", { mode: 0o755 });
 
   // 拡張はヘッドレスの新しい形でないと読み込まれない
   const ctx = await chromium.launchPersistentContext(udd, {
@@ -65,6 +76,25 @@ const eq = (label, got, want) => {
      JSON.parse(fs.readFileSync(path.join(REPO, 'manifest.json'), 'utf8')).version);
   eq('要約などの依頼が claude まで届いて返る（日本語・改行・記号そのまま）',
      [r.run.ok, r.run.via, r.run.text], [true, 'native', 'E2E:こんにちは「テスト」\n2行目 \\ "引用"']);
+
+  console.log('■ 会話を切らずに使う（connectNative・v0.24.53）');
+  const rs = await page.evaluate(async () => {
+    const out = [];
+    for (const t of ['一', '二', '三']) out.push(await claudeBridgeRun(t, { session: true, effort: 'low' }));
+    return out.map((x) => [x.ok, x.text]);
+  });
+  const m2 = /^S1@(\d+):二$/.exec(rs[1][1] || ''), m3 = /^S2@(\d+):三$/.exec(rs[2][1] || '');
+  eq('本物の Chromium のつなぎっぱなしの口で、ホストの中の同じ claude に続けて届く',
+     [rs[0][1], !!m2, !!m3, m2 && m3 && m2[1] === m3[1]], ['E2E:一', true, true, true]);
+  const rl = await page.evaluate(async () => {
+    localStorage.setItem('dictation:settings', JSON.stringify({ ...JSON.parse(localStorage.getItem('dictation:settings') || '{}'), aiEnabled: true, claudeCode: true, inputMode: 'web-speech' }));
+    loadSettings(); applyClaudeBridgeSetting();
+    appendRawChunk('今日は評価論の話をします。評価の観点は三つあります。');
+    await flushPendingToGemini();
+    return document.querySelector('#confirmed .paragraph.refined')?.textContent || '';
+  });
+  eq('アプリのライブ整形も同じ claude に届く（Gemini のキーなし）', /^S3@/.test(rl.trim()), true);
+  await page.evaluate(() => { localStorage.removeItem('dictation:settings'); });
 
   console.log('■ 登録が無い');
   fs.unlinkSync(regFile);

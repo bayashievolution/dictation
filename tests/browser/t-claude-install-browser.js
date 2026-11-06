@@ -112,7 +112,7 @@ const visible = (page, sel) => page.evaluate((s) => {
   console.log('■ 拡張でインストール済み');
   {
     const { ctx, page } = await open(browser, { extension: true, settings: { claudeCode: true },
-      nativeReply: { ok: true, version: '9.9.9', invocation: 'wsl', via: 'native', features: ['effort', 'timeout'], auth: { ok: true, loggedIn: true } } });
+      nativeReply: { ok: true, version: '9.9.9', invocation: 'wsl', via: 'native', features: ['effort', 'timeout', 'session'], auth: { ok: true, loggedIn: true } } });
     // v0.24.44: 連携がオンなら、立ち上げたときに自動で確かめて横に出す
     await page.waitForTimeout(600);
     eq('使えると言う', await page.textContent('#claude-bridge-status'), '使えます（ログイン済み / wsl / 連携 9.9.9）');

@@ -231,18 +231,84 @@ function claudeNativeSend(msg) {
   });
 }
 
+/**
+ * つなぎっぱなしの口で1通送って1通受け取る (v0.24.53)。**例外は投げない**
+ *
+ * sendNativeMessage は1回ごとにホストを起動して終わらせるので、ホストの中で claude を
+ * 立たせておけない。connectNative なら口を開いている間ホストが生きていて、
+ * claude も同じ会話のまま次の依頼を待てる（claude-runner.js の runClaudeSession）。
+ *
+ * 返事は id で依頼と対応させる。古いホストは id を返さないが、1本ずつ順に処理するので
+ * 一番古い依頼への返事とみなしてよい（そのときは毎回 claude を起動し直すだけで、動きはする）。
+ */
+let _claudePort = null;
+let _claudePortSeq = 0;
+
+function claudeNativePortAvailable() {
+  return claudeNativeAvailable() && typeof chrome.runtime.connectNative === 'function';
+}
+
+function claudeNativePortSend(msg, waitMs) {
+  return new Promise((resolve) => {
+    let port = _claudePort;
+    if (!port) {
+      try {
+        port = chrome.runtime.connectNative(CLAUDE_NATIVE_HOST);
+      } catch (e) {
+        resolve({ ok: false, kind: 'broken', error: claudeNativeErrorText('broken', e && e.message) });
+        return;
+      }
+      const waiters = new Map();
+      port._waiters = waiters;
+      _claudePort = port;
+      port.onMessage.addListener((reply) => {
+        let id = reply && reply.id;
+        if (id == null || !waiters.has(id)) id = waiters.keys().next().value;
+        const w = waiters.get(id);
+        if (!w) return;
+        waiters.delete(id);
+        w(reply && typeof reply === 'object' ? reply : { ok: false, kind: 'broken', error: '返事が空でした' });
+      });
+      port.onDisconnect.addListener(() => {
+        const le = chrome.runtime.lastError;
+        const raw = (le && le.message) || 'Native host has exited.';
+        const kind = claudeNativeErrorKind(raw);
+        if (_claudePort === port) _claudePort = null;
+        for (const w of waiters.values()) w({ ok: false, kind, error: claudeNativeErrorText(kind, raw) });
+        waiters.clear();
+      });
+    }
+    const id = ++_claudePortSeq;
+    // ホストが黙ったまま固まったときの保険。ホスト側の時間切れより少し長く待つ
+    const timer = setTimeout(() => {
+      if (port._waiters.delete(id)) resolve({ ok: false, kind: 'broken', error: `${Math.round(waitMs / 1000)}秒待っても返事がありませんでした` });
+    }, waitMs);
+    port._waiters.set(id, (r) => { clearTimeout(timer); resolve(r); });
+    try {
+      port.postMessage({ ...msg, id });
+    } catch (e) {
+      port._waiters.delete(id);
+      clearTimeout(timer);
+      if (_claudePort === port) _claudePort = null;
+      resolve({ ok: false, kind: 'broken', error: claudeNativeErrorText('broken', e && e.message) });
+    }
+  });
+}
+
 /* ───────── 中継を叩く ───────── */
 
 /**
  * ブリッジに投げる。**例外は投げない。** 失敗は戻り値で返す
  * @returns {Promise<{ok:boolean, text?:string, error?:string}>}
  */
-async function claudeBridgeRun(prompt, { url = CLAUDE_BRIDGE_URL, signal, effort, timeoutMs } = {}) {
+async function claudeBridgeRun(prompt, { url = CLAUDE_BRIDGE_URL, signal, effort, timeoutMs, session = false } = {}) {
   if (!prompt || !prompt.trim()) return { ok: false, error: 'プロンプトが空です' };
   // v0.24.23: 呼び出しごとの調整（リアルタイム要約だけが使う）。古いホストは黙って無視する
+  // v0.24.53: session … 会話を切らずに呼ぶ（ライブ整形・見出し追加）。古いホスト・サーバーは無視して毎回起動する
   const tune = {
     ...(effort ? { effort } : {}),
     ...(timeoutMs ? { timeoutMs } : {}),
+    ...(session ? { session: true } : {}),
   };
 
   /* v0.24.21: 拡張ならインストール式の口を先に使う。
@@ -250,7 +316,9 @@ async function claudeBridgeRun(prompt, { url = CLAUDE_BRIDGE_URL, signal, effort
    * インストールするまでの間も動くように。どちらも無ければ「インストールされていません」と言う
    * （「start.bat を起動して」と言うと、黒い窓に戻れと言っていることになる） */
   if (claudeNativeAvailable()) {
-    const r = await claudeNativeSend({ type: 'run', prompt, ...tune });
+    const r = session && claudeNativePortAvailable()
+      ? await claudeNativePortSend({ type: 'run', prompt, ...tune }, (timeoutMs || 180000) + 15000)
+      : await claudeNativeSend({ type: 'run', prompt, ...tune });
     if (r.ok) return { ok: true, text: claudeBridgeUnfence(r.text), seconds: r.seconds, via: 'native' };
     if (r.kind !== 'not-installed') return { ok: false, error: r.error };
     const viaHttp = await claudeBridgeRunHttp(prompt, { url, signal, tune });
@@ -379,11 +447,12 @@ function claudeBridgeHealthMessage(health) {
       h.version ? (h.via === 'native' ? '連携 ' : 'サーバー ') + h.version : ''].filter(Boolean);
     // v0.24.23: 連携が古い（リアルタイム要約を速くする調整を知らない）なら、入れ直しを促す。
     // 使えないわけではないので ok のまま
-    const stale = !(Array.isArray(h.features) && h.features.includes('effort'));
+    // v0.24.53: 会話を切らずに使う（session）を知らない版も古いとみなす。ライブ整形が毎回 claude を起動し直して遅い
+    const stale = !(Array.isArray(h.features) && h.features.includes('effort') && h.features.includes('session'));
     const fix = !stale ? ''
       : h.via === 'native'
-        ? '。連携が古い版です。ライブ要約を速くするため、「連携アプリをダウンロード」から入れ直してください'
-        : '。サーバーが古い版です。ライブ要約を速くするため、start.bat を起動し直してください';
+        ? '。連携が古い版です。ライブ整形・ライブ要約を速くするため、「連携アプリをダウンロード」から入れ直してください'
+        : '。サーバーが古い版です。ライブ整形・ライブ要約を速くするため、start.bat を起動し直してください';
     return { ok: true, needsLogin: false, unknown: false, stale,
              text: `使えます（ログイン済み${parts.length ? ' / ' + parts.join(' / ') : ''}）${fix}` };
   }

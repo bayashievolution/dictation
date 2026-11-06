@@ -3314,3 +3314,11 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 連携がオンなら Gemini のキーが無くてもライブ整形が回る（Web Speech モードは Gemini を一度も使わずに済む）
   - 設定の説明: 「要約・質問・タイトル・全体整形・メモの整形・ライブ整形・文字起こしへの項目付けを Claude Code で処理します。音声を処理する必要がある、文字起こし・話者判別は Gemini API で処理します。」
   - テスト: `tests/t-claude-bridge.js`（振り分けと文言）、`tests/browser/t-live-claude-browser.js`（14件・オンなら文字の処理を Gemini に1回も送らない・Claude が失敗しても Gemini に送らず元の文字が残る・オフなら Gemini・キー無しの Web Speech でも Claude で整形・設定の説明）。旧版では11件落ちる
+- 2026-11-06 (v0.24.53): **ライブ整形・見出し追加は、Claude を立ち上げたまま同じ会話で続けて頼む（セッションを切らない）**。やっさん「セッションを切らずに」「1〜2秒でも縮むなら進めてほしい」
+  - `claude -p --input-format stream-json --output-format stream-json --verbose` に1行ずつ依頼を書く（`claude-runner.js` の `ClaudeSession` / `runClaudeSession`）。**この環境での実測**（effort low・整形依頼）: 起動し直す 5.9〜6.5秒 → 切らずに 2回目以降 3.5〜4.4秒。16回続けても遅くならず、16回ともその回の中身を正しく返した。毎回 `/clear` すると会話は消えるが速さもほぼ消える（4.3〜7.2秒）。先に起動して待たせておいても1回目は速くならない（5.2秒）ので、それはしていない
+  - 会話は消さずに続け、**30回か8万字ごとに起動し直す**。10分使わなければ閉じる。時間切れのときは会話を捨てて次は起動し直す（遅れて届いた古い答えを次の依頼の答えにしない）
+  - 拡張: `sendNativeMessage` は1回ごとにホストを起動して終わらせるので、ライブ整形だけ `connectNative`（つなぎっぱなしの口）で送る。返事は id で対応させる（古いホストは id を返さないが、1本ずつ順に処理するので先頭の依頼への返事とみなす）。口が閉じたらホストは claude も閉じて終わる
+  - ブラウザ版: serve.js は立ちっぱなしなので、`/api/claude` に `session: true` を付けるだけ
+  - 古い claude で stream-json が使えなければ（1回目に答えずに終わったら）、そのホストの間は毎回起動する方式に戻す。呼び方（Windows 側か WSL 側か）がまだ決まっていない最初の1回も毎回起動する方式
+  - health の `features` に `session` を足した。**これを返さない連携は「古い版です…入れ直してください」と出る**（やっさんは連携アプリの入れ直しが要る）
+  - テスト: `tests/t-claude-host.js`（本物のホストに偽の stream-json claude: 同じ pid に続けて届く・id・要約は毎回起動・入力を閉じたら claude も残らない・途中で落ちたら起動し直す・古い claude なら戻す・30回で起動し直す）、`tests/t-claude-bridge-native.js`（口は1本を使い回す・ホストが終わったら開き直す・古いホスト・未インストール・古い連携の案内・ブラウザ版の session）、`tests/browser/t-claude-native-e2e-browser.js`（**本物の Chromium → 本物のホスト → 偽 claude** で同じ claude に続けて届く・アプリのライブ整形も届く）。本物の claude でも serve.js 経由で確かめた（上の実測）。**Windows の Chrome / Edge と WSL の claude の組み合わせはここでは確かめていない**

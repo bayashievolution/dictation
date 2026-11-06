@@ -277,10 +277,191 @@ async function claudeAuthLogin() {
   return last || { ok: false, error: 'claude を実行できませんでした' };
 }
 
+/* ───────── セッションを切らずに使う (v0.24.53) ─────────
+ *
+ * やっさん「セッションを切らずに」「1〜2秒でも縮むなら進めてほしい」。
+ * ライブ整形は録音中に数十秒ごとに呼ぶので、毎回 `claude -p` を起動し直す時間が効く。
+ *
+ * `claude -p --input-format stream-json --output-format stream-json --verbose` は、
+ * 標準入力に1行ずつ依頼を書くと、同じ会話のまま次々に答える。
+ * **この環境での実測**（effort low・1200字の整形依頼）:
+ *   起動し直す  6.3 / 6.5 / 15.9 秒
+ *   切らずに    5.1 → 以降 3.5〜4.4 秒（16回続けても遅くならない。16回とも、その回の中身を正しく返した）
+ *   毎回 /clear 6.8 / 4.6 / 4.3 / 7.2 / 6.4 秒（会話は消えるが、速さもほぼ消える）
+ *   先に起動しておく（6秒置いてから最初の依頼） 5.2 秒（置かないのと同じ。速くなるのは2回目から）
+ * なので、会話は消さずに続け、**30回か8万字ごとに起動し直す**（会話が長くなりすぎないように）。
+ *
+ * 同じ会話なので前の回の依頼も Claude には見えている。依頼は毎回それだけで完結する形
+ * （整形の指示＋文脈＋新しいチャンク）なので、取り違えは上の実測では起きていない。
+ *
+ * 依頼は1本ずつ順に流す（同時に書くと返事の対応が取れなくなる）。
+ * 古い claude で stream-json が使えなければ、そのホストの間は起動し直す方式に戻す。
+ */
+const SESSION_MAX_TURNS = 30;
+const SESSION_MAX_CHARS = 80000;
+/** しばらく使わなければ閉じる（録音していない間に claude を立たせっぱなしにしない） */
+const SESSION_IDLE_MS = 10 * 60 * 1000;
+
+/** stream-json の1行から「答え」を取り出す。答えの行でなければ null（テストできる形で置く） */
+function parseSessionLine(line) {
+  let o;
+  try { o = JSON.parse(line); } catch { return null; }
+  if (!o || o.type !== 'result') return null;
+  const text = typeof o.result === 'string' ? o.result.trim() : '';
+  if (o.is_error || (o.subtype && o.subtype !== 'success')) {
+    return { ok: false, error: (text || o.subtype || 'Claude がエラーを返しました').slice(0, 500) };
+  }
+  if (!text) return { ok: false, error: 'Claude の返事が空でした' };
+  return { ok: true, text };
+}
+
+/** 依頼1件を stream-json の1行にする */
+function sessionMessageLine(prompt) {
+  return JSON.stringify({ type: 'user', message: { role: 'user', content: String(prompt) } }) + '\n';
+}
+
+function sessionArgs(args, effort) {
+  const full = [];
+  for (const a of args) {
+    full.push(a);
+    if (a === '-p') full.push(...claudeExtraArgs({ effort }),
+      '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose');
+  }
+  return full;
+}
+
+class ClaudeSession {
+  constructor(inv, effort, spawnFn = spawn) {
+    this.inv = inv; this.effort = effort; this.spawnFn = spawnFn;
+    this.child = null; this.turns = 0; this.chars = 0;
+    this.queue = Promise.resolve();
+    this.waiter = null; this.idleTimer = null; this.err = '';
+  }
+
+  ask(prompt, timeoutMs) {
+    const run = this.queue.then(() => this._ask(prompt, timeoutMs));
+    this.queue = run.catch(() => {});
+    return run;
+  }
+
+  close() {
+    clearTimeout(this.idleTimer);
+    const c = this.child;
+    this.child = null;
+    if (!c) return;
+    // 入力を閉じれば claude は自分で終わる。WSL 越しだと kill が中まで届かないことがあるので先に閉じる
+    try { c.stdin.end(); } catch {}
+    setTimeout(() => { try { c.kill(); } catch {} }, 3000).unref?.();
+  }
+
+  _start() {
+    this.turns = 0; this.chars = 0; this.err = '';
+    let child;
+    try {
+      child = this.spawnFn(this.inv.cmd, sessionArgs(this.inv.args, this.effort),
+        { stdio: ['pipe', 'pipe', 'pipe'], cwd: os.tmpdir() });   // cwd の理由は runClaudeOnce と同じ（CLAUDE.md を読ませない）
+    } catch (e) {
+      return { ok: false, error: e.message, spawnFailed: true };
+    }
+    this.child = child;
+    let buf = '';
+    child.stdout.setEncoding('utf8');   // 日本語が 64KB の切れ目で割れないように（runClaudeOnce と同じ）
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const r = parseSessionLine(buf.slice(0, i));
+        buf = buf.slice(i + 1);
+        // 捨てた古い claude（時間切れ・起動し直し）が遅れて返した答えを、次の依頼の答えにしない
+        if (r && this.waiter && this.child === child) { const w = this.waiter; this.waiter = null; w(r); }
+      }
+    });
+    child.stderr.on('data', (d) => { this.err = (this.err + d).slice(-2000); });
+    child.stdin.on('error', () => {});   // 先に終わっていたら EPIPE。結果は close で拾う
+    const gone = (r) => {
+      if (this.child !== child) return;   // もう捨てた古いほう
+      this.child = null;
+      if (this.waiter) { const w = this.waiter; this.waiter = null; w(r); }
+    };
+    child.on('error', (e) => gone({ ok: false, error: e.message, spawnFailed: e.code === 'ENOENT' }));
+    child.on('close', (code) => gone({ ok: false, code,
+      error: (this.err.trim() || `claude が終了しました（終了コード ${code}）`).slice(0, 500) }));
+    return null;
+  }
+
+  async _ask(prompt, timeoutMs) {
+    clearTimeout(this.idleTimer);
+    if (this.child && (this.turns >= SESSION_MAX_TURNS || this.chars >= SESSION_MAX_CHARS)) {
+      log(`[claude] 会話が長くなったので起動し直します（${this.turns}回・${this.chars}字）`);
+      this.close();
+    }
+    let fresh = false;
+    if (!this.child) {
+      const bad = this._start();
+      if (bad) return bad;
+      fresh = true;
+    }
+    const child = this.child;
+    const r = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.waiter = null;
+        // 途中の会話がどうなっているか分からないので、捨てて次は起動し直す
+        this.close();
+        resolve({ ok: false, error: `${timeoutMs / 1000}秒待っても返事がありませんでした` });
+      }, timeoutMs);
+      this.waiter = (x) => { clearTimeout(timer); resolve(x); };
+      try { child.stdin.write(sessionMessageLine(prompt)); } catch { /* close で拾う */ }
+    });
+    if (r.ok) { this.turns++; this.chars += String(prompt).length; }
+    r.fresh = fresh;
+    if (this.child) {
+      this.idleTimer = setTimeout(() => this.close(), SESSION_IDLE_MS);
+      this.idleTimer.unref?.();
+    }
+    return r;
+  }
+}
+
+const sessions = new Map();   // effort ごとに1本
+let sessionUnsupported = false;
+
+/**
+ * 会話を切らずに claude を呼ぶ (v0.24.53)
+ * 呼び方がまだ決まっていなければ、まず起動し直す方式で1回呼んで決める
+ */
+async function runClaudeSession(prompt, opts) {
+  const { effort, timeoutMs } = claudeRunOptions(opts);
+  if (sessionUnsupported || !claudeInvocation) return runClaude(prompt, opts);
+  const key = `${claudeInvocation.cmd}|${effort || ''}`;
+  let s = sessions.get(key);
+  if (!s) { s = new ClaudeSession(claudeInvocation, effort); sessions.set(key, s); }
+  const r = await s.ask(prompt, timeoutMs);
+  if (r.ok) return { ok: true, text: r.text, session: true };
+  // 起動した直後の1回目で落ちた＝この claude は stream-json か --effort を知らない、かもしれない。
+  // ログイン切れ・時間切れはどちらの方式でも同じなので、戻さずそのまま返す
+  // 答えの行（is_error 付き）が返ってきたなら stream-json は通じている。戻すのは「答えずに終わった」ときだけ
+  if (r.fresh && (r.spawnFailed || 'code' in r) && !/authenticat|OAuth|unauthorized|401/i.test(r.error || '')) {
+    log(`[claude] 会話を切らずに使えなかったので、毎回起動する方式に戻します: ${r.error}`);
+    sessionUnsupported = true;
+    s.close(); sessions.delete(key);
+    return runClaude(prompt, opts);
+  }
+  return r;
+}
+
+/** 開いている会話を全部閉じる（ホストが終わるとき） */
+function closeClaudeSessions() {
+  for (const s of sessions.values()) s.close();
+  sessions.clear();
+}
+
 /** いま覚えている呼び方（health で返す） */
 function claudeInvocationName() { return claudeInvocation ? claudeInvocation.cmd : null; }
 
 module.exports = {
   CLAUDE_MAX_CHARS, CLAUDE_TIMEOUT_MS, claudeRunOptions,
   runClaude, checkClaudeAuth, claudeAuthLogin, claudeInvocationName, setLogger,
+  runClaudeSession, closeClaudeSessions, ClaudeSession, parseSessionLine, sessionMessageLine, sessionArgs,
+  SESSION_MAX_TURNS, SESSION_MAX_CHARS,
 };

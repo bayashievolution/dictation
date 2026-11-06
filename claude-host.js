@@ -24,6 +24,11 @@
  * 受け取るもの:
  *   { type: 'health' }            → { ok:true, version, invocation, auth }
  *   { type: 'run', prompt: '…' } → { ok:true, text, seconds } / { ok:false, error }
+ *   { type: 'run', session: true, id, … } → 会話を切らずに呼ぶ (v0.24.53)。返事に同じ id を付ける
+ *
+ * v0.24.53: ライブ整形は connectNative（つなぎっぱなしの口）で呼ばれる。その間ホストは
+ * 終わらず、claude も立ったまま次の依頼を待つ（claude-runner.js の runClaudeSession）。
+ * 口が閉じられたら claude も閉じて終わる。
  *
  * **標準出力には返事以外を1バイトも書かない。** 混ざると Chrome 側で
  * 「Error when communicating with the native messaging host」になる。
@@ -67,7 +72,7 @@ async function handle(msg) {
     const auth = await runner.checkClaudeAuth();
     // features: この版のホストが分かる依頼の調整。アプリは無ければ「入れ直して」と言う (v0.24.23)
     return { ok: true, version: hostVersion(), invocation: runner.claudeInvocationName(), auth, via: 'native',
-             features: ['effort', 'timeout'] };
+             features: ['effort', 'timeout', 'session'] };
   }
   if (type === 'run') {
     const prompt = String((msg && msg.prompt) || '');
@@ -77,7 +82,8 @@ async function handle(msg) {
     }
     const started = Date.now();
     // v0.24.23: リアルタイム要約は考える量を減らし、長く待つ（claude-runner.js の claudeRunOptions）
-    const r = await runner.runClaude(prompt, { effort: msg.effort, timeoutMs: msg.timeoutMs });
+    const opts = { effort: msg.effort, timeoutMs: msg.timeoutMs };
+    const r = msg.session ? await runner.runClaudeSession(prompt, opts) : await runner.runClaude(prompt, opts);
     const seconds = Number(((Date.now() - started) / 1000).toFixed(1));
     return r.ok ? { ok: true, text: r.text, seconds } : { ok: false, error: r.error, seconds };
   }
@@ -135,12 +141,15 @@ process.stdin.on('data', (chunk) => {
     busy = busy.then(async () => {
       let msg;
       try { msg = JSON.parse(body); } catch { send({ ok: false, error: '依頼を読めませんでした' }); return; }
-      try { send(await handle(msg)); } catch (e) { send({ ok: false, error: String((e && e.message) || e) }); }
+      // つなぎっぱなしの口では、どの依頼への返事かを id で示す (v0.24.53)
+      const tag = (r) => (msg && msg.id != null ? { ...r, id: msg.id } : r);
+      try { send(tag(await handle(msg))); } catch (e) { send(tag({ ok: false, error: String((e && e.message) || e) })); }
     });
   }
 });
 // ブラウザが入力を閉じたら、走っている依頼を終えてから自然に終わる。
 // process.exit() は呼ばない。**呼ぶと書きかけの返事が捨てられる**
 // （実測: 45万バイトの返事が 14万バイトで切れた）。開いている口が無くなれば node は勝手に終わる
-process.stdin.on('end', () => { busy.then(() => { process.exitCode = 0; }); });
+// v0.24.53: 立たせておいた claude も閉じる。閉じないと子プロセスが残り、node も終われない
+process.stdin.on('end', () => { busy.then(() => { runner.closeClaudeSessions(); process.exitCode = 0; }); });
 }

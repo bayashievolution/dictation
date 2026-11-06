@@ -320,7 +320,8 @@ async function _tryClaudeBridge(body, feature) {
 
   // v0.24.52: 録音中に数十秒ごとに呼ぶものは考え込ませない（effort low）。
   // 待ち時間の上限も短くし、詰まったら次の回に譲る（溜まって何本も並ばないように）
-  const r = await claudeBridgeRun(prompt, strict ? { effort: 'low', timeoutMs: 120000 } : {});
+  // v0.24.53: 会話を切らずに呼ぶ（session）。毎回 claude を起動し直すより 2 秒ほど速い（claude-runner.js に実測）
+  const r = await claudeBridgeRun(prompt, strict ? { effort: 'low', timeoutMs: 120000, session: true } : {});
   if (r.ok && r.text) {
     if (window.diagLog) window.diagLog.info(`Claude Code で処理しました（${feature} / ${r.seconds}秒）`);
     return r.text;

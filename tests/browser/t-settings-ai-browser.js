@@ -39,7 +39,7 @@ async function open(browser, settings) {
       body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '## 概要\n- 要約の中身' }] }, finishReason: 'STOP' }] }) });
   });
   await page.route('**/api/claude/**', r => r.fulfill({ contentType: 'application/json',
-    body: JSON.stringify({ ok: true, invocation: 'claude', features: ['effort', 'timeout'], auth: { ok: true, loggedIn: true } }) }));
+    body: JSON.stringify({ ok: true, invocation: 'claude', features: ['effort', 'timeout', 'session'], auth: { ok: true, loggedIn: true } }) }));
   await page.goto(URL);
   await page.waitForTimeout(800);
   return { ctx, page, seen };

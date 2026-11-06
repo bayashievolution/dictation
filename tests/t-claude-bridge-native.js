@@ -33,7 +33,7 @@ function load({ native, http }) {
     },
   };
   const ctx = {
-    console, JSON, Promise, String, RegExp, Error, Object, Array,
+    console, JSON, Promise, String, RegExp, Error, Object, Array, Map, Math, setTimeout, clearTimeout,
     chrome,
     fetch: async () => {
       calls.http++;
@@ -101,7 +101,7 @@ function load({ native, http }) {
 
   console.log('\n■ 「接続を確認」');
   {
-    const { ctx } = load({ native: { reply: { ok: true, version: '0.24.23', invocation: 'wsl', via: 'native', features: ['effort', 'timeout'], auth: { ok: true, loggedIn: true } } }, http: 'down' });
+    const { ctx } = load({ native: { reply: { ok: true, version: '0.24.23', invocation: 'wsl', via: 'native', features: ['effort', 'timeout', 'session'], auth: { ok: true, loggedIn: true } } }, http: 'down' });
     const h = await ctx.claudeBridgeHealth();
     eq('インストール式で使える', ctx.claudeBridgeHealthMessage(h).text, '使えます（ログイン済み / wsl / 連携 0.24.23）');
   }
@@ -134,6 +134,74 @@ function load({ native, http }) {
     const { ctx } = load({ native: { lastError: 'Specified native messaging host not found.' }, http: 'down' });
     const m = ctx.claudeBridgeHealthMessage(await ctx.claudeBridgeHealth());
     eq('未インストール → インストールを案内', m.text, vm.runInContext('CLAUDE_NOT_INSTALLED', ctx));
+  }
+
+  // v0.24.53: ライブ整形は connectNative（つなぎっぱなしの口）で送り、ホストの中の claude を立たせておく
+  console.log('\n■ 会話を切らずに使う（つなぎっぱなしの口）');
+  function fakePort(ctx, { replyWithId = true, notInstalled = false } = {}) {
+    const st = { connects: 0, posted: [], disconnect: null };
+    ctx.chrome.runtime.connectNative = (name) => {
+      st.connects++;
+      const onMsg = [], onDis = [];
+      const port = {
+        name,
+        onMessage: { addListener: (f) => onMsg.push(f) },
+        onDisconnect: { addListener: (f) => onDis.push(f) },
+        postMessage(m) {
+          st.posted.push(m);
+          setTimeout(() => {
+            if (notInstalled) {
+              ctx.chrome.runtime.lastError = { message: 'Specified native messaging host not found.' };
+              onDis.forEach((f) => f()); ctx.chrome.runtime.lastError = undefined; return;
+            }
+            const r = { ok: true, text: '答え:' + m.prompt, seconds: 1 };
+            if (replyWithId) r.id = m.id;
+            onMsg.forEach((f) => f(r));
+          }, 5);
+        },
+      };
+      st.disconnect = (msg) => { ctx.chrome.runtime.lastError = { message: msg }; onDis.forEach((f) => f()); ctx.chrome.runtime.lastError = undefined; };
+      return port;
+    };
+    return st;
+  }
+  {
+    const { ctx, calls } = load({ native: { reply: { ok: true, text: '一回きり' } }, http: 'down' });
+    const st = fakePort(ctx);
+    const [a, b] = await Promise.all([ctx.claudeBridgeRun('一', { session: true, effort: 'low' }), ctx.claudeBridgeRun('二', { session: true, effort: 'low' })]);
+    eq('session なら、つなぎっぱなしの口で送る', [a.text, b.text, a.via], ['答え:一', '答え:二', 'native']);
+    eq('口は1本だけ開いて使い回す', st.connects, 1);
+    eq('session と effort を付けて送り、依頼ごとに別の id', [st.posted[0].session, st.posted[0].effort, st.posted[0].id !== st.posted[1].id], [true, 'low', true]);
+    eq('sendNativeMessage は使わない', calls.native.length, 0);
+    const c = await ctx.claudeBridgeRun('要約して');
+    eq('session でない依頼（要約など）はこれまでどおり1回ずつ', [c.text, calls.native.length], ['一回きり', 1]);
+    st.disconnect('Native host has exited.');
+    const d = await ctx.claudeBridgeRun('三', { session: true });
+    eq('ホストが終わったら、次の依頼で口を開き直す', [d.text, st.connects], ['答え:三', 2]);
+  }
+  {
+    const { ctx } = load({ native: { reply: null }, http: 'down' });
+    fakePort(ctx, { replyWithId: false });
+    const r = await ctx.claudeBridgeRun('一', { session: true });
+    eq('古いホスト（id を返さない）でも答えを受け取れる', r.text, '答え:一');
+  }
+  {
+    const { ctx } = load({ native: { reply: null }, http: 'down' });
+    fakePort(ctx, { notInstalled: true });
+    const r = await ctx.claudeBridgeRun('一', { session: true });
+    eq('未インストールなら、これまでどおり「インストールされていません」', r.error, vm.runInContext('CLAUDE_NOT_INSTALLED', ctx));
+  }
+  {
+    const { ctx } = load({ native: { reply: { ok: true, version: '0.24.52', invocation: 'wsl', via: 'native', features: ['effort', 'timeout'], auth: { ok: true, loggedIn: true } } }, http: 'down' });
+    const m = ctx.claudeBridgeHealthMessage(await ctx.claudeBridgeHealth());
+    eq('session を知らない連携（v0.24.52 まで）→ 使えるが、入れ直してと言う', [m.ok, m.stale, /ライブ整形/.test(m.text)], [true, true, true]);
+  }
+  {
+    const { ctx } = load({ native: undefined, http: { ok: true, text: 'x' } });
+    let body = null;
+    ctx.fetch = async (u, o) => { body = JSON.parse(o.body); return { ok: true, status: 200, json: async () => ({ ok: true, text: 'x' }) }; };
+    await ctx.claudeBridgeRun('一', { session: true, effort: 'low' });
+    eq('ブラウザ版は中継に session を付けて送る（serve.js が claude を立たせておく）', [body.session, body.effort], [true, 'low']);
   }
 
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');

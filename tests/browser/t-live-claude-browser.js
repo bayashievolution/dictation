@@ -38,7 +38,7 @@ async function open(browser, settings, { claudeFails = false } = {}) {
       body: JSON.stringify({ candidates: [{ content: { parts: [{ text: isAudio ? '今日は評価論の話をします。観点は三つあります。' : '## Geminiの見出し\nGeminiの本文' }] }, finishReason: 'STOP' }] }) });
   });
   await page.route('**/api/claude/health', r => r.fulfill({ contentType: 'application/json',
-    body: JSON.stringify({ ok: true, invocation: 'claude', features: ['effort', 'timeout'], auth: { ok: true, loggedIn: true } }) }));
+    body: JSON.stringify({ ok: true, invocation: 'claude', features: ['effort', 'timeout', 'session'], auth: { ok: true, loggedIn: true } }) }));
   await page.route('**/api/claude', r => {
     const b = JSON.parse(r.request().postData() || '{}');
     seen.claude.push({ effort: b.effort || '', heading: /見出し/.test(b.prompt || ''), len: (b.prompt || '').length });
