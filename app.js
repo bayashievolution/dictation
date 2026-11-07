@@ -634,7 +634,35 @@ function recordingLabel() {
 }
 
 /** 録音の状態に応じて右上を戻す。エラー表示などのあとに使う */
+/**
+ * 時間のかかる処理が走っている間の表示（「要約生成中（Claude）」など）(v0.24.56)
+ *
+ * やっさん報告「要約を生成中の表示が、設定を開いて閉じたら待機中になっていたけど、まだ要約中だった」。
+ * 状態の戻し先（restoreStatus）が「録音中か・停止か」しか見ておらず、**ほかのお知らせが引っ込むたびに
+ * 「停止」に戻していた**。録音を止めるとライブ要約の最終版 → 要約の順に回るので、
+ * ライブ要約の「更新しました」（2.5秒で引っ込む）が要約の最中に「停止」へ戻していた（実機と同じ流れで再現）。
+ * 設定の開け閉めはそれと重なっただけと見ている（設定を開け閉めするだけでは戻らないことを確かめた）。
+ *
+ * 走っている処理をここに登録しておき、戻すときはまずそれを出す。
+ * 複数あれば、あとから始まったほう。
+ */
+const statusTasks = [];
+function beginStatusTask(key, label) {
+  const i = statusTasks.findIndex((t) => t.key === key);
+  if (i >= 0) statusTasks.splice(i, 1);
+  statusTasks.push({ key, label });
+  // お知らせを出している最中なら上書きしない（引っ込んだときにこれが出る）
+  if (!statusNoticeTimer) setStatus('listening', label);
+}
+function endStatusTask(key, { restore = true } = {}) {
+  const i = statusTasks.findIndex((t) => t.key === key);
+  if (i >= 0) statusTasks.splice(i, 1);
+  if (restore && !statusNoticeTimer) restoreStatus();
+}
+
 function restoreStatus() {
+  const task = statusTasks[statusTasks.length - 1];
+  if (task) { setStatus('listening', task.label); return; }
   setStatus(state.isRecording ? 'listening' : 'idle',
             state.isRecording ? recordingLabel() : '停止');
 }
@@ -1405,10 +1433,7 @@ async function retryPendingRefinements({ showFeedback = true } = {}) {
   autoScroll();
   if (showFeedback && failed > 0) {
     setStatus('error', `${failed}件の整形は失敗（後でまた再試行可）`);
-    setTimeout(() => {
-      if (state.isRecording) setStatus('listening', recordingLabel());
-      else setStatus('idle', '停止');
-    }, 4000);
+    setTimeout(() => restoreStatus(), 4000);   // v0.24.56: 走っている処理があればそれを出す
   }
   return { tried: pending.length, ok, failed };
 }
@@ -2361,7 +2386,7 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
   markBusy('live', sessionId, true);
   if (dim) markBusy('liveDim', sessionId, true);
   diagLog.info(`ライブ要約を更新します（${fresh ? '最初から' : final ? '最終版' : '途中'} / 文字起こし${src.transcript.length}字）`);
-  if (!state.isRecording || manual) setStatus('listening', fresh ? '目次付きで要約し直しています（Claude）' : 'ライブ要約を更新中（Claude）');
+  if (!state.isRecording || manual) beginStatusTask(`live:${sessionId}`, fresh ? '目次付きで要約し直しています（Claude）' : 'ライブ要約を更新中（Claude）');
   try {
     const prompt = buildLiveSummaryPrompt({
       transcript: src.transcript, previous: src.previous, memo: src.memo,
@@ -2410,6 +2435,8 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
     markBusy('live', sessionId, false);
     // restoreStatus はここで呼ばない。成功も失敗も statusNotice で知らせていて、
     // 時間が来たら statusNotice が戻す。ここで戻すと**失敗の知らせが一瞬で消える**（テストで見つけた）
+    // v0.24.56: 登録だけ外す（お知らせが出ていないとき＝途中で返ったときは戻す）
+    endStatusTask(`live:${sessionId}`);
   }
 }
 
@@ -6762,7 +6789,8 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
   if (wasActive) els.summaryEmpty.hidden = true;
   markBusy('summary', targetId, true);
   // v0.24.12: どちらの AI で回しているかを出す（やっさんの要望）
-  setStatus('listening', `要約生成中（${typeof aiEngineName === 'function' ? aiEngineName('summary') : 'Gemini'}）`);
+  // v0.24.56: 走っている間に別のお知らせが引っ込んでも「停止」に戻らないよう、処理として登録する
+  beginStatusTask(`summary:${targetId}`, `要約生成中（${typeof aiEngineName === 'function' ? aiEngineName('summary') : 'Gemini'}）`);
   try {
     const summary = await summarizeWithGemini({
       apiKey: state.settings.apiKey,
@@ -6796,7 +6824,7 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
     if (!silent) alert('要約生成に失敗しました: ' + e.message);
   } finally {
     markBusy('summary', targetId, false);
-    restoreStatus();
+    endStatusTask(`summary:${targetId}`);
   }
 }
 
@@ -10841,7 +10869,7 @@ async function refineMemoSelection() {
     snapshotActiveToSession();
     persistSessions();
     setStatus('error', 'メモ整形失敗: ' + (e.message || '').slice(0, 60));
-    setTimeout(() => setStatus('idle', '停止'), 4000);
+    setTimeout(() => restoreStatus(), 4000);   // v0.24.56
   } finally {
     markBusy('memoRefine', memoSid, false);
   }

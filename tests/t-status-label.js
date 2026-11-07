@@ -18,7 +18,11 @@ let shown = null;
 const ctx = { console, state: { settings: {}, isRecording: false },
               setStatus: (mode, label) => { shown = { mode, label }; } };
 vm.createContext(ctx);
-vm.runInContext([grab(app, 'recordingLabel'), grab(app, 'restoreStatus')].join('\n'), ctx);
+// v0.24.56: restoreStatus は走っている処理（statusTasks）を先に見る。旧版には無いので、無ければ飛ばす
+const hasTasks = app.includes('function beginStatusTask(');
+vm.runInContext([grab(app, 'recordingLabel'), grab(app, 'restoreStatus'),
+  ...(hasTasks ? ['var statusTasks = []; var statusNoticeTimer = null;', grab(app, 'beginStatusTask'), grab(app, 'endStatusTask')] : []),
+].join('\n'), ctx);
 
 let fail = 0;
 const eq = (label, got, want) => {
@@ -47,6 +51,29 @@ ctx.state.settings.inputMode = 'web-speech';
 ctx.state.isRecording = true;
 ctx.restoreStatus();
 eq('Web Speech・録音中', shown, { mode: 'listening', label: '録音中' });
+
+console.log('\n■ 走っている処理があれば、そちらに戻す（v0.24.56）');
+if (!hasTasks) { console.log('✕ beginStatusTask が無い'); fail++; }
+else {
+  ctx.state.isRecording = false;
+  ctx.beginStatusTask('summary:a', '要約生成中（Claude）');
+  eq('始めたら出す', shown, { mode: 'listening', label: '要約生成中（Claude）' });
+  ctx.restoreStatus();
+  eq('ほかのお知らせが引っ込んでも「停止」にしない', shown, { mode: 'listening', label: '要約生成中（Claude）' });
+  ctx.beginStatusTask('live:a', 'ライブ要約を更新中（Claude）');
+  ctx.endStatusTask('live:a');
+  eq('あとから始まった処理が終わったら、残っているほうに戻す', shown, { mode: 'listening', label: '要約生成中（Claude）' });
+  ctx.endStatusTask('summary:a');
+  eq('全部終わったら「停止」', shown, { mode: 'idle', label: '停止' });
+  vm.runInContext('statusNoticeTimer = 1', ctx);
+  shown = null;
+  ctx.beginStatusTask('summary:b', '要約生成中（Gemini）');
+  eq('お知らせを出している最中は上書きしない', shown, null);
+  ctx.restoreStatus();
+  eq('お知らせが引っ込んだら出る', shown, { mode: 'listening', label: '要約生成中（Gemini）' });
+  ctx.endStatusTask('summary:b');
+  vm.runInContext('statusNoticeTimer = null', ctx);
+}
 
 console.log('\n■ 直書きが残っていないこと（直すたびに食い違うのを防ぐ）');
 const body = app.replace(grab(app, 'recordingLabel'), '');
