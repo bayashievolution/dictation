@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.13.29" />
+  <link rel="stylesheet" href="style.css?v=0.24.56" />
 </head>
 <body>
   <div id="app">
@@ -46,6 +46,9 @@
       </button>
       <button id="btn-search" class="btn btn-ghost btn-square" title="検索＆置換（Ctrl+F）">
         <span class="btn-icon" data-icon="search"></span>
+      </button>
+      <button id="btn-context" class="btn btn-ghost btn-square" title="この録音の文脈（分野・話者・用語）を設定して文字起こしの精度を上げる">
+        <span class="btn-icon" data-icon="tag"></span>
       </button>
       <button id="btn-settings" class="btn btn-ghost btn-square" title="設定">
         <span class="btn-icon" data-icon="settings"></span>
@@ -99,6 +102,10 @@
           <button id="btn-refine-transcript" class="toggle-switch toggle-with-action" title="ノブ=録音中の自動整形ON/OFF／本体の『文字起こし整形』クリック=トグル状態に関わらず上から下まで全体を文脈込みで整形＋見出し付け">
             <span class="toggle-track" data-role="toggle"><span class="toggle-knob"></span></span>
             <span class="toggle-label" data-role="action"><span data-icon="sparkles"></span>文字起こし整形</span>
+          </button>
+          <!-- v0.21.0: 保管した録音をまとめて投げ直し、話者付きで作り直す -->
+          <button id="btn-diarize" class="pane-btn pane-btn-icon" title="保管した録音をまとめて投げ直し、話者付きで作り直す（録音の保持がオンのときだけ）">
+            <span data-icon="users"></span>
           </button>
           <button class="pane-btn pane-btn-icon" data-pane-undo="pane-transcript" disabled title="この タブの変更を戻す（Ctrl+Z）">
             <span data-icon="undo"></span>
@@ -228,6 +235,31 @@
         </div>
       </div>
 
+      <!-- v0.24.25: リアルタイム要約は要約と別のタブ。設定でオンのときだけタブが出る -->
+      <div id="pane-live" class="pane">
+        <div class="pane-header">
+          <button id="btn-live-redo" class="pane-btn" title="講義全体を見て、目次付きで最初から要約し直す（Claude）">
+            <span data-icon="sparkles"></span>最初から要約し直す
+          </button>
+          <button class="pane-btn pane-btn-icon" data-pane-undo="pane-live" disabled title="ライブ要約の変更を戻す（Ctrl+Z）">
+            <span data-icon="undo"></span>
+          </button>
+          <button class="pane-btn pane-btn-icon" data-pane-redo="pane-live" disabled title="ライブ要約の変更をやり直す（Ctrl+Shift+Z）">
+            <span data-icon="redo"></span>
+          </button>
+          <button class="pane-btn pane-btn-icon" data-pane-clear="pane-live" title="ライブ要約をクリア">
+            <span data-icon="trash"></span>
+          </button>
+        </div>
+        <div class="pane-body">
+          <div id="live-summary" contenteditable="true" spellcheck="false"></div>
+          <div id="live-summary-empty" class="empty-hint" hidden>
+            録音中、設定した間隔ごとに<strong>目次付きの要約</strong>がここにできます（Claude 連携）。<br>
+            <small>間隔は 設定 → AI機能 で変えられます</small>
+          </div>
+        </div>
+      </div>
+
       <div id="pane-chat" class="pane">
         <div class="pane-header">
           <button class="pane-btn pane-btn-icon" data-pane-clear="pane-chat" title="チャット履歴をクリア">
@@ -259,6 +291,33 @@
 
   </div>
 
+  <!-- v0.20.0: フッター左＝辞書、右＝拡大ルーラー。
+       いま何の語彙が効いているかが常に見えていないと、間違ったまま録り続けてしまう -->
+  <div id="dict-bar" title="語彙辞書（クリックで切替）">
+    <button type="button" id="dict-toggle" class="dict-btn">
+      <span data-icon="tag"></span>
+      <span id="dict-label">辞書なし</span>
+    </button>
+  </div>
+
+  <div id="dict-menu" class="dict-menu" hidden>
+    <div class="dict-menu-head">
+      <span>語彙辞書</span>
+      <button type="button" class="modal-close" id="dict-menu-close"><span data-icon="x"></span></button>
+    </div>
+    <p class="field-hint dict-menu-hint">
+      選ぶと<strong>いまの自動辞書に足されます</strong>（置き換えではありません）。
+      録音中でも切り替えられます。
+    </p>
+    <div id="dict-menu-list" class="dict-menu-list"></div>
+    <div class="dict-menu-foot">
+      <span id="dict-menu-auto" class="field-hint"></span>
+      <button type="button" id="dict-menu-detail" class="pane-btn">
+        <span data-icon="pencil"></span><span>詳しく設定</span>
+      </button>
+    </div>
+  </div>
+
   <div id="zoom-bar" title="拡大率">
     <button class="zoom-btn" id="zoom-minus" title="縮小">−</button>
     <input type="range" id="zoom-range" min="75" max="200" step="5" value="100" />
@@ -277,21 +336,176 @@
       </div>
       <div class="modal-body">
 
+        <!-- v0.24.45: 音声入力を設定の一番上に（やっさんの指定） -->
         <div class="field-group">
-          <h3 class="field-group-title">Gemini API</h3>
+          <h3 class="field-group-title">音声入力</h3>
+          <div class="field">
+            <span class="field-label">文字起こしのモード</span>
+            <label class="field-row" style="margin-bottom:4px">
+              <input type="radio" name="input-mode" id="mode-webspeech" value="web-speech" />
+              <span><strong>Web Speech</strong><small class="field-hint" style="display:block">高速・システム既定マイクのみ</small></span>
+            </label>
+            <label class="field-row" style="margin-bottom:0">
+              <input type="radio" name="input-mode" id="mode-gemini" value="gemini-audio" />
+              <span><strong>Gemini Audio</strong><small class="field-hint" style="display:block">小さい声に強い・10〜15秒遅延・任意のデバイス選択可</small></span>
+            </label>
+          </div>
+          <div class="field-conditional is-hidden" id="webspeech-only-fields">
+            <div class="field-conditional-inner">
+              <!-- v0.13.22: Web Speech チャンク間隔（強制 commit）は望む動作達成の鍵
+                   （v0.13.20 撤去ミスで判明）。N 秒ごとに recognition.stop() を呼んで
+                   字幕の「ちょうどいい塊感」を作る。話し手のリズムで調整可能。-->
+              <label class="field">
+                <span class="field-label">Web Speech チャンク長（秒）</span>
+                <select id="input-webspeech-commit-sec">
+                  <option value="0">OFF（WebSpeech 任せ）</option>
+                  <option value="6" selected>6</option>
+                  <option value="8">8</option>
+                  <option value="10">10</option>
+                </select>
+                <small class="field-hint">設定した秒数で文字起こしを下書きから確定します。</small>
+              </label>
+
+
+            </div>
+          </div>
+          <div class="field-conditional is-hidden" id="gemini-only-fields">
+            <div class="field-conditional-inner">
+              <label class="field">
+                <span class="field-label">音声入力デバイス</span>
+                <select id="input-audio-device"></select>
+              </label>
+              <label class="field field-row">
+                <input id="input-gemini-live-display" type="checkbox" />
+                <span>リアルタイム表示を使う（Web Speech を並走）</span>
+              </label>
+              <div class="field">
+                <small class="field-hint">Gemini の結果が返るまでの間、Web Speech が聞き取った文字を「未確定」として表示します。</small>
+              </div>
+              <!-- v0.24.47: Gemini に送る音声まわりを「音声チャンク」にまとめた（やっさんの指定） -->
+              <span class="field-label" style="font-weight:600">音声チャンク</span>
+              <label class="field">
+                <span class="field-label">チャンク長（秒）</span>
+                <div class="number-stepper">
+                  <input id="input-chunk-sec" type="number" min="5" max="60" step="1" />
+                  <div class="number-stepper-btns">
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">Geminiに送信する音声の長さです。長いほど精度が上がりますが、結果が返ってくるまで文字起こしは表示されません。</small>
+              </label>
+              <label class="field field-row">
+                <input id="input-silence-cut" type="checkbox" />
+                <span>無音の切れ目で送信</span>
+              </label>
+              <div class="field">
+                <small class="field-hint">話が途切れたところを狙って区切り、音声をGeminiに送信します。オフにすると、設定したチャンク長で送信します。</small>
+              </div>
+              <label class="field">
+                <span class="field-label">最長待ち時間（秒）</span>
+                <div class="number-stepper">
+                  <input id="input-chunk-max-sec" type="number" min="7" max="90" step="1" />
+                  <div class="number-stepper-btns">
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-max-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-max-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">話が途切れない場合、この秒数で強制的に区切って送信します。</small>
+              </label>
+              <label class="field">
+                <span class="field-label">音声送信しきい値（バイト）</span>
+                <div class="number-stepper">
+                  <input id="input-min-chunk-bytes" type="number" min="100" max="5000" step="50" />
+                  <div class="number-stepper-btns">
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-min-chunk-bytes" data-stepper-delta="50" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                    <button type="button" class="number-stepper-btn" data-stepper-target="input-min-chunk-bytes" data-stepper-delta="-50" tabindex="-1"><span data-icon="chevron-down"></span></button>
+                  </div>
+                </div>
+                <small class="field-hint">このサイズ未満の音声チャンクは無音とみなしてスキップします。</small>
+              </label>
+              <label class="field">
+                <span class="field-label">音質（kbps）</span>
+                <select id="input-audio-bitrate">
+                  <option value="32000">32 — 最小（90分で約21MB）</option>
+                  <option value="64000">64 — 標準（90分で約43MB）</option>
+                  <option value="96000">96 — 高め（90分で約65MB）</option>
+                  <option value="128000">128 — 従来（90分で約86MB）</option>
+                </select>
+                <small class="field-hint">送信用音声ファイルの音質です。</small>
+              </label>
+              <div class="field">
+                <button type="button" id="btn-chunk-defaults" class="btn btn-ghost btn-sm">既定値に戻す</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- v0.24.39: AI まわりの設定を1つにまとめ、やっさんの指定した順に並べた。
+             「ライブ整形」と「要約・タイトル生成」は独立（以前はライブ整形をオフにすると要約も止まっていた）。
+             Claude Code は「連携を使う（Claude Code）」と「一部を Claude Code で処理する」の2つに分けた。
+             名前のすみ分け（v0.24.29）: ライブ○○ ＝ AI が録音中に処理するもの／リアルタイム表示 ＝ Web Speech をそのまま出すもの -->
+        <div class="field-group">
+          <h3 class="field-group-title">AI機能</h3>
           <label class="field">
             <span class="field-label">Gemini API キー</span>
             <input id="input-api-key" type="password" placeholder="AIza..." autocomplete="off" spellcheck="false" />
             <span class="field-hint">
-              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で取得（無料枠内で運用できます）
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で取得
             </span>
           </label>
+
+          <!-- v0.24.44: 「一部を Claude Code で処理する」は隠し、連携をオンにすれば同時に有効（やっさんの指定）。
+               接続の状態はトグルの横に自動で出す（オンにしたとき・アプリを立ち上げたとき）。「接続を確認」ボタンは外した -->
+          <div class="field toggle-with-status">
+            <label class="field-row">
+              <input id="input-claude-code" type="checkbox" />
+              <span>Claude Code 連携</span>
+            </label>
+            <span id="claude-bridge-status" class="field-hint"></span>
+          </div>
+          <div class="field">
+            <small class="field-hint">
+              要約・質問・タイトル・全体整形・メモの整形・ライブ整形・文字起こしへの項目付けを Claude Code で処理します。
+              音声を処理する必要がある、文字起こし・話者判別は Gemini API で処理します。
+            </small>
+          </div>
+          <!-- v0.24.21: インストール式（拡張のときだけ出す） -->
+          <div class="field" data-claude-native-only>
+            <button type="button" id="btn-claude-install" class="btn btn-ghost btn-sm">連携アプリをダウンロード</button>
+            <small class="field-hint" style="display:block; margin-top:4px">
+              Claude Code のターミナル版が入っている場合、連携アプリをインストールすることで有効にできます。
+            </small>
+          </div>
+          <div class="field" data-claude-web-only>
+            <small class="field-hint">
+              Claude Code のターミナル版が入っている場合、<code>start.bat</code> でサーバーを起動しておくことで有効にできます。
+            </small>
+          </div>
+          <!-- v0.24.12: 中継に必要なファイル（ブラウザ版のときだけ出す） -->
+          <div class="field" data-claude-web-only>
+            <div class="audio-usage-row">
+              <span class="field-hint">中継用のファイルが手元に無いとき</span>
+              <button type="button" id="btn-save-bridge-files" class="btn btn-ghost btn-sm">中継用ファイルを保存</button>
+            </div>
+            <small class="field-hint">
+              ブラウザ版からはパソコンのプログラムを起動できないので、中継役の <code>serve.js</code> を動かしてもらう必要があります。
+              <code>serve.js</code> ・<code>claude-runner.js</code> ・<code>start.bat</code> ・<code>login.bat</code> の4つを保存し、
+              <strong>同じフォルダに置いて</strong> <code>start.bat</code> をダブルクリックしてください（Node.js が必要）。
+            </small>
+          </div>
+
+          <!-- v0.24.49: ライブ整形はここ（AI機能）。Web Speech モードでは文字起こしを、Gemini Audio モードでは
+               文字起こしの結果を Gemini に送り直してまとめ直す（見出しを付ける）。タイミングは「黙ってから」ではなく「◯秒ごと」 -->
           <label class="field field-row">
             <input id="input-ai-enabled" type="checkbox" />
-            <span>リアルタイムAI文字起こし整形</span>
+            <span>ライブ整形</span>
           </label>
+          <div class="field">
+            <small class="field-hint">文字起こしをGeminiに送信し、段落分けや見出し、句読点を入れて体裁を整えます。</small>
+          </div>
           <label class="field">
-            <span class="field-label">リアルタイムAI文字起こし整形のタイミング（秒）</span>
+            <span class="field-label">ライブ整形のタイミング（秒）</span>
             <div class="number-stepper">
               <input id="input-silence-sec" type="number" min="1" max="30" step="1" />
               <div class="number-stepper-btns">
@@ -299,12 +513,46 @@
                 <button type="button" class="number-stepper-btn" data-stepper-target="input-silence-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
               </div>
             </div>
-            <small class="field-hint">無音状態が設定した秒数継続したら、発話を Gemini に送って整形</small>
           </label>
+          <!-- v0.24.51: 見出し追加（まとめ直し）のタイミング。説明なし（やっさんの指定） -->
+          <label class="field">
+            <span class="field-label">見出し追加のタイミング（秒）</span>
+            <div class="number-stepper">
+              <input id="input-mid-consolidate-sec" type="number" min="30" max="1800" step="10" />
+              <div class="number-stepper-btns">
+                <button type="button" class="number-stepper-btn" data-stepper-target="input-mid-consolidate-sec" data-stepper-delta="10" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button type="button" class="number-stepper-btn" data-stepper-target="input-mid-consolidate-sec" data-stepper-delta="-10" tabindex="-1"><span data-icon="chevron-down"></span></button>
+              </div>
+            </div>
+          </label>
+
+          <!-- v0.24.22: ライブ要約（Claude Code 連携のみ。v0.24.27 までの名前はリアルタイム要約／RT要約） -->
+          <label class="field field-row">
+            <input id="input-live-summary" type="checkbox" />
+            <span>ライブ要約</span>
+          </label>
+          <div class="field">
+            <small class="field-hint">文字起こしをしつつ、話題を順に端的にまとめます。</small>
+            <small id="live-summary-note" class="field-hint warn-hint">上の「Claude Code 連携」をオンにすると選べます。</small>
+          </div>
+          <label class="field">
+            <span class="field-label">ライブ要約の間隔（分）</span>
+            <div class="number-stepper">
+              <input id="input-live-summary-min" type="number" min="1" max="60" step="1" />
+              <div class="number-stepper-btns">
+                <button type="button" class="number-stepper-btn" data-stepper-target="input-live-summary-min" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
+                <button type="button" class="number-stepper-btn" data-stepper-target="input-live-summary-min" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
+              </div>
+            </div>
+          </label>
+
           <label class="field field-row">
             <input id="input-auto-summarize" type="checkbox" />
-            <span>録音停止時にAI要約・タイトル生成</span>
+            <span>要約・タイトル生成</span>
           </label>
+          <div class="field">
+            <small class="field-hint">録音停止時に要約・タイトルを生成します。</small>
+          </div>
           <div class="field">
             <span class="field-label">要約の詳しさ</span>
             <label class="field-row" style="margin-bottom:4px">
@@ -322,108 +570,96 @@
           </div>
         </div>
 
+        <!-- v0.24.49: 字幕用設定は開発中。音声入力の中から独立させ、SUMADO の上に置いた（やっさんの指定） -->
         <div class="field-group">
-          <h3 class="field-group-title">音声入力</h3>
-          <div class="field">
-            <span class="field-label">入力モード</span>
-            <label class="field-row" style="margin-bottom:4px">
-              <input type="radio" name="input-mode" id="mode-webspeech" value="web-speech" />
-              <span><strong>Web Speech</strong> — 速い・無料・システム既定マイクのみ</span>
-            </label>
-            <label class="field-row" style="margin-bottom:0">
-              <input type="radio" name="input-mode" id="mode-gemini" value="gemini-audio" />
-              <span><strong>Gemini Audio</strong> — 小さい声に強い・10〜15秒遅延・任意のデバイス選択可</span>
-            </label>
-            <small class="field-hint" style="margin-top:8px;display:block">
-              Zoom/Meet の音声を取り込むには
-              <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener">VB-Cable</a>
-              などの仮想オーディオケーブルをインストール
-            </small>
-          </div>
-          <div class="field-conditional is-hidden" id="webspeech-only-fields">
-            <div class="field-conditional-inner">
-              <!-- v0.13.22: Web Speech チャンク間隔（強制 commit）は望む動作達成の鍵
-                   （v0.13.20 撤去ミスで判明）。N 秒ごとに recognition.stop() を呼んで
-                   字幕の「ちょうどいい塊感」を作る。話し手のリズムで調整可能。-->
-              <label class="field">
-                <span class="field-label">Web Speech チャンク間隔（秒）</span>
-                <select id="input-webspeech-commit-sec">
-                  <option value="0">OFF（WebSpeech 任せ）</option>
-                  <option value="6" selected>6（既定）</option>
-                  <option value="8">8</option>
-                  <option value="10">10</option>
-                </select>
-                <small class="field-hint">文字起こしを下書きから確定するまでの時間</small>
-              </label>
+          <h3 class="field-group-title">字幕用設定（開発中）</h3>
+        <!-- v0.13.31: ここから下は字幕／オーバーレイ用設定。文字起こしペインは触らない。
+             完全分離（dictation:liveCaption キー経由）。 -->
+        
 
-              <!-- v0.13.31: ここから下は字幕／オーバーレイ用設定。文字起こしペインは触らない。
-                   完全分離（dictation:liveCaption キー経由）。 -->
-              <h3 class="field-group-title">字幕用設定</h3>
-
-              <!-- v0.13.31: 真の「改行」方式。recognition.stop() を呼ばずに、
-                   interim を N 字単位にカットして新段落として字幕／オーバーレイに流す。
-                   stop しない＝Web Speech は走り続ける＝ブロック間の言葉が失われない。
-                   v0.13.30 の「stop で final 化」誤翻訳のやり直し。
-                   ↑↓ は design-system principles.md「ネイティブ装飾は appearance:none」に従い、
-                   汎用 .number-stepper（wireNumberSteppers）を使う。 -->
-              <label class="field">
-                <span class="field-label">字幕一行あたりの最大文字数（10〜100）</span>
-                <div class="number-stepper">
-                  <input type="number" id="input-webspeech-slice-chars" min="10" max="100" step="1" value="30">
-                  <div class="number-stepper-btns">
-                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
-                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
-                  </div>
-                </div>
-                <small class="field-hint">文字起こしの下書きがこの字数になると字幕エリアに表示される。話者のリズム・読みやすさで調整（既定 30）</small>
-              </label>
-
-              <!-- v0.13.31: 無音 stop。30 字に達しない短い発話を、
-                   既存の時間ベース 6 秒を待たずに字幕へ流すための補完。
-                   interim の「中身」が変化していない時間で判定するので、
-                   v0.13.30 の誤発火（喋り中も onresult が空く問題）は起きない。
-                   0=OFF。 -->
-              <label class="field">
-                <span class="field-label">強制字幕表示時間（秒、0=OFF）</span>
-                <div class="number-stepper">
-                  <input type="number" id="input-webspeech-silence-stop-sec" min="0" max="10" step="1" value="3">
-                  <div class="number-stepper-btns">
-                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
-                    <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
-                  </div>
-                </div>
-                <small class="field-hint">文字起こしの下書きが指定文字数に足りず、無言の場合、強制的に字幕エリアに表示するまでの時間。0 で OFF</small>
-              </label>
+        <!-- v0.13.31: 真の「改行」方式。recognition.stop() を呼ばずに、
+             interim を N 字単位にカットして新段落として字幕／オーバーレイに流す。
+             stop しない＝Web Speech は走り続ける＝ブロック間の言葉が失われない。
+             v0.13.30 の「stop で final 化」誤翻訳のやり直し。
+             ↑↓ は design-system principles.md「ネイティブ装飾は appearance:none」に従い、
+             汎用 .number-stepper（wireNumberSteppers）を使う。 -->
+        <label class="field">
+          <span class="field-label">字幕一行あたりの最大文字数（10〜100）</span>
+          <div class="number-stepper">
+            <input type="number" id="input-webspeech-slice-chars" min="10" max="100" step="1" value="30">
+            <div class="number-stepper-btns">
+              <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
+              <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-slice-chars" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
             </div>
           </div>
-          <div class="field-conditional is-hidden" id="gemini-only-fields">
-            <div class="field-conditional-inner">
-              <label class="field">
-                <span class="field-label">音声入力デバイス</span>
-                <select id="input-audio-device"></select>
-              </label>
-              <label class="field">
-                <span class="field-label">Geminiチャンク間隔（秒）</span>
-                <div class="number-stepper">
-                  <input id="input-chunk-sec" type="number" min="5" max="60" step="1" />
-                  <div class="number-stepper-btns">
-                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="1" tabindex="-1"><span data-icon="chevron-up"></span></button>
-                    <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
-                  </div>
-                </div>
-                <small class="field-hint">この秒数ごとに音声を Gemini へ送信。長いほど精度アップ・遅延増、短いほど反応速い。既定 12 秒。</small>
-              </label>
-              <label class="field">
-                <span class="field-label">音声送信しきい値（バイト）</span>
-                <div class="number-stepper">
-                  <input id="input-min-chunk-bytes" type="number" min="100" max="5000" step="50" />
-                  <div class="number-stepper-btns">
-                    <button type="button" class="number-stepper-btn" data-stepper-target="input-min-chunk-bytes" data-stepper-delta="50" tabindex="-1"><span data-icon="chevron-up"></span></button>
-                    <button type="button" class="number-stepper-btn" data-stepper-target="input-min-chunk-bytes" data-stepper-delta="-50" tabindex="-1"><span data-icon="chevron-down"></span></button>
-                  </div>
-                </div>
-                <small class="field-hint">このサイズ未満の音声チャンクは無音とみなしてスキップ。小声も拾いたいなら下げる（既定 400）／無駄送信を減らすなら上げる。</small>
-              </label>
+          <small class="field-hint">文字起こしの下書きがこの字数になると字幕エリアに表示される。話者のリズム・読みやすさで調整（既定 30）</small>
+        </label>
+
+        <!-- v0.13.31: 無音 stop。30 字に達しない短い発話を、
+             既存の時間ベース 6 秒を待たずに字幕へ流すための補完。
+             interim の「中身」が変化していない時間で判定するので、
+             v0.13.30 の誤発火（喋り中も onresult が空く問題）は起きない。
+             0=OFF。 -->
+        <label class="field">
+          <span class="field-label">強制字幕表示時間（秒、0=OFF）</span>
+          <div class="number-stepper">
+            <input type="number" id="input-webspeech-silence-stop-sec" min="0" max="10" step="1" value="3">
+            <div class="number-stepper-btns">
+              <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="1" tabindex="-1" title="増やす"><span data-icon="chevron-up"></span></button>
+              <button class="number-stepper-btn" type="button" data-stepper-target="input-webspeech-silence-stop-sec" data-stepper-delta="-1" tabindex="-1" title="減らす"><span data-icon="chevron-down"></span></button>
+            </div>
+          </div>
+          <small class="field-hint">文字起こしの下書きが指定文字数に足りず、無言の場合、強制的に字幕エリアに表示するまでの時間。0 で OFF</small>
+        </label>
+        </div>
+
+        <div class="field-group">
+          <h3 class="field-group-title">SUMADO</h3>
+          <label class="field field-row">
+            <input id="input-sumado-meter" type="checkbox" />
+            <span>録音中、SUMADO のアイランドに声の大きさのメーターを出す</span>
+          </label>
+          <div class="field">
+            <small class="field-hint">SUMADO の中で使っているときだけ働きます。</small>
+          </div>
+        </div>
+
+        <!-- v0.24.48: 話者判別は Gemini モードの録音を使うので、Gemini モードのときだけ出す（やっさんの指定）。
+             保存のキー（keepRecording / audioRetention）は変えていない -->
+        <div class="field-group" id="keep-recording-group">
+          <h3 class="field-group-title">録音の保持</h3>
+          <label class="field field-row">
+            <input id="input-keep-recording" type="checkbox" />
+            <span>話者判別機能を有効にする</span>
+          </label>
+          <div class="field">
+            <small class="field-hint">話者判別機能が有効になり、それに伴い音声ファイルが端末に一時保存されます。</small>
+          </div>
+          <div class="field">
+            <small class="field-hint warn-hint">
+              <strong>この設定が決めるのは「端末に残すかどうか」だけです。</strong>
+              Gemini モードは、この設定に関係なく文字起こしのために音声を Google へ送信しています。
+              話者判別を実行すると録音全体がアップロードされます。
+              使い終わったファイルはこちらから削除しますが、削除できなかった場合も Google 側で48時間後に自動削除されます。
+              録音の保存自体が許されない場面では、この設定をオフにしたうえで、
+              Gemini モードを使うことの可否も確認してください。
+            </small>
+          </div>
+          <label class="field">
+            <span class="field-label">音声ファイルの取り扱い</span>
+            <select id="input-audio-retention">
+              <option value="close">タブを閉じたら消す（推奨）</option>
+              <option value="repass">話者判別処理が終わったら消す（24時間で自動失効）</option>
+              <option value="1d">1日たったら消す</option>
+              <option value="7d">7日たったら消す</option>
+              <option value="manual">手動で消すまで残す</option>
+            </select>
+            <small class="field-hint">音声ファイルが残っていれば話者判別をやり直すことができます。どの設定でもタブを閉じた時点でその録音は削除されます。</small>
+          </label>
+          <div class="field">
+            <div class="audio-usage-row">
+              <span id="audio-usage-text" class="field-hint">保持中の音声: 確認中…</span>
+              <button type="button" id="btn-clear-audio" class="btn btn-ghost btn-sm">すべて消す</button>
             </div>
           </div>
         </div>
@@ -491,37 +727,36 @@
           </div>
         </div>
 
+        <!-- v0.24.50: やっさんの指定で整理。「Notion 連携」トグルを足し、横に接続の状態を自動で出す
+             （オンにしたとき・アクセストークンを入れ直したとき・アプリを立ち上げたとき）。「接続テスト」ボタンは外した -->
         <div class="field-group" id="notion-settings-group">
           <h3 class="field-group-title">Notion 連携</h3>
+          <div class="field toggle-with-status">
+            <label class="field-row">
+              <input id="input-notion-enabled" type="checkbox" />
+              <span>Notion 連携</span>
+            </label>
+            <span id="notion-test-result" class="field-hint notion-test-result"></span>
+          </div>
+          <div class="field">
+            <small class="field-hint">文字起こしや要約など全てのタブをNotionに送信します。</small>
+          </div>
           <label class="field">
             <span class="field-label">アクセストークン</span>
             <input id="input-notion-token" type="password" placeholder="ntn_..." autocomplete="off" spellcheck="false" />
             <span class="field-hint">
-              <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">Notion の開発者ツール → コネクション</a>
-              でコネクトを開き（「+ 新規コネクト」で作っても、既存のものでも可）、
-              「設定」タブの<strong>「インテグレーショントークン」→「アクセストークン」</strong>をコピーしてここに貼ります。
-              コネクトの権限に「コンテンツを挿入」が必要です。
-              そのあと <strong>保存先にしたいデータベースのページを開き、「…」→「コネクト」からそのコネクトを接続</strong>してください。
-              接続していないデータベースは保存先の一覧に出てきません。
+              <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">Notionコネクション</a>で取得
             </span>
           </label>
-          <div class="field">
-            <div class="diag-log-actions">
-              <button type="button" id="btn-notion-test" class="pane-btn" title="トークンが有効か確かめる">
-                <span data-icon="check"></span><span>接続テスト</span>
-              </button>
-              <span id="notion-test-result" class="field-hint notion-test-result"></span>
-            </div>
-          </div>
           <div class="field">
             <span class="field-label">前回の保存先</span>
             <div class="diag-log-actions">
               <span id="notion-last-target" class="field-hint">（まだありません）</span>
               <button type="button" id="btn-notion-forget" class="pane-btn" title="記憶している保存先を忘れる">
-                <span data-icon="trash"></span><span>忘れる</span>
+                <span data-icon="trash"></span><span>リセット</span>
               </button>
             </div>
-            <small class="field-hint">アップロード時はこの保存先が最初から選ばれた状態で確認ダイアログが出ます</small>
+            <small class="field-hint">アップロード時はこの保存先が最初から選ばれた状態で確認ダイアログが出ます。</small>
           </div>
         </div>
 
@@ -627,6 +862,92 @@
   </div>
 
   <!-- 無音停止確認ダイアログ -->
+  <!-- v0.16.0: 録音の文脈。ここに書いた語彙が文字起こしのプロンプトに載る。
+       同音異義語と固有名詞の誤りは音だけでは直せないので、先に語を教えておく。 -->
+  <div id="context-modal" class="modal hidden">
+    <div class="modal-backdrop" data-dismiss></div>
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <h2>この録音の文脈</h2>
+        <button class="modal-close" data-dismiss><span data-icon="x"></span></button>
+      </div>
+      <div class="modal-body">
+        <p class="field-hint" style="margin-bottom:14px">
+          ここに書いた内容は<strong>語彙のヒント</strong>として文字起こしに渡されます。
+          同音異義語（家庭／課程／過程）や固有名詞は音だけでは決められないので、
+          先に教えておくと精度が上がります。<strong>台本としては使われません</strong>（書いた内容が勝手に本文に入ることはありません）。
+        </p>
+
+        <label class="field">
+          <span class="field-label">分野・場面</span>
+          <input id="input-context-field" type="text" placeholder="例: 講義 / 会議 / 打ち合わせ / インタビュー" />
+          <small class="field-hint">分野があれば「〇〇学の講義」のように書くと、その分野の語が選ばれやすくなります</small>
+        </label>
+
+        <label class="field">
+          <span class="field-label">話者</span>
+          <input id="input-context-speakers" type="text" placeholder="例: 山田さん、佐藤さん、司会" />
+          <small class="field-hint">話者判別を入れたときに名前で出せるようになります</small>
+        </label>
+
+        <label class="field">
+          <span class="field-label">よく出る語・固有名詞</span>
+          <textarea id="input-context-terms" rows="5" placeholder="製品名・サービス名&#10;社名・団体名&#10;略語&#10;人名"></textarea>
+          <small class="field-hint">改行かカンマ区切り。人名・専門用語・製品名など、誤変換されやすいものを</small>
+        </label>
+
+        <div class="field">
+          <span class="field-label">語彙辞書</span>
+          <small class="field-hint" style="margin-bottom:6px">
+            選んだ辞書の語が、上の「よく出る語」と自動で拾った語に<strong>足されます</strong>。
+            合計50語まで（手入力 → 辞書 → 自動 の順に残ります）。
+          </small>
+          <div id="context-dict-list" class="context-dict-list"></div>
+          <div class="diag-log-actions" style="margin-top:8px">
+            <button type="button" id="btn-save-auto-dict" class="pane-btn" title="いま育っている自動辞書と手入力の語に名前を付けて保存する">
+              <span data-icon="tag"></span><span>いまの語を辞書として保存</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="diag-log-actions">
+            <button type="button" id="btn-context-from-memo" class="pane-btn" title="メモペインに書いた見出しや箇条書きから語を拾う">
+              <span data-icon="pencil"></span><span>メモから取り込む</span>
+            </button>
+            <span id="context-memo-result" class="field-hint"></span>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="diag-log-head">
+            <span class="field-label">自動で拾った内容</span>
+            <div class="diag-log-actions">
+              <button type="button" id="btn-context-adopt-auto" class="pane-btn" title="拾った語を上の欄に移して自分で直せるようにする">
+                <span data-icon="check"></span><span>上の欄に取り込む</span>
+              </button>
+            </div>
+          </div>
+          <div id="auto-context-box" class="auto-context-box"></div>
+          <small class="field-hint">
+            録音中に記録から自動で拾っています。誤変換をそのまま覚えないよう、
+            単純な頻度ではなく AI に「正しい表記」を判断させています。
+            おかしければ取り込んで直してください（<strong>上の欄が最終権限</strong>です）
+          </small>
+        </div>
+
+        <label class="field field-row">
+          <input id="input-context-default" type="checkbox" />
+          <span>この内容を新しいタブの初期値にする</span>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-context-save" class="btn btn-primary">保存</button>
+        <button class="btn btn-ghost" data-dismiss>キャンセル</button>
+      </div>
+    </div>
+  </div>
+
   <!-- v0.14.2: Notion 保存先ピッカー。
        毎回聞くが、前回の保存先が最初から選ばれた状態で開く（そのまま保存を押せば済む）。 -->
   <div id="notion-picker" class="modal hidden">
@@ -643,7 +964,13 @@
           <select id="notion-picker-select"></select>
           <small class="field-hint">Notion 側で「コネクト」を接続したデータベースだけが出ます</small>
         </label>
+        <!-- v0.23.0: 新しいノートを作るか、そのデータベースの中の既存ノートに追記するか -->
         <label class="field">
+          <span class="field-label">保存のしかた</span>
+          <select id="notion-picker-note"></select>
+          <small class="field-hint" id="notion-picker-note-hint">既存のノートを選ぶと、そのノートの末尾に追記します</small>
+        </label>
+        <label class="field" id="notion-picker-date-row">
           <span class="field-label">録音日時の保存先</span>
           <select id="notion-picker-date"></select>
           <small class="field-hint">日付プロパティを選ぶと、タイトルから日時を外してその列に入れます</small>
@@ -657,26 +984,25 @@
     </div>
   </div>
 
-  <!-- v0.14.2: アップロード進捗＋完了後の「閉じますか？」 -->
-  <div id="notion-progress" class="modal hidden">
-    <div class="modal-backdrop"></div>
-    <div class="modal-card modal-small">
-      <div class="modal-header">
-        <h2 id="notion-progress-title">Notion に保存中…</h2>
-      </div>
-      <div class="modal-body">
-        <p id="notion-progress-body" style="font-size:14px; line-height:1.7; white-space:pre-line;"></p>
-        <label class="field field-row" id="notion-auto-close-row">
-          <input id="notion-auto-close" type="checkbox" />
-          <span>保存できたタブを自動的に閉じる</span>
-        </label>
-        <div id="notion-progress-list" class="notion-progress-list"></div>
-      </div>
-      <div class="modal-footer" id="notion-progress-footer">
-        <button id="btn-notion-cancel" class="btn btn-ghost">中止</button>
-        <button id="btn-notion-close-tabs" class="btn btn-primary" hidden>閉じる</button>
-        <button id="btn-notion-keep-tabs" class="btn btn-ghost" hidden>残す</button>
-      </div>
+  <!-- v0.14.2: アップロード進捗＋完了後の「閉じますか？」
+       v0.24.33: モーダル（後ろを暗くして操作を止める）をやめ、右下の小さな窓にした。
+       ヘッダーをつかんで動かせる。保存中も、録音中のタブなどで作業を続けられる（やっさんの要望） -->
+  <div id="notion-progress" class="notion-float hidden" role="dialog" aria-label="Notion への保存">
+    <div class="float-window-header notion-float-header" title="ドラッグで移動">
+      <h2 id="notion-progress-title">Notion に保存中…</h2>
+    </div>
+    <div class="notion-float-body">
+      <p id="notion-progress-body" class="notion-float-text"></p>
+      <label class="field field-row" id="notion-auto-close-row">
+        <input id="notion-auto-close" type="checkbox" />
+        <span>保存できたタブを、確認せずに閉じる（この回だけ）</span>
+      </label>
+      <div id="notion-progress-list" class="notion-progress-list"></div>
+    </div>
+    <div class="notion-float-footer" id="notion-progress-footer">
+      <button id="btn-notion-cancel" class="btn btn-ghost btn-sm">中止</button>
+      <button id="btn-notion-close-tabs" class="btn btn-primary btn-sm" hidden>閉じる</button>
+      <button id="btn-notion-keep-tabs" class="btn btn-ghost btn-sm" hidden>残す</button>
     </div>
   </div>
 
@@ -699,9 +1025,18 @@
     </div>
   </div>
 
-  <script src="icons.js?v=0.15.2"></script>
-  <script src="gemini.js?v=0.15.2"></script>
-  <script src="notion.js?v=0.15.2"></script>
-  <script src="app.js?v=0.15.2"></script>
+  <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
+       （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
+  <script src="icons.js?v=0.24.56"></script>
+  <script src="gemini.js?v=0.24.56"></script>
+  <script src="notion.js?v=0.24.56"></script>
+  <script src="audio-store.js?v=0.24.56"></script>
+  <script src="claude-bridge.js?v=0.24.56"></script>
+  <script src="claude-installer.js?v=0.24.56"></script>
+  <script src="live-summary.js?v=0.24.56"></script>
+  <script src="image-store.js?v=0.24.56"></script>
+  <script src="gemini-files.js?v=0.24.56"></script>
+  <script src="term-dicts.js?v=0.24.56"></script>
+  <script src="app.js?v=0.24.56"></script>
 </body>
 </html>
