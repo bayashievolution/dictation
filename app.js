@@ -134,6 +134,10 @@ const DEFAULT_SETTINGS = {
   chatFont: 'sans',
   chatSize: 14,
   inputMode: 'web-speech',
+  // v0.24.83: Gemini モードの中で、音声を文字にするところだけ Groq の Whisper（無料）に替えられる。
+  // 録音・区切り・話者判別（Gemini）はそのまま。新しいキーなので前の版に戻しても読めなくなるものは無い
+  transcribeEngine: 'gemini',   // gemini / groq
+  groqApiKey: '',
   audioDeviceId: '',
   audioChunkSec: 12,
   audioMinChunkBytes: 400, // 旧1200から感度↑。小さい発話（小声・短語）もGeminiへ送る
@@ -513,6 +517,9 @@ const els = {
   summaryDetailHigh: document.getElementById('summary-detail-high'),
   modeWebSpeech: document.getElementById('mode-webspeech'),
   modeGemini: document.getElementById('mode-gemini'),
+  engineGemini: document.getElementById('engine-gemini'),   // v0.24.83
+  engineGroq: document.getElementById('engine-groq'),
+  inputGroqKey: document.getElementById('input-groq-key'),
   inputAudioDevice: document.getElementById('input-audio-device'),
   inputChunkSec: document.getElementById('input-chunk-sec'),
   inputSilenceCut: document.getElementById('input-silence-cut'),
@@ -584,6 +591,14 @@ function loadSettings() {
   }
   // v0.24.50: 「Notion 連携」トグルを足した。トークンを入れていた人はオンのまま始める
   if (state.settings.notionEnabled === undefined) state.settings.notionEnabled = !!state.settings.notionToken;
+  // v0.24.83: 比較ページ（stt-compare.html）で入れた Groq のキーを引き継ぐ。同じ拡張の中なので同じ場所に保存されている。
+  // 引き継ぐだけで、聞き取りを Groq に切り替えはしない（それはやっさんが設定で選ぶ）
+  if (!state.settings.groqApiKey) {
+    try {
+      const k = (JSON.parse(localStorage.getItem('dictation:sttCompare') || '{}') || {})['groq-key'];
+      if (k) state.settings.groqApiKey = String(k).trim();
+    } catch (_) {}
+  }
   // v0.24.39: 「Claude Code」（連携を使う）を足した。前の設定で Claude に任せるかライブ要約を
   // オンにしていた人は、オンのまま始める（オフから始めると、どちらも黙って止まる）
   if (state.settings.claudeCode === undefined) {
@@ -643,7 +658,14 @@ function recordingLabel() {
   // v0.24.6: そのとき `(Gemini)` まで消してしまっていたが、
   // これは**どちらのモードで動いているかの印**なので残す。
   // 変えるべきだったのは前半だけ（やっさん指摘）。
-  return state.settings.inputMode === 'gemini-audio' ? '聞き取り中 (Gemini)' : '録音中';
+  // v0.24.83: 聞き取りを Groq にしたときは (Groq)。どちらが聞いているかの印なので、ここも正直に
+  if (state.settings.inputMode !== 'gemini-audio') return '録音中';
+  return usesGroqTranscribe() ? '聞き取り中 (Groq)' : '聞き取り中 (Gemini)';
+}
+
+/** 音声を文字にするのを Groq に任せるか (v0.24.83)。キーが無ければ Gemini のまま */
+function usesGroqTranscribe() {
+  return state.settings.transcribeEngine === 'groq' && !!state.settings.groqApiKey;
 }
 
 /** 録音の状態に応じて右上を戻す。エラー表示などのあとに使う */
@@ -3817,7 +3839,8 @@ function shouldDropEmptyChunk(provisionalText, edges) {
 }
 
 async function startGeminiAudioRecording() {
-  if (!state.settings.apiKey) {
+  // v0.24.83: 聞き取りが Groq なら Gemini のキーは無くても録音できる（話者判別と、Groq で失敗したときの代わりには要る）
+  if (!state.settings.apiKey && !usesGroqTranscribe()) {
     alert('Gemini Audio モードは API キーが必要です');
     openSettings();
     return;
@@ -4294,14 +4317,21 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
     persistSessions();
   };
 
+  // v0.24.83: 文字にするのは Gemini か Groq か。画面の断り書きにも実際に答えたほうの名前を出す
+  let engine = usesGroqTranscribe() ? 'Groq' : 'Gemini';
   try {
-    const text = await transcribeAudioWithGemini({
-      apiKey: state.settings.apiKey,
-      sessionContext: getSessionContextForAi(),
-      audioBlob: blob,
-      contextHint: getContextForGemini(300),   // v0.24.55: 表記の参考だけなので短く
-      edges,
-    });
+    let text;
+    if (engine === 'Groq') {
+      ({ text, engine } = await transcribeChunkWithGroq(blob, targetEl, edges));
+    } else {
+      text = await transcribeAudioWithGemini({
+        apiKey: state.settings.apiKey,
+        sessionContext: getSessionContextForAi(),
+        audioBlob: blob,
+        contextHint: getContextForGemini(300),   // v0.24.55: 表記の参考だけなので短く
+        edges,
+      });
+    }
     if (text && text.trim() && isFillerOnly(text) && isFillerOnly(previousParagraphText(targetEl))) {
       // v0.24.34: 相づちだけのチャンクが続いたら、2つ目以降は出さない（判断根拠は isFillerOnly）
       diagLog.info(`相づちだけのチャンクが続いたので表示しない（${text.trim().slice(0, 20)}）`);
@@ -4353,7 +4383,7 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
        * 大きすぎる。**何秒ぶんが文字にならなかったか**が分かれば用は足りる。 */
       const sec = ((edges && edges.durationMs) || 0) / 1000;
       transcriptMorph(() => setParagraphContent(targetEl, provisionalText
-        ? provisionalText + '　[Gemini は聞き取れず・Web Speech の結果です]'
+        ? provisionalText + `　[${engine} は聞き取れず・Web Speech の結果です]`
         : `（この${sec ? sec.toFixed(1) + '秒' : '区間'}は言葉として聞き取れませんでした。音楽や物音の可能性があります）`));
       persist();
     }
@@ -4364,13 +4394,67 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
     // 聞き取れていたのに何も残らないという最悪の結果になる
     targetEl.className = 'paragraph needs-retry';
     transcriptMorph(() => setParagraphContent(targetEl, provisionalText
-      ? provisionalText + '　[Gemini 失敗・Web Speech の結果です: ' + (e.message || '').slice(0, 40) + ']'
+      ? provisionalText + `　[${engine} 失敗・Web Speech の結果です: ` + (e.message || '').slice(0, 40) + ']'
       : '[文字起こし失敗: ' + (e.message || '').slice(0, 60) + ']'));
     persist();
   } finally {
     state.audioInFlightCount--;
     updateActionButtons();
     if (!inBg) autoScroll();
+  }
+}
+
+/**
+ * 1 つのかたまりを Groq で文字にして、ライブ整形に通す (v0.24.83)
+ *
+ * Whisper は句読点も改行も付けない。そのまま段落にすると、見出し追加（既定 5 分ごと）まで
+ * 句読点の無い文が並ぶ。なので Web Speech モードと同じライブ整形（refineWithGemini・連携オンなら Claude）に通す。
+ *
+ * 整形はここで**待ってから**返す。段落を short-refined にしたあとで整形の結果を書き込むと、
+ * そのあいだに見出し追加がこの段落をまとめていた場合に、まとめた文を 1 かたまりぶんで上書きしてしまう。
+ * 待っているあいだは audioInFlightCount が減らないので、停止時のまとめも待ってくれる。
+ *
+ * Groq で失敗したら、Gemini のキーがあれば Gemini で文字にする（そのかたまりを失わないため）。
+ * 料金はかかるが、失敗はまれな前提。どちらで文字にしたかは診断ログと断り書きに出す。
+ * @returns {Promise<{text: string, engine: 'Groq'|'Gemini'}>}
+ */
+async function transcribeChunkWithGroq(blob, targetEl, edges) {
+  const sessionContext = getSessionContextForAi();
+  let raw;
+  try {
+    raw = await transcribeAudioWithGroq({
+      apiKey: state.settings.groqApiKey,
+      audioBlob: blob,
+      sessionContext,
+      contextHint: getContextForGemini(300),
+    });
+  } catch (e) {
+    if (!state.settings.apiKey) throw e;
+    diagLog.info(`Groq で文字にできなかったので Gemini で文字にします: ${(e.message || e).toString().slice(0, 120)}`);
+    const text = await transcribeAudioWithGemini({
+      apiKey: state.settings.apiKey,
+      sessionContext,
+      audioBlob: blob,
+      contextHint: getContextForGemini(300),
+      edges,
+    });
+    return { text, engine: 'Gemini' };
+  }
+  if (!raw || !raw.trim() || !liveRefineReady()) return { text: raw || '', engine: 'Groq' };
+  // 整形のあいだも、聞き取れた文字は見えているようにする（Web Speech の仮の文字より Groq のほうが確か）
+  transcriptMorph(() => setParagraphContent(targetEl, raw));
+  try {
+    const refined = await refineWithGemini({
+      apiKey: state.settings.apiKey,
+      sessionContext,
+      context: getContextForGemini(),
+      newChunk: raw,
+    });
+    return { text: (refined && refined.trim()) ? refined : raw, engine: 'Groq' };
+  } catch (e) {
+    // 整形できなくても文字は残す。見出し追加のときにもう一度まとめ直される
+    diagLog.info(`Groq の文字を整形できなかったので、そのまま残します: ${(e.message || e).toString().slice(0, 120)}`);
+    return { text: raw, engine: 'Groq' };
   }
 }
 
@@ -4406,6 +4490,11 @@ function revealSettingRow(el, show, animated, withMargin = false) {
   if (!el) return;
   if (window.Motion) Motion.reveal(el, show, { instant: !animated, withMargin });
   else el.hidden = !show;
+}
+
+/** Groq のキーの欄は、聞き取りを Groq にしたときだけ出す (v0.24.83) */
+function applyGroqFieldsVisibility(animated = true) {
+  revealSettingRow(document.getElementById('groq-fields'), !!(els.engineGroq && els.engineGroq.checked), animated);
 }
 
 function applyGeminiOnlyVisibility(animated = true) {
@@ -8080,6 +8169,10 @@ function openSettings() {
     els.modeWebSpeech.checked = true;
   }
   els.inputChunkSec.value = state.settings.audioChunkSec || 12;
+  if (els.engineGroq) {   // v0.24.83
+    (state.settings.transcribeEngine === 'groq' ? els.engineGroq : els.engineGemini).checked = true;
+    els.inputGroqKey.value = state.settings.groqApiKey || '';
+  }
   if (els.inputSilenceCut) els.inputSilenceCut.checked = state.settings.audioSilenceCut !== false;
   if (els.inputChunkMaxSec) els.inputChunkMaxSec.value = state.settings.audioChunkMaxSec || 20;
   if (els.inputAudioBitrate) els.inputAudioBitrate.value = String(state.settings.audioBitrate || 64000);
@@ -8121,6 +8214,7 @@ function openSettings() {
   populateAudioDevices();
   applyGeminiOnlyVisibility(/* animated */ false);
   applyWebSpeechOnlyVisibility(/* animated */ false);
+  applyGroqFieldsVisibility(/* animated */ false);
   els.fontTranscript.value = state.settings.transcriptFont;
   els.sizeTranscript.value = state.settings.transcriptSize;
   els.fontMemo.value = state.settings.memoFont;
@@ -8162,6 +8256,10 @@ function saveSettingsFromForm() {
     els.summaryDetailLow.checked ? 'low' :
     els.summaryDetailHigh.checked ? 'high' : 'medium';
   state.settings.inputMode = els.modeGemini.checked ? 'gemini-audio' : 'web-speech';
+  if (els.engineGroq) {   // v0.24.83
+    state.settings.transcribeEngine = els.engineGroq.checked ? 'groq' : 'gemini';
+    state.settings.groqApiKey = els.inputGroqKey.value.trim();
+  }
   state.settings.audioDeviceId = els.inputAudioDevice ? els.inputAudioDevice.value : '';
   state.settings.audioChunkSec = Math.max(5, Math.min(60, Number(els.inputChunkSec.value) || 12));
   if (els.inputSilenceCut) state.settings.audioSilenceCut = els.inputSilenceCut.checked;
@@ -10095,6 +10193,11 @@ if (els.modeGemini) {
     applyGeminiOnlyVisibility(true);
     applyWebSpeechOnlyVisibility(true);
   });
+}
+
+// v0.24.83: 聞き取りを Gemini / Groq で切り替えたら、Groq のキーの欄を出し入れする
+for (const r of [els.engineGemini, els.engineGroq]) {
+  if (r) r.addEventListener('change', () => applyGroqFieldsVisibility(true));
 }
 
 // v0.13.24: btnWebSpeechDefaults クリックハンドラ削除（UI 撤去・WEB_SPEECH_DEFAULTS 撤去に伴う）。

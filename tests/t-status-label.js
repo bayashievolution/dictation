@@ -20,7 +20,9 @@ const ctx = { console, state: { settings: {}, isRecording: false },
 vm.createContext(ctx);
 // v0.24.56: restoreStatus は走っている処理（statusTasks）を先に見る。旧版には無いので、無ければ飛ばす
 const hasTasks = app.includes('function beginStatusTask(');
-vm.runInContext([grab(app, 'recordingLabel'), grab(app, 'restoreStatus'),
+// v0.24.83: 聞き取りを Groq にしたときの印。旧版には無いので、無ければ飛ばす
+const hasGroq = app.includes('function usesGroqTranscribe(');
+vm.runInContext([grab(app, 'recordingLabel'), grab(app, 'restoreStatus'), ...(hasGroq ? [grab(app, 'usesGroqTranscribe')] : []),
   ...(hasTasks ? ['var statusTasks = []; var statusNoticeTimer = null;', grab(app, 'beginStatusTask'), grab(app, 'endStatusTask')] : []),
 ].join('\n'), ctx);
 
@@ -38,6 +40,21 @@ ctx.state.settings.inputMode = 'web-speech';
 eq('Web Speech モードは「録音中」', ctx.recordingLabel(), '録音中');
 ctx.state.settings.inputMode = undefined;
 eq('設定が無ければ「録音中」', ctx.recordingLabel(), '録音中');
+
+console.log('\n■ 聞き取りを Groq にしたとき（v0.24.83）');
+if (!hasGroq) { console.log('✕ usesGroqTranscribe が無い'); fail++; }
+else {
+  ctx.state.settings.inputMode = 'gemini-audio';
+  ctx.state.settings.transcribeEngine = 'groq';
+  ctx.state.settings.groqApiKey = 'gsk_x';
+  eq('Groq が聞いているなら「聞き取り中 (Groq)」', ctx.recordingLabel(), '聞き取り中 (Groq)');
+  ctx.state.settings.groqApiKey = '';
+  eq('キーが無ければ Gemini が聞くので (Gemini)', ctx.recordingLabel(), '聞き取り中 (Gemini)');
+  ctx.state.settings.groqApiKey = 'gsk_x';
+  ctx.state.settings.inputMode = 'web-speech';
+  eq('Web Speech モードなら Groq を選んでいても「録音中」', ctx.recordingLabel(), '録音中');
+  delete ctx.state.settings.transcribeEngine; delete ctx.state.settings.groqApiKey;
+}
 
 console.log('\n■ 状態を戻すとき（エラー表示のあとなど）');
 ctx.state.settings.inputMode = 'gemini-audio';
