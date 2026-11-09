@@ -7479,13 +7479,22 @@ function toggleDict(id) {
   diagLog.info(`辞書を${i >= 0 ? '外した' : '適用した'}: ${d ? d.name : id}`);
 }
 
+// v0.24.63: 左下の辞書の札から、小さいところから少し行き過ぎてぽんと出る。しまうときは下へ戻って消える
+// （TODO「動きを SUMADO の仕様書に合わせる」の 4。前は出るのも消えるのも一瞬だった）
 function openDictMenu() {
   if (!els.dictMenu) return;
   renderDictMenu();
-  els.dictMenu.hidden = false;
+  if (window.Motion) Motion.popIn(els.dictMenu, { y: 12 });
+  else els.dictMenu.hidden = false;
 }
 function closeDictMenu() {
-  if (els.dictMenu) els.dictMenu.hidden = true;
+  if (!els.dictMenu) return;
+  if (window.Motion) Motion.popOut(els.dictMenu, { y: 12 });
+  else els.dictMenu.hidden = true;
+}
+/** 辞書メニューが出ているか（しまう途中は出ていない扱い。押し直したら出し直す） */
+function dictMenuOpen() {
+  return !!els.dictMenu && (window.Motion ? Motion.popIsOpen(els.dictMenu) : !els.dictMenu.hidden);
 }
 
 /**
@@ -9488,7 +9497,7 @@ if (els.btnContext) {
   if (els.dictToggle) {
     els.dictToggle.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (els.dictMenu && els.dictMenu.hidden) openDictMenu(); else closeDictMenu();
+      if (!dictMenuOpen()) openDictMenu(); else closeDictMenu();
     });
   }
   if (els.dictMenuClose) els.dictMenuClose.addEventListener('click', closeDictMenu);
@@ -9499,7 +9508,7 @@ if (els.btnContext) {
   if (els.dictMenu) els.dictMenu.addEventListener('click', e => e.stopPropagation());
   document.addEventListener('click', () => closeDictMenu());
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && els.dictMenu && !els.dictMenu.hidden) closeDictMenu();
+    if (e.key === 'Escape' && dictMenuOpen()) closeDictMenu();
   });
   const btnSaveAutoDict = document.getElementById('btn-save-auto-dict');
   if (btnSaveAutoDict) btnSaveAutoDict.addEventListener('click', saveAutoAsDict);

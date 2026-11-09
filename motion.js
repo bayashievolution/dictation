@@ -348,5 +348,44 @@
     }
   }
 
-  global.Motion = { SPRINGS, MOTION, animate, set, current, clear, onFrame, reveal, smoothHeight, flipList, Spring1D };
+  /* ───────── ポップアップの出入り（ディクテーション用に足した。値は SUMADO の MOTION.pop の考え方そのまま）─────────
+   * 仕様書 2.2「ポップアップ（メニュー）は押したところの小さい大きさから、少し行き過ぎて、ぽんと出る。
+   * 大きさだけ行き過ぎ、濃さはすぐ。しまうときは行き過ぎない」「下から出たものは、下へ戻って消える」。
+   * 押したところから広がるよう、要素の CSS で transform-origin を押したもの側にしておく。
+   * hidden で出し入れする要素に使う（しまい終わったら hidden を付ける。途中で popIn し直したら付けない）。
+   */
+  const popStates = new WeakMap();
+  function popIn(el, o) {
+    o = o || {};
+    const from = o.from != null ? o.from : MOTION.popFrom;
+    const st = popStates.get(el) || {};
+    st.open = true;
+    popStates.set(el, st);
+    const wasHidden = el.hidden || st.closing;
+    el.hidden = false;
+    if (wasHidden && !states.has(el)) set(el, { scale: from, opacity: 0, y: o.y || 0 });
+    st.closing = false;
+    animate(el, { scale: 1, y: 0 }, { spring: MOTION.pop });
+    return animate(el, { opacity: 1 }, { spring: MOTION.popFade }).then((d) => { if (d && popStates.get(el).open) clear(el); return d; });
+  }
+  function popOut(el, o) {
+    o = o || {};
+    const st = popStates.get(el) || {};
+    if (el.hidden && !st.closing) return Promise.resolve(true);
+    st.open = false;
+    st.closing = true;
+    popStates.set(el, st);
+    animate(el, { scale: o.to != null ? o.to : 0.9, y: o.y || 0 }, { spring: SPRINGS.press });
+    return animate(el, { opacity: 0 }, { spring: SPRINGS.fade }).then((d) => {
+      if (!d || popStates.get(el).open) return false;   // しまう途中で出し直された
+      st.closing = false;
+      el.hidden = true;
+      clear(el);
+      return true;
+    });
+  }
+  /** いま出ているか（しまう途中は「出ていない」） */
+  function popIsOpen(el) { const st = popStates.get(el); return st ? !!st.open : !el.hidden; }
+
+  global.Motion = { SPRINGS, MOTION, animate, set, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, Spring1D };
 })(typeof window !== 'undefined' ? window : globalThis);

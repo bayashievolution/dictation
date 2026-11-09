@@ -3151,6 +3151,8 @@ body.chat-active #dict-bar {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: 0 8px 32px rgba(0,0,0,0.55);
+  /* v0.24.63: 左下の札から広がる・札へ戻る（motion.js の popIn / popOut） */
+  transform-origin: 16px calc(100% + 20px);
 }
 body.chat-active .dict-menu { bottom: 114px; }
 
