@@ -2501,7 +2501,7 @@ mark.search-hit.current {
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(4px);
-  animation: fadeIn 0.2s var(--ease-out);
+  /* v0.24.62: 出入りは motion.js のばね（installModalMotion）。keyframes は ease で、閉じるときは何もしていなかった */
 }
 
 .modal-card {
@@ -2515,7 +2515,8 @@ mark.search-hit.current {
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-  animation: modalPop 0.3s var(--ease-out);
+  /* v0.24.62: 出入りは motion.js のばね（少し大きいところから縮んで、少し行き過ぎて収まる）。
+     keyframes が残っていると、ばねが書く transform を最初の 0.3 秒上書きしてしまう */
 }
 
 .modal-small {

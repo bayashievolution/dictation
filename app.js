@@ -10568,6 +10568,81 @@ if (els.btnDiarize) {
   updateDiarizeButton();
 }
 
+/* ───────── モーダルの出入り（v0.24.62・TODO「動きを SUMADO の仕様書に合わせる」の 3）─────────
+ * 設定・文脈・Notion の保存先・字幕の設定・無音の確認。開くときは CSS の keyframes（ease）、閉じると一瞬で消えていた。
+ * 仕様書 2.2「アラートは少し大きいところから縮んで、少し行き過ぎて収まる。しまうときは行き過ぎない」（MOTION.pop / alertFrom）。
+ *
+ * 出し入れは今までどおり各所で .hidden を付け外しする。ここは class の変化を見張って動きだけを付ける
+ * （呼び出し側を全部書き換えると、閉じ忘れや二重の閉じが起きやすい）。
+ * 閉じるときは、本物はその場で隠し、見た目の写しを置いて縮めながら消す。本物を残して待つと、その間は
+ * classList.contains('hidden') が false のままで、「開いていたら閉じる」の判定（Esc など）がずれる。
+ */
+function installModalMotion() {
+  if (!window.Motion) return;
+  const M = Motion.MOTION, S = Motion.SPRINGS;
+  const ghostOf = (modal) => {
+    const g = modal.cloneNode(true);
+    g.removeAttribute('id');
+    g.setAttribute('aria-hidden', 'true');
+    g.classList.remove('hidden');
+    g.style.pointerEvents = 'none';
+    g.querySelectorAll('[id]').forEach((n) => n.removeAttribute('id'));
+    // 写しには、いま入っている値を写す（cloneNode は打ち込んだ値・チェックを写さない）
+    const src = modal.querySelectorAll('input, textarea, select');
+    g.querySelectorAll('input, textarea, select').forEach((n, i) => {
+      const o = src[i];
+      if (!o) return;
+      if (n.type === 'checkbox' || n.type === 'radio') n.checked = o.checked; else n.value = o.value;
+    });
+    // iframe は写すと読み込み直して白く光るので、同じ大きさの空の箱にする（字幕の設定）
+    g.querySelectorAll('iframe').forEach((f) => { const d = document.createElement('div'); d.style.cssText = 'flex:1;background:var(--bg)'; f.replaceWith(d); });
+    return g;
+  };
+  for (const modal of document.querySelectorAll('.modal')) {
+    let shown = !modal.classList.contains('hidden');
+    new MutationObserver(() => {
+      const now = !modal.classList.contains('hidden');
+      if (now === shown) return;
+      shown = now;
+      const card = modal.querySelector('.modal-card');
+      const back = modal.querySelector('.modal-backdrop');
+      if (now) {
+        if (card) {
+          Motion.set(card, { scale: M.alertFrom, opacity: 0 });
+          // 2 回目の animate は 1 回目の約束を「割り込まれた」で終わらせる。片付けは、全部のばねが止まったときに
+          // 返る 2 回目の約束にかける（1 回目にかけると片付かず、style に値が残った。テストで見つけた）
+          Motion.animate(card, { scale: 1 }, { spring: M.pop });
+          Motion.animate(card, { opacity: 1 }, { spring: M.popFade }).then((d) => { if (d) Motion.clear(card); });
+        }
+        if (back) {
+          Motion.set(back, { opacity: 0 });
+          Motion.animate(back, { opacity: 1 }, { spring: S.fade }).then((d) => { if (d) Motion.clear(back); });
+        }
+        return;
+      }
+      const g = ghostOf(modal);
+      document.body.appendChild(g);
+      const gc = g.querySelector('.modal-card');
+      const gb = g.querySelector('.modal-backdrop');
+      // 開いている途中で閉じたら、その途中の大きさ・濃さから
+      if (card && gc) {
+        const c = Motion.current(card);
+        Motion.clear(card);
+        Motion.set(gc, { scale: c.scale, opacity: c.opacity });
+      }
+      if (back) Motion.clear(back);
+      const done = [];
+      if (gc) {
+        Motion.animate(gc, { scale: 0.96 }, { spring: S.press });
+        done.push(Motion.animate(gc, { opacity: 0 }, { spring: S.fade }));
+      }
+      if (gb) done.push(Motion.animate(gb, { opacity: 0 }, { spring: S.fade }));
+      Promise.all(done).then(() => g.remove());
+    }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+  }
+}
+installModalMotion();
+
 // v0.24.60: 下書き（#interim）の高さを、出る・消える・行が増えるたびにばねで（空は高さ 0）
 if (window.Motion && els.interim) Motion.smoothHeight(els.interim, els.interim);
 // v0.24.60: 人が自分でスクロールしはじめたら、ばねの自動スクロールをその場で止める

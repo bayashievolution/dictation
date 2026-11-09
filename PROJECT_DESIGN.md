@@ -3365,3 +3365,10 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 下の色の線（`.tab-active-indicator`）は CSS の transition（cubic-bezier）だったのを、位置も幅もばね（SUMADO の切り替え `segmented` と同じ SPRINGS.sheet）に。transition に残したのは色と出る・消えるだけ
   - ドラッグで並べ替えたときの動き（`enablePointerDragSort`）は TODO の 11 で扱う
   - テスト: `tests/browser/t-motion-tabs-browser.js`（新しいタブは途中の濃さを通る・閉じたタブの写しがふわっと消える・右のタブは前の場所から寄る・線は transition を使わず途中を通って選んだタブへ・止まったら style に値を残さない）。旧版では5件落ちる
+- 2026-11-09 (v0.24.62): **モーダルの出入り**（TODO「動きを SUMADO の仕様書に合わせる」の 3。設定・文脈・Notion の保存先・字幕の設定・無音の確認）
+  - 開くとき: 枠は少し大きいところ（MOTION.alertFrom 1.15）から縮んで、少し行き過ぎて収まる（MOTION.pop）。濃さはすぐ（popFade）。後ろの暗い幕はふわっと。前は CSS の keyframes（ease）だった
+  - 閉じるとき: 本物はその場で隠し、見た目の写しを置いて、少し縮めながら（SPRINGS.press）ふわっと消す。前は一瞬で消えていた
+  - 出し入れは各所の `.hidden` の付け外しのまま。`installModalMotion` が class の変化を見張って動きだけを付ける（呼び出し側を全部書き換えると、閉じ忘れや二重の閉じが起きやすい）。本物を残して閉じ終わるのを待たないのは、その間 `classList.contains('hidden')` が false のままで、「開いていたら閉じる」（Esc など）の判定がずれるから
+  - 写しには、いま打ち込んでいる値・チェックを写す（cloneNode は写さない）。id は外す（getElementById が写しを拾わないように）。字幕の設定の iframe は、写すと読み込み直して白く光るので空の箱にする
+  - 作っている途中で1つ踏んだ: 同じ要素に animate を2回呼ぶと1回目の約束は「割り込まれた」で終わる。片付けを1回目にかけていて style に値が残った（テストで見つけた）。全部のばねが止まったときに返る2回目にかけた
+  - テスト: `tests/browser/t-motion-modal-browser.js`（5つのモーダルそれぞれ: 1 より大きいところから・行き過ぎて 1 に収まる・keyframes を使っていない・style に値を残さない・閉じたら本物はすぐ隠れる・写しが薄くなって消える。写しに打ち込み中の値・id なし・Esc）。旧版では19件落ちる
