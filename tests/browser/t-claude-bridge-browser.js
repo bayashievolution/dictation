@@ -135,11 +135,13 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
       ['理由が空', ''],
     ];
     for (const [label, err] of REASONS) {
-      const r = await page.evaluate((e) => {
+      const r = await page.evaluate(async (e) => {
         const msg = claudeBridgeFallbackMessage(e);
         setStatus('error', msg);
-        const el = els.status;
-        return { msg, 切れ: el.scrollWidth > el.clientWidth + 1, 幅: Math.round(el.scrollWidth) };
+        // v0.24.69: 札はアイランドとして伸びていくので、伸びきってから測る。字（と「…」）は中の .status-text にある
+        await new Promise(r => setTimeout(r, 900));
+        const el = els.status.querySelector('.status-text') || els.status;
+        return { msg, 切れ: el.scrollWidth > el.clientWidth + 1 || els.status.getBoundingClientRect().width + 1 < el.getBoundingClientRect().width, 幅: Math.round(el.scrollWidth) };
       }, err);
       eq(`${label}（${r.幅}px）: ${r.msg}`, r.切れ, false);
     }
@@ -153,10 +155,11 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
   {
     const { ctx, page } = await open(browser);
     const LONG = 'Error: Invalid API key \u00b7 Please run /login\n    at Object.<anonymous> (/usr/lib/cli.js:1:2345)';
-    const r = await page.evaluate((e) => {
+    const r = await page.evaluate(async (e) => {
       const msg = claudeBridgeFallbackMessage(e);
-      const el = els.status;
       setStatus('error', msg);
+      await new Promise(r => setTimeout(r, 900));   // v0.24.69: 伸びきってから
+      const el = els.status.querySelector('.status-text') || els.status;
       return { msg, 切れ: el.scrollWidth > el.clientWidth + 1 };
     }, LONG);
     eq('生の理由を文言に入れない', r.msg.includes('Invalid API key'), false);

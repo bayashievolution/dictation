@@ -353,6 +353,65 @@
     }
   }
 
+  /* ───────── にゅっと出る・しまう「形」（SUMADO の kit/motion.js の createMorph をそのまま写した）─────────
+   * 幅と高さを別々のばねで動かす（横が先、縦が遅れる）。角は高さの半分まで（細いうちはカプセル）、上限 radiusMax。
+   * 全体を拡大・縮小しないので、中の字がゆがまない。
+   */
+  function createMorph(box, o) {
+    o = o || {};
+    const radiusMax = o.radiusMax != null ? o.radiusMax : MOTION.morph.radiusMax;
+    const min = o.min != null ? o.min : 4;
+    const centerY = !!o.centerY;
+    const driver = document.createElement('span');
+    let anchorH = 0;
+    onFrame(driver, ({ x, y }) => {
+      const w = Math.max(min, x);
+      const h = Math.max(min, y);
+      box.style.width = `${w}px`;
+      box.style.height = `${h}px`;
+      box.style.borderRadius = `${Math.min(h / 2, radiusMax)}px`;
+      if (centerY) box.style.translate = anchorH ? `0 ${(anchorH - h) / 2}px` : '';
+    });
+    const size = () => ({ w: parseFloat(box.style.width) || 0, h: parseFloat(box.style.height) || 0 });
+    let step = 0;
+    const cancel = () => clearTimeout(step);
+    return {
+      size,
+      jump(w, h) {
+        cancel();
+        set(driver, { x: w, y: h });
+        if (anchorH && centerY) box.style.translate = `0 ${(anchorH - h) / 2}px`;
+      },
+      to(w, h) {
+        cancel();
+        anchorH = 0;
+        const cur = size();
+        const m = MOTION.morph;
+        animate(driver, { x: w }, { spring: w >= cur.w ? m.wide : m.shrinkW });
+        return animate(driver, { y: h }, { spring: h >= cur.h ? m.tall : m.shrinkH });
+      },
+      rise(w, h) {
+        cancel();
+        const m = MOTION.morph;
+        anchorH = h;
+        set(driver, { x: m.dot, y: m.dot });
+        step = setTimeout(() => {
+          animate(driver, { y: h }, { spring: m.riseTall });
+          step = setTimeout(() => animate(driver, { x: w }, { spring: m.wide }), m.riseGap);
+        }, m.riseHold);
+      },
+      vanish() {
+        cancel();
+        const m = MOTION.morph;
+        anchorH = size().h;
+        animate(driver, { x: m.dot }, { spring: m.sinkWide });
+        return new Promise((resolve) => {
+          step = setTimeout(() => animate(driver, { y: m.dot }, { spring: m.vanish }).then(resolve), m.sinkGap);
+        });
+      },
+    };
+  }
+
   /* ───────── ポップアップの出入り（ディクテーション用に足した。値は SUMADO の MOTION.pop の考え方そのまま）─────────
    * 仕様書 2.2「ポップアップ（メニュー）は押したところの小さい大きさから、少し行き過ぎて、ぽんと出る。
    * 大きさだけ行き過ぎ、濃さはすぐ。しまうときは行き過ぎない」「下から出たものは、下へ戻って消える」。
@@ -395,5 +454,5 @@
   /** いま出ているか（しまう途中は「出ていない」） */
   function popIsOpen(el, o) { const st = popStates.get(el); return st ? !!st.open : !isHidden(el, o); }
 
-  global.Motion = { SPRINGS, MOTION, animate, set, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, Spring1D };
+  global.Motion = { SPRINGS, MOTION, animate, set, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, createMorph, Spring1D };
 })(typeof window !== 'undefined' ? window : globalThis);

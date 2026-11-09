@@ -192,13 +192,38 @@ html, body {
   font-feature-settings: "palt";
   border-radius: 999px;
   font-weight: 500;
-  transition: all 0.25s var(--ease-out);
+  /* v0.24.69: 大きさ・形は motion.js のばね（SUMADO のダイナミックアイランドの型）。transition: all だと、
+     ばねが毎フレーム書く幅・高さ・角を CSS がさらに遅らせて二重になる。色の変わり目だけ CSS */
+  transition: background-color 0.25s, color 0.25s;
   margin-right: 4px;
   max-width: 360px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* v0.24.69: アイランドとして動かすとき。字は中の .status-text に入れ、札の幅が変わっても真ん中に置く。
+   余白は札ではなく中の字に持たせる（札に余白があると、点まで細くなれない） */
+.status.island-pending { opacity: 0; }
+.status.island {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-sizing: border-box;
+  vertical-align: middle;
+  padding: 0;
+}
+.status.island.has-detail { padding: 0; }
+.status.island .status-text {
+  min-width: 0;
+  flex-shrink: 0;
+  padding: 3px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status.island.has-detail .status-text { padding-right: 24px; }
+.status-text-ghost { z-index: 2; }
 
 .status.idle {
   background: var(--bg-subtle);

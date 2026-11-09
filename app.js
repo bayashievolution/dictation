@@ -671,9 +671,116 @@ function restoreStatus() {
             state.isRecording ? recordingLabel() : '停止');
 }
 
+/* ───────── 状態の札を、SUMADO のダイナミックアイランドのように動かす（v0.24.69）─────────
+ *
+ * TODO「動きを SUMADO の仕様書に合わせる」の 13。やっさん「状態の札（待機中・録音中）を、SUMADO のダイナミックアイランドの
+ * ように動かす」。v0.24.7 で札の動きを外したのは「ダイナミックアイランドがうまく表現できなかったから」。
+ * 手本は SUMADO の「にゅっと出る・しまう」型（仕様書 2.3。js/island.js の render と kit/motion.js の createMorph）:
+ *   - 立ち上がったとき: 点 → 縦に伸びる → 横に広がる。中身（字）は形ができてからふわっと
+ *   - 字が変わるとき（待機中 → 録音中 → 要約生成中…）: いまの字が先にさっと消え、形は横が先・縦が遅れて新しい大きさへ、
+ *     新しい字は形がある程度できてからふわっと
+ * 見た目（色・字・札の形）はディクテーションのまま。角の丸さはもとの札と同じ（カプセル）。
+ *
+ * ■ 字はすぐ入れ替える
+ * els.status.textContent は「いま出しているお知らせと同じか」の判定や、テストが読んでいる。字を遅らせて入れると、
+ * その間は古い字を読んでしまう。なので本物の字はすぐ新しくし（濃さ 0 から出す）、消えていく古い字は札の外に写しを置いて薄くする。
+ */
+let statusIsland = null;
+
+function installStatusIsland() {
+  if (!els.status) return;
+  els.status.classList.remove('island-pending');   // 動かせないときも、隠したままにしない
+  if (!window.Motion || !Motion.createMorph || statusIsland) return;
+  const box = els.status;
+  const M = Motion.MOTION.morph;
+  const text = document.createElement('span');
+  text.className = 'status-text';
+  text.textContent = box.textContent;
+  box.textContent = '';
+  box.appendChild(text);
+  box.classList.add('island');
+  const morph = Motion.createMorph(box, { radiusMax: 999 });
+  const timers = [];
+  const later = (ms, fn) => timers.push(setTimeout(fn, ms));
+  const clearTimers = () => { while (timers.length) clearTimeout(timers.pop()); };
+  /** いまの字・クラスのときの本来の大きさ */
+  const natural = () => {
+    const keepW = box.style.width, keepH = box.style.height;
+    box.style.width = ''; box.style.height = '';
+    const r = box.getBoundingClientRect();
+    box.style.width = keepW; box.style.height = keepH;
+    return { w: r.width, h: r.height };
+  };
+  let shownText = text.textContent;
+  let pending = false;
+  let changed = false;
+  let oldText = '';
+  // 字・クラスの変化は同じ処理の中で続けて起きる（setStatus のあとに has-detail を付ける等）。まとめて 1 回動かす
+  const schedule = () => {
+    if (pending) return;
+    pending = true;
+    queueMicrotask(() => {
+      pending = false;
+      const { w, h } = natural();
+      if (!changed) { morph.to(w, h); return; }
+      changed = false;
+      clearTimers();
+      // 1. いまの字は、札の外に置いた写しで先にさっと消す
+      if (oldText) {
+        const r = text.getBoundingClientRect();
+        const host = box.parentElement;
+        const hr = host.getBoundingClientRect();
+        const g = document.createElement('span');
+        g.className = 'status-text-ghost';
+        g.setAttribute('aria-hidden', 'true');
+        g.textContent = oldText;
+        const cs = getComputedStyle(box);
+        Object.assign(g.style, { position: 'absolute', left: `${r.left - hr.left}px`, top: `${r.top - hr.top}px`,
+          font: cs.font, fontFeatureSettings: cs.fontFeatureSettings, color: cs.color, whiteSpace: 'nowrap', pointerEvents: 'none' });
+        host.appendChild(g);
+        Motion.animate(g, { opacity: 0 }, { spring: M.contentOut }).then(() => g.remove());
+      }
+      // 2. 形は、字をしまってから新しい大きさへ（伸びるなら横が先・縦が遅れて、縮むなら一瞬行き過ぎて）
+      later(M.shapeAfterOut, () => morph.to(w, h));
+      // 3. 新しい字は、形がある程度できてからふわっと
+      Motion.set(text, { opacity: 0 });
+      later(M.shapeAfterOut + M.contentInDelay, () => {
+        Motion.animate(text, { opacity: 1 }, { spring: M.contentIn }).then((d) => { if (d) Motion.clear(text); });
+      });
+    });
+  };
+  statusIsland = {
+    setText(label) {
+      const t = String(label == null ? '' : label);
+      if (t !== shownText) {
+        if (!changed) oldText = shownText;
+        changed = true;
+        shownText = t;
+        text.textContent = t;
+      }
+      schedule();
+    },
+    relayout: schedule,
+  };
+  // クラスの付け外し（has-detail で右に › が付く等）で大きさが変わることもあるので見張る
+  new MutationObserver(schedule).observe(box, { attributes: true, attributeFilter: ['class'] });
+  window.addEventListener('resize', schedule);
+  // 立ち上がったとき: 点 → 縦に伸びる → 横に広がる。字は形ができてから
+  const { w, h } = natural();
+  morph.jump(M.dot, M.dot);
+  Motion.set(box, { opacity: 0 });
+  Motion.animate(box, { opacity: 1 }, { spring: M.appear }).then((d) => { if (d) { box.style.opacity = ''; } });
+  morph.rise(w, h);
+  Motion.set(text, { opacity: 0 });
+  later(M.riseHold + M.riseGap + M.contentInDelay, () => {
+    Motion.animate(text, { opacity: 1 }, { spring: M.contentIn }).then((d) => { if (d) Motion.clear(text); });
+  });
+}
+
 function setStatus(mode, label, detail) {
-  els.status.className = `status ${mode}`;
-  els.status.textContent = label;
+  els.status.className = `status ${mode}` + (statusIsland ? ' island' : '');
+  if (statusIsland) statusIsland.setText(label);
+  else els.status.textContent = label;
   // detail: 画面には入りきらない全文 (v0.24.7)。
   // 状態表示は max-width: 360px で末尾から切れるので、
   // 長い理由（claude の stderr など）はホバーで読めるようにする。
@@ -10745,6 +10852,8 @@ function installModalMotion() {
 }
 installModalMotion();
 
+// v0.24.69: 右上の状態の札を、SUMADO のダイナミックアイランドのように（点 → 縦 → 横で出る・字が変わると形が伸び縮み）
+installStatusIsland();
 // v0.24.64: Notion 保存の小窓は、文言・結果の行・下のボタンの出入りで高さが変わる。跳ばずに伸び縮みさせる
 if (window.Motion && els.notionProgress) Motion.smoothHeight(els.notionProgress, els.notionProgress);
 // v0.24.60: 下書き（#interim）の高さを、出る・消える・行が増えるたびにばねで（空は高さ 0）
