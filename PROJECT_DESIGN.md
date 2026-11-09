@@ -3489,3 +3489,10 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 比較ページで入れた Groq のキーは引き継ぐ（切り替えはしない）
   - テスト: `tests/t-groq.js`（落とす・残すの判断・prompt の長さ・読み込み）、`tests/t-status-label.js` に (Groq)、
     `tests/browser/t-groq-browser.js`（Gemini に音声を送らない・整形は文字だけ・失敗したとき・設定画面で選んで保存・キーの引き継ぎ）
+- 2026-11-09 (v0.24.84): **「Gemini Audio」を「AI で聞き取る」にした**（やっさん「AI で聞き取る を選んでどれを使うかを選ぶ、がいいよね」）
+  - v0.24.83 は「Gemini Audio」を選んで「聞き取り: Groq」という、名前と中身が食い違う画面だった。
+    「AI で聞き取る」を選ぶと、すぐ下に「聞き取る AI: Gemini / Groq Whisper」（デバイスの選択より上）
+  - 保存の値 `inputMode: 'gemini-audio'` / `transcribeEngine` は据え置き（前の設定をそのまま読む）
+  - Groq のときに嘘になる「Gemini に送信」を外した（チャンク長・無音の切れ目・リアルタイム表示の説明）。
+    録音の保持の注意書きは「Google（Groq Whisper を選んだときは Groq）へ送信」に。キーが無いときの警告も同じ考えで直した
+  - 説明の「小さい声に強い」は外した。Gemini だけの話で、Groq との違いはまだ比べ切れていない

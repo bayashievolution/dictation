@@ -3841,7 +3841,7 @@ function shouldDropEmptyChunk(provisionalText, edges) {
 async function startGeminiAudioRecording() {
   // v0.24.83: 聞き取りが Groq なら Gemini のキーは無くても録音できる（話者判別と、Groq で失敗したときの代わりには要る）
   if (!state.settings.apiKey && !usesGroqTranscribe()) {
-    alert('Gemini Audio モードは API キーが必要です');
+    alert('「AI で聞き取る」は Gemini の API キーが必要です（聞き取る AI を Groq Whisper にしたときは Groq の API キー）');
     openSettings();
     return;
   }
@@ -9970,7 +9970,7 @@ const ONBOARDING_STEPS = [
   {
     target: '#btn-settings',
     title: '設定',
-    text: 'Gemini API キー、フォント・サイズ、要約の詳細度、音声入力モード（Web Speech / Gemini Audio）などをここで調整します。',
+    text: 'Gemini API キー、フォント・サイズ、要約の詳細度、音声入力モード（Web Speech / AI で聞き取る）などをここで調整します。',
   },
   {
     target: '#btn-captions',

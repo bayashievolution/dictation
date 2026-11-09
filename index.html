@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.83" />
+  <link rel="stylesheet" href="style.css?v=0.24.84" />
 </head>
 <body>
   <div id="app">
@@ -352,7 +352,9 @@
             </label>
             <label class="field-row" style="margin-bottom:0">
               <input type="radio" name="input-mode" id="mode-gemini" value="gemini-audio" />
-              <span><strong>Gemini Audio</strong><small class="field-hint" style="display:block">小さい声に強い・10〜15秒遅延・任意のデバイス選択可</small></span>
+              <!-- v0.24.84: 「Gemini Audio」→「AI で聞き取る」。Groq も選べるようになり、Gemini の名前では嘘になった（やっさんの指定）。
+                   値 gemini-audio は保存済みの設定を読めなくしないため据え置き -->
+              <span><strong>AI で聞き取る</strong><small class="field-hint" style="display:block">10〜15秒遅延・任意のデバイス選択可</small></span>
             </label>
           </div>
           <div class="field-conditional" id="webspeech-only-fields" hidden>
@@ -376,13 +378,9 @@
           </div>
           <div class="field-conditional" id="gemini-only-fields" hidden>
             <div class="field-conditional-inner">
-              <label class="field">
-                <span class="field-label">音声入力デバイス</span>
-                <select id="input-audio-device"></select>
-              </label>
               <!-- v0.24.83: 音声を文字にするところだけ Groq の Whisper（無料枠）に替えられる。録音・話者判別はそのまま -->
               <div class="field">
-                <span class="field-label">聞き取り</span>
+                <span class="field-label">聞き取る AI</span>
                 <label class="field-row" style="margin-bottom:4px">
                   <input type="radio" name="transcribe-engine" id="engine-gemini" value="gemini" />
                   <span>Gemini</span>
@@ -399,12 +397,16 @@
                   <a href="https://console.groq.com/keys" target="_blank" rel="noopener">GroqCloud</a> で取得
                 </span>
               </label>
+              <label class="field">
+                <span class="field-label">音声入力デバイス</span>
+                <select id="input-audio-device"></select>
+              </label>
               <label class="field field-row">
                 <input id="input-gemini-live-display" type="checkbox" />
                 <span>リアルタイム表示を使う（Web Speech を並走）</span>
               </label>
               <div class="field">
-                <small class="field-hint">Gemini の結果が返るまでの間、Web Speech が聞き取った文字を「未確定」として表示します。</small>
+                <small class="field-hint">AI の結果が返るまでの間、Web Speech が聞き取った文字を「未確定」として表示します。</small>
               </div>
               <!-- v0.24.47: Gemini に送る音声まわりを「音声チャンク」にまとめた（やっさんの指定） -->
               <span class="field-label" style="font-weight:600">音声チャンク</span>
@@ -417,14 +419,14 @@
                     <button type="button" class="number-stepper-btn" data-stepper-target="input-chunk-sec" data-stepper-delta="-1" tabindex="-1"><span data-icon="chevron-down"></span></button>
                   </div>
                 </div>
-                <small class="field-hint">Geminiに送信する音声の長さです。長いほど精度が上がりますが、結果が返ってくるまで文字起こしは表示されません。</small>
+                <small class="field-hint">送信する音声の長さです。長いほど精度が上がりますが、結果が返ってくるまで文字起こしは表示されません。</small>
               </label>
               <label class="field field-row">
                 <input id="input-silence-cut" type="checkbox" />
                 <span>無音の切れ目で送信</span>
               </label>
               <div class="field">
-                <small class="field-hint">話が途切れたところを狙って区切り、音声をGeminiに送信します。オフにすると、設定したチャンク長で送信します。</small>
+                <small class="field-hint">話が途切れたところを狙って区切り、音声を送信します。オフにすると、設定したチャンク長で送信します。</small>
               </div>
               <label class="field">
                 <span class="field-label">最長待ち時間（秒）</span>
@@ -667,11 +669,11 @@
           <div class="field">
             <small class="field-hint warn-hint">
               <strong>この設定が決めるのは「端末に残すかどうか」だけです。</strong>
-              Gemini モードは、この設定に関係なく文字起こしのために音声を Google へ送信しています。
+              「AI で聞き取る」は、この設定に関係なく文字起こしのために音声を Google（Groq Whisper を選んだときは Groq）へ送信しています。
               話者判別を実行すると録音全体がアップロードされます。
               使い終わったファイルはこちらから削除しますが、削除できなかった場合も Google 側で48時間後に自動削除されます。
               録音の保存自体が許されない場面では、この設定をオフにしたうえで、
-              Gemini モードを使うことの可否も確認してください。
+              「AI で聞き取る」を使うことの可否も確認してください。
             </small>
           </div>
           <label class="field">
@@ -1056,18 +1058,18 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.83"></script>
-  <script src="motion.js?v=0.24.83"></script>
-  <script src="gemini.js?v=0.24.83"></script>
-  <script src="groq.js?v=0.24.83"></script>
-  <script src="notion.js?v=0.24.83"></script>
-  <script src="audio-store.js?v=0.24.83"></script>
-  <script src="claude-bridge.js?v=0.24.83"></script>
-  <script src="claude-installer.js?v=0.24.83"></script>
-  <script src="live-summary.js?v=0.24.83"></script>
-  <script src="image-store.js?v=0.24.83"></script>
-  <script src="gemini-files.js?v=0.24.83"></script>
-  <script src="term-dicts.js?v=0.24.83"></script>
-  <script src="app.js?v=0.24.83"></script>
+  <script src="icons.js?v=0.24.84"></script>
+  <script src="motion.js?v=0.24.84"></script>
+  <script src="gemini.js?v=0.24.84"></script>
+  <script src="groq.js?v=0.24.84"></script>
+  <script src="notion.js?v=0.24.84"></script>
+  <script src="audio-store.js?v=0.24.84"></script>
+  <script src="claude-bridge.js?v=0.24.84"></script>
+  <script src="claude-installer.js?v=0.24.84"></script>
+  <script src="live-summary.js?v=0.24.84"></script>
+  <script src="image-store.js?v=0.24.84"></script>
+  <script src="gemini-files.js?v=0.24.84"></script>
+  <script src="term-dicts.js?v=0.24.84"></script>
+  <script src="app.js?v=0.24.84"></script>
 </body>
 </html>
