@@ -777,10 +777,13 @@ html, body {
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  /* v0.24.66: 行のあいだは gap ではなく、2 行目からの上の余白（行の高さの中）にした。gap だと、置換の行が
+     高さ 0 に縮みきっても 6px が残り、最後に隠れた瞬間に詰まって跳ぶ */
+  gap: 0;
   cursor: grab;         /* バー余白はドラッグ可能 */
   user-select: none;
-  animation: searchBarIn 0.18s var(--ease-out);
+  /* v0.24.66: 出入りは motion.js のばね（右上の検索の札から広がる・縮む）。keyframes は ease だった */
+  transform-origin: 100% 0;
 }
 .search-bar.dragging { cursor: grabbing; }
 .search-bar input,
@@ -859,7 +862,9 @@ html, body {
   border-color: var(--border);
   padding: 0 10px;
 }
-.search-replace-row.hidden { display: none; }
+/* v0.24.66: 置換の行は hidden 属性（[hidden] は display:none）で、出し入れは motion.js の reveal */
+.search-bar > .search-row + .search-row,
+.search-bar > .search-scope { padding-top: 6px; box-sizing: border-box; }
 .search-scope {
   font-size: 10px;
   color: var(--text-faint);

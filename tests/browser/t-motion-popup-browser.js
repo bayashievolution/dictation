@@ -2,6 +2,7 @@
 //   v0.24.63: 左下の辞書メニュー
 //   v0.24.64: Notion 保存の小窓（出る・消える・中身で高さが変わる）
 //   v0.24.65: 右クリックのメニュー（タブ・画像）
+//   v0.24.66: 検索と置換のバー（出入り・置換の行の出し入れ）
 //
 // ■ これは `sh tests/run.sh` では走らない（tests/t-*.js の形にしていない）
 //
@@ -157,6 +158,41 @@ async function trace(page, el, open, close) {
     eq('閉じると id はすぐ外れ、本体は消えるまで残る', [r.idGone, r.stillThere], [true, true]);
     eq('消える途中に開き直しても、新しいほうだけ', [r.freshOk, r.left], [true, 1]);
     eq('閉じたら全部消える', r.end, 0);
+  }
+
+  console.log('■ 検索と置換のバー');
+  {
+    const r = await trace(page, '#search-bar', 'openSearchBar()', 'closeSearchBar()');
+    eq('小さいところから出て、少し行き過ぎて 1 に収まる', [r.opening[0].s < 0.97, Math.max(...r.opening.map(x => x.s)) > 1.003, Math.abs(r.opening[r.opening.length - 1].s - 1) < 0.002], [true, true, true]);
+    eq('keyframes の動きは使っていない', await page.evaluate(() => getComputedStyle(document.getElementById('search-bar')).animationName), 'none');
+    eq('閉じてもすぐには消えず、行き過ぎずに薄くなる', [r.hiddenRightAway, r.closing.some(x => !x.h && x.o > 0.05 && x.o < 0.95), r.closing.every(x => x.s <= 1.0001)], [false, true, true]);
+    eq('閉じたら「開いていない」（Esc などの判定）', await page.evaluate(() => searchState.open), false);
+  }
+  {
+    const r = await page.evaluate(async () => {
+      openSearchBar();
+      await new Promise(r => setTimeout(r, 800));
+      const bar = document.getElementById('search-bar');
+      const row = document.getElementById('search-replace-row');
+      const h0 = bar.offsetHeight;
+      document.getElementById('search-toggle-replace').click();
+      await new Promise(r => requestAnimationFrame(r)); await new Promise(r => requestAnimationFrame(r));
+      const mid = bar.offsetHeight;
+      await new Promise(r => setTimeout(r, 900));
+      const h1 = bar.offsetHeight;
+      document.getElementById('search-toggle-replace').click();
+      await new Promise(r => requestAnimationFrame(r)); await new Promise(r => requestAnimationFrame(r));
+      const mid2 = bar.offsetHeight;
+      await new Promise(r => setTimeout(r, 900));
+      const h2 = bar.offsetHeight;
+      const res = { h0, mid, h1, mid2, h2, hidden: row.hidden, style: row.getAttribute('style') || '' };
+      closeSearchBar();
+      await new Promise(r => setTimeout(r, 800));
+      return res;
+    });
+    eq('置換の行を出すとき、バーの高さが途中を通って伸びる', r.mid > r.h0 && r.mid < r.h1, true);
+    eq('しまうとき、途中を通って縮み、最後は元の高さ（余白が残って跳ばない）', [r.mid2 < r.h1 && r.mid2 > r.h0, r.h2 === r.h0], [true, true]);
+    eq('しまいきったら隠れて、style に値を残さない', [r.hidden, r.style.replace(/\s/g, '')], [true, '']);
   }
 
   await browser.close();

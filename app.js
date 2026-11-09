@@ -11266,7 +11266,9 @@ function openSearchBar() {
   const bar = document.getElementById('search-bar');
   if (!bar) return;
   searchState.open = true;
-  bar.classList.remove('hidden');
+  // v0.24.66: 小さいところから少し行き過ぎてぽんと（TODO「動きを SUMADO の仕様書に合わせる」の 7。前は keyframes の ease）
+  if (window.Motion) Motion.popIn(bar, { from: 0.9, hiddenClass: 'hidden' });
+  else bar.classList.remove('hidden');
   const input = document.getElementById('search-input');
   // 既に選択中のテキストがあれば初期値に（ブラウザ標準の挙動に寄せる）
   const sel = window.getSelection();
@@ -11283,7 +11285,9 @@ function closeSearchBar() {
   const bar = document.getElementById('search-bar');
   if (!bar) return;
   searchState.open = false;
-  bar.classList.add('hidden');
+  // v0.24.66: 一瞬で消さず、行き過ぎずに縮みながらふわっと
+  if (window.Motion) Motion.popOut(bar, { to: 0.94, hiddenClass: 'hidden' });
+  else bar.classList.add('hidden');
   const { el } = getSearchTargetEl();
   clearSearchHighlights(el);
   searchState.matches = [];
@@ -11507,7 +11511,9 @@ function searchReplaceAll() {
   });
   if (btnTog && replRow) btnTog.addEventListener('click', () => {
     searchState.showReplace = !searchState.showReplace;
-    replRow.classList.toggle('hidden', !searchState.showReplace);
+    // v0.24.66: 置換の行は、高さと濃さをばねで出し入れする（SUMADO の reveal。前は class で一瞬）
+    if (window.Motion) Motion.reveal(replRow, !!searchState.showReplace);
+    else replRow.hidden = !searchState.showReplace;
     btnTog.classList.toggle('active', searchState.showReplace);
     if (searchState.showReplace) setTimeout(() => replInput.focus(), 10);
   });
