@@ -1,6 +1,7 @@
 // 小さなメニューの出入り（TODO「動きを SUMADO の仕様書に合わせる」の 4・6）を、本物の Chromium で検査する。
 //   v0.24.63: 左下の辞書メニュー
 //   v0.24.64: Notion 保存の小窓（出る・消える・中身で高さが変わる）
+//   v0.24.65: 右クリックのメニュー（タブ・画像）
 //
 // ■ これは `sh tests/run.sh` では走らない（tests/t-*.js の形にしていない）
 //
@@ -22,16 +23,17 @@ const eq = (label, got, want) => {
 /** 開く・閉じるを毎フレーム記録する。open / close はページの中で呼ぶ式 */
 async function trace(page, el, open, close) {
   return page.evaluate(async ([sel, open, close]) => {
-    const el = document.querySelector(sel);
+    let el = document.querySelector(sel);
     const m = () => { const t = new DOMMatrix(getComputedStyle(el).transform); return { s: +t.a.toFixed(3), y: +t.f.toFixed(1), o: +Number(getComputedStyle(el).opacity).toFixed(3) }; };
     eval(open);
+    el = document.querySelector(sel);   // 初めて開いたときに作られるものもある（タブのメニュー）
     const opening = [];
     for (let i = 0; i < 40; i++) { await new Promise(r => requestAnimationFrame(r)); opening.push(m()); }
     const styleOpen = el.getAttribute('style') || '';
     eval(close);
-    const hiddenRightAway = el.hidden;
+    const hiddenRightAway = el.hidden || el.classList.contains('hidden');
     const closing = [];
-    for (let i = 0; i < 40; i++) { await new Promise(r => requestAnimationFrame(r)); closing.push({ ...m(), h: el.hidden }); }
+    for (let i = 0; i < 40; i++) { await new Promise(r => requestAnimationFrame(r)); closing.push({ ...m(), h: el.hidden || el.classList.contains('hidden') }); }
     return { opening, styleOpen, hiddenRightAway, closing, endHidden: el.hidden, styleEnd: el.getAttribute('style') || '' };
   }, [el, open, close]);
 }
@@ -102,6 +104,59 @@ async function trace(page, el, open, close) {
     });
     eq('ボタンが出て高くなるとき、途中の高さを通る（一瞬で伸びない）', [r.h1 > r.h0, r.mid > r.h0 && r.mid < r.h1], [true, true]);
     eq('止まったら高さを書き込んだままにしない', r.style, '');
+  }
+
+  console.log('■ タブの右クリックのメニュー');
+  {
+    await page.evaluate(() => { createSession({ activate: true }); });
+    await page.waitForTimeout(600);
+    const r = await trace(page, '#tab-context-menu',
+      "showTabContextMenu(state.activeId, 200, 40)",
+      "document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))");
+    // 位置を決めるのは次のフレーム。そこから測る
+    const o = r.opening.slice(1);
+    eq('押したところの小さい大きさから出て、少し行き過ぎて 1 に収まる', [o[0].s < 0.8, Math.max(...o.map(x => x.s)) > 1.01, Math.abs(o[o.length - 1].s - 1) < 0.002], [true, true, true]);
+    eq('押したところから広がる（transform-origin が押した点）', await page.evaluate(async () => {
+      showTabContextMenu(state.activeId, 200, 40);
+      await new Promise(r => setTimeout(r, 900));
+      const m = document.getElementById('tab-context-menu');
+      const [ox, oy] = getComputedStyle(m).transformOrigin.split(' ').map(parseFloat);
+      const r = m.getBoundingClientRect();
+      const ok = Math.abs(r.left + ox - 200) < 1.5 && Math.abs(r.top + oy - 40) < 1.5;
+      hideTabContextMenu();
+      await new Promise(r => setTimeout(r, 900));
+      return ok;
+    }), true);
+    eq('keyframes の動きは使っていない', await page.evaluate(() => getComputedStyle(document.getElementById('tab-context-menu')).animationName), 'none');
+    eq('外を押して閉じても、すぐには消えず、行き過ぎずに薄くなる', [r.hiddenRightAway, r.closing.some(x => !x.h && x.o > 0.05 && x.o < 0.95), r.closing.every(x => x.s <= 1.0001)], [false, true, true]);
+    eq('最後は隠れる', await page.evaluate(() => document.getElementById('tab-context-menu').classList.contains('hidden')), true);
+  }
+
+  console.log('■ 画像の右クリックのメニュー');
+  {
+    const r = await page.evaluate(async () => {
+      const img = document.createElement('img');
+      img.src = 'assets/icon-128.png';
+      els.memo.appendChild(img);
+      openImageMenu(img, 300, 200);
+      const m = document.getElementById('img-menu');
+      const scales = [];
+      for (let i = 0; i < 70; i++) { await new Promise(r => requestAnimationFrame(r)); scales.push(+new DOMMatrix(getComputedStyle(m).transform).a.toFixed(3)); }
+      closeImageMenu();
+      const idGone = !document.getElementById('img-menu');
+      const stillThere = m.isConnected;
+      openImageMenu(img, 320, 220);   // 消える途中にもう一度開いても、新しいほうだけが #img-menu
+      const fresh = document.getElementById('img-menu');
+      await new Promise(r => setTimeout(r, 900));
+      const left = document.querySelectorAll('.img-menu').length;
+      closeImageMenu();
+      await new Promise(r => setTimeout(r, 900));
+      return { scales, idGone, stillThere, freshOk: !!fresh && fresh !== m, left, end: document.querySelectorAll('.img-menu').length };
+    });
+    eq('小さいところから出て、少し行き過ぎて 1 に収まる（前は一瞬で出ていた）', [r.scales[0] < 0.8, Math.max(...r.scales) > 1.01, Math.abs(r.scales[r.scales.length - 1] - 1) < 0.002], [true, true, true]);
+    eq('閉じると id はすぐ外れ、本体は消えるまで残る', [r.idGone, r.stillThere], [true, true]);
+    eq('消える途中に開き直しても、新しいほうだけ', [r.freshOk, r.left], [true, 1]);
+    eq('閉じたら全部消える', r.end, 0);
   }
 
   await browser.close();

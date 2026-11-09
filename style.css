@@ -920,7 +920,7 @@ mark.search-hit.current {
   font-size: 13px;
   color: var(--text);
   user-select: none;
-  animation: context-menu-in 0.14s ease-out;
+  /* v0.24.65: 出入りは motion.js のばね（押したところから、少し行き過ぎてぽんと）。keyframes は ease だった */
 }
 @keyframes context-menu-in {
   from { opacity: 0; transform: translateY(-4px) scale(0.98); }

@@ -8718,7 +8718,13 @@ function onInlineImageDown(e) {
 
 function closeImageMenu() {
   const m = document.getElementById('img-menu');
-  if (m) m.remove();
+  if (!m) return;
+  // v0.24.65: 縮みながらふわっと消してから外す。id はすぐ外す（消える途中のものを、次に開いたメニューや
+  // 「メニューの中を押したか」の判定が拾わないように）
+  if (!window.Motion) { m.remove(); return; }
+  m.removeAttribute('id');
+  m.style.pointerEvents = 'none';
+  Motion.popOut(m, { to: 0.92 }).then(() => m.remove());
 }
 
 function openImageMenu(img, x, y) {
@@ -8758,8 +8764,16 @@ function openImageMenu(img, x, y) {
   document.body.appendChild(menu);
   // 画面からはみ出さない位置に置く
   const r = menu.getBoundingClientRect();
-  menu.style.left = `${Math.min(x, window.innerWidth - r.width - 8)}px`;
-  menu.style.top  = `${Math.min(y, window.innerHeight - r.height - 8)}px`;
+  const left = Math.min(x, window.innerWidth - r.width - 8);
+  const top = Math.min(y, window.innerHeight - r.height - 8);
+  menu.style.left = `${left}px`;
+  menu.style.top  = `${top}px`;
+  // v0.24.65: 押したところの小さい大きさから、少し行き過ぎてぽんと（前は一瞬で出ていた）
+  if (window.Motion) {
+    menu.style.transformOrigin = `${x - left}px ${y - top}px`;
+    menu.hidden = true;
+    Motion.popIn(menu);
+  }
 }
 
 /**
@@ -9013,7 +9027,10 @@ function closeAllTabs() {
 
 function hideTabContextMenu() {
   const menu = document.getElementById('tab-context-menu');
-  if (menu) menu.classList.add('hidden');
+  if (!menu) return;
+  // v0.24.65: 一瞬で消さず、行き過ぎずに縮みながらふわっと（TODO「動きを SUMADO の仕様書に合わせる」の 6）
+  if (window.Motion) Motion.popOut(menu, { to: 0.92, hiddenClass: 'hidden' });
+  else menu.classList.add('hidden');
 }
 
 // メニューを開いた瞬間の event がそのまま document まで伝播して
@@ -9041,7 +9058,7 @@ function showTabContextMenu(sessionId, clientX, clientY) {
       if (!menu.contains(e.target)) hideTabContextMenu();
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !menu.classList.contains('hidden')) hideTabContextMenu();
+      if (e.key === 'Escape' && (window.Motion ? Motion.popIsOpen(menu, { hiddenClass: 'hidden' }) : !menu.classList.contains('hidden'))) hideTabContextMenu();
     });
   }
   const idx = state.sessions.findIndex(s => s.id === sessionId);
@@ -9082,6 +9099,8 @@ function showTabContextMenu(sessionId, clientX, clientY) {
   renderIcons(menu);
 
   // 画面端を超えないよう位置を調整
+  // v0.24.65: 大きさは測るときだけ 1 に戻す（しまう途中に開き直すと、縮んだ大きさで測ってしまう）
+  if (window.Motion) Motion.clear(menu);
   menu.style.visibility = 'hidden';
   menu.classList.remove('hidden');
   requestAnimationFrame(() => {
@@ -9093,6 +9112,12 @@ function showTabContextMenu(sessionId, clientX, clientY) {
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
     menu.style.visibility = '';
+    // v0.24.65: 押したところの小さい大きさから、少し行き過ぎてぽんと（端に寄せたときも押したところから）
+    if (window.Motion) {
+      menu.style.transformOrigin = `${clientX - x}px ${clientY - y}px`;
+      menu.classList.add('hidden');
+      Motion.popIn(menu, { hiddenClass: 'hidden' });
+    }
   });
 }
 
