@@ -2359,7 +2359,9 @@ mark.search-hit.current {
   border-radius: var(--radius-sm);
   cursor: grab;
   user-select: none;
-  transition: transform 0.15s var(--ease-snap), border-color 0.15s, opacity 0.15s;
+  /* v0.24.72: 並べ替えの動きは motion.js のばね。transition に transform があると、ばねが毎フレーム書く値を
+     CSS がさらに遅らせて、行き過ぎて戻るような変な動きになった（テストで見つけた） */
+  transition: border-color 0.15s, opacity 0.15s;
   position: relative;
 }
 .pane-order-item:hover {

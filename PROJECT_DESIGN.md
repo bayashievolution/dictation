@@ -3419,3 +3419,8 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 文字起こしの段落: `.paragraph` の keyframes（fadeInUp）と `.paragraph.refined` の keyframes（fadeInReplace）で、セッションを切り替えるたびに全部の段落が出直していた。新しい段落（`createParagraphEl`）だけ少し下からふわっと、整えた中身に差し替わった段落（`setParagraphContent` で refined のとき・画面にあるものだけ）だけふわっと
   - `motion.js` に `place`（値を決めるが、ほかのばねは止めない）を足し、文字起こしの FLIP で使うようにした。set だと、差し替えたばかりの段落のふわっと（濃さ）まで止まる
   - テスト: `tests/browser/t-motion-render-browser.js`（前からある吹き出しは濃さ 1 のまま・増えたものだけ途中の濃さ・keyframes なし・考え中→答えは中身だけ・切り替えでは動かさない・段落も同じ）。旧版では5件落ちる。ほかのブラウザのテストも全部通ることを確かめた
+- 2026-11-09 (v0.24.72): **ドラッグで並べ替えたあとの動き**（TODO「動きを SUMADO の仕様書に合わせる」の 11。設定のペインの並び順・セッションのタブ・中のタブ）
+  - 共通の `enablePointerDragSort` は CSS の transition（cubic-bezier）で FLIP していたが、設定のペインの並び順は `onReorder` がその場で一覧を描き直すので、動かしていた要素ごと捨てられて一瞬で跳んでいた。並べ替えと描き直しをまとめて `Motion.flipList` で包み、描き直したあとの要素を前の場所からばねで動かす
+  - `.pane-order-item` の CSS に `transition: transform 0.15s` があり、ばねが毎フレーム書く値を CSS がさらに遅らせて、行き過ぎて戻るような変な動きになった（テストで見つけた）。transition から transform を外した
+  - 下の線は並べ替えたらすぐ新しい場所へ（線もばねで動く。前は FLIP が終わる 340ms 後に動かしていた）
+  - テスト: `tests/browser/t-motion-dragsort-browser.js`（本物のマウスで: 並べ替わる・描き直したあとも前の場所から途中を通って動く・style に値を残さない・transition に transform を入れていない。タブも同じ）。旧版では3件落ちる
