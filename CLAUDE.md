@@ -23,7 +23,13 @@ git log -1 --format=%cd --date=short    # 最後のコミット日
 > 前回の更新から N 日空いています。拡張のアップデート方法を確認しておきますか？
 
 「はい」なら**その場に短く書く**。ファイルを読ませに行かせない。
-今は `update.bat`（v0.24.4 以降）があるので、まずこれを案内する:
+**やっさんは GitHub Desktop で更新している**（2026-11-09 に「前も言ったけど」と言われた。
+`update.bat` を案内し続けていたのは申し送りの漏れ）。まずこれを案内する:
+
+> GitHub Desktop でブランチが `claude/dictation-app-status-ra7l70` になっているか確かめて
+> **Fetch origin** → **Pull origin** → `chrome://extensions` の ↻
+
+`update.bat`（v0.24.4 以降）も使えるが、聞かれたときだけ:
 
 > エクスプローラーで `\\wsl.localhost\Ubuntu\home\bayashi\dictation` を開いて
 > `update.bat` をダブルクリック → `chrome://extensions` の ↻

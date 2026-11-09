@@ -23,7 +23,14 @@
 
 ## 1. 最新のコードを取ってくる
 
-### いちばん簡単な方法：`update.bat` をダブルクリック
+### やっさんがいつも使っている方法：GitHub Desktop
+
+1. GitHub Desktop で dictation を選ぶ
+2. 上のブランチが **`claude/dictation-app-status-ra7l70`** になっているか確かめる（`main` では新しくならない）
+3. **Fetch origin** → **Pull origin**
+4. `chrome://extensions` で β 版の **↻**
+
+### ほかの方法：`update.bat` をダブルクリック
 
 ターミナルを開く必要はありません。エクスプローラーのアドレス欄にこれを貼って開き、
 
