@@ -385,11 +385,20 @@ function getWriteContainer() {
 }
 
 /** BG コンテナの innerHTML を録音対象セッションのデータへ書き戻す */
+/**
+ * 画面の HTML を、保存してよい形にする (v0.24.70)
+ * ばねで動いている途中の段落には一時的な transform / opacity が付いている。そのまま保存すると、
+ * 開き直したときにずれたまま・薄いままになる（v0.24.60〜69 で起きていた。motion.js の stripMotionStyles を参照）
+ */
+function savableHtml(html) {
+  return window.Motion && Motion.stripMotionStyles ? Motion.stripMotionStyles(html) : html;
+}
+
 function syncBgToSession() {
   if (!state.bgTranscriptEl) return;
   const s = state.sessions.find(x => x.id === state.recordingSessionId);
   if (!s) return;
-  s.transcript = state.bgTranscriptEl.innerHTML;
+  s.transcript = savableHtml(state.bgTranscriptEl.innerHTML);
   s.updatedAt = Date.now();
 }
 
@@ -4434,10 +4443,10 @@ function getPaneText(id) {
   return '';
 }
 function getPaneHtml(id) {
-  if (id === 'pane-transcript') return els.confirmed.innerHTML;
-  if (id === 'pane-memo') return els.memo.innerHTML;
-  if (id === 'pane-summary') return els.summary.innerHTML;
-  if (id === 'pane-live') return els.liveSummary.innerHTML;
+  if (id === 'pane-transcript') return savableHtml(els.confirmed.innerHTML);
+  if (id === 'pane-memo') return savableHtml(els.memo.innerHTML);
+  if (id === 'pane-summary') return savableHtml(els.summary.innerHTML);
+  if (id === 'pane-live') return savableHtml(els.liveSummary.innerHTML);
   if (id === 'pane-chat') return getChatHtml();
   return '';
 }
@@ -6334,10 +6343,11 @@ function memoUndoCommit() {
  * 保存（snapshotActiveToSession）と同じく id だけ残して記録し、戻したあとに差し込み直す。
  */
 function paneHtml(paneId) {
-  if (paneId === 'pane-memo') return els.memo ? stripManagedImageSrc(els.memo.innerHTML) : '';
-  if (paneId === 'pane-transcript') return els.confirmed ? els.confirmed.innerHTML : '';
-  if (paneId === 'pane-summary') return els.summary ? els.summary.innerHTML : '';
-  if (paneId === 'pane-live') return els.liveSummary ? els.liveSummary.innerHTML : '';
+  // v0.24.70: 戻す・やり直すの記録にも、ばねの途中の値を入れない（戻したときにずれたまま残る）
+  if (paneId === 'pane-memo') return els.memo ? stripManagedImageSrc(savableHtml(els.memo.innerHTML)) : '';
+  if (paneId === 'pane-transcript') return els.confirmed ? savableHtml(els.confirmed.innerHTML) : '';
+  if (paneId === 'pane-summary') return els.summary ? savableHtml(els.summary.innerHTML) : '';
+  if (paneId === 'pane-live') return els.liveSummary ? savableHtml(els.liveSummary.innerHTML) : '';
   return '';
 }
 
@@ -8286,6 +8296,10 @@ function initSessions() {
   }
   // Migrate legacy format (session.html → session.transcript)
   for (const s of state.sessions) {
+    // v0.24.70: v0.24.60〜69 で、ばねの途中の値が付いたまま保存された段落がありうる。読むときに取り除く
+    for (const k of ['transcript', 'memo', 'summary', 'liveSummary']) {
+      if (typeof s[k] === 'string') s[k] = savableHtml(s[k]);
+    }
     if (s.html !== undefined && s.transcript === undefined) {
       s.transcript = s.html;
       delete s.html;
@@ -8404,12 +8418,13 @@ function getActiveSession() {
 function snapshotActiveToSession(opts = {}) {
   const s = getActiveSession();
   if (!s) return;
-  const nextTranscript = els.confirmed.innerHTML;
+  // v0.24.70: ばねで動いている途中の値（transform / opacity）は保存しない（savableHtml）
+  const nextTranscript = savableHtml(els.confirmed.innerHTML);
   // v0.22.0: 貼った画像の src は blob: の URL で、**保存しても次回は死んでいる**。
   // id だけ残し、表示のたびに差し込み直す（image-store.js の冒頭を参照）
-  const nextMemo       = stripManagedImageSrc(els.memo.innerHTML);
-  const nextSummary    = els.summary.innerHTML;
-  const nextLive       = els.liveSummary ? els.liveSummary.innerHTML : (s.liveSummary || '');   // v0.24.25
+  const nextMemo       = stripManagedImageSrc(savableHtml(els.memo.innerHTML));
+  const nextSummary    = savableHtml(els.summary.innerHTML);
+  const nextLive       = els.liveSummary ? savableHtml(els.liveSummary.innerHTML) : (s.liveSummary || '');   // v0.24.25
   // v0.15.1: Notion に上げたあとで中身が変わったら、アップ済み印を外す。
   // 「印は付いているが最新版は上がっていない」状態を作らないため。
   if (s.notionUploadedAt &&

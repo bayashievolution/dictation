@@ -3409,3 +3409,8 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 見た目はそのまま（色・字・カプセルの形。変える前と後を画像で見比べた）。余白は札から中の字（`.status-text`）に移した（札に余白があると点まで細くなれない）。`.status` の `transition: all` は色だけにした（大きさは ばね）
   - 既存の `tests/browser/t-claude-bridge-browser.js` の「文言が切れていないか」は、札が伸びきってから中の字で測るようにした
   - テスト: `tests/browser/t-motion-island-browser.js`（アイランドになる前は見えない・はじめは点・縦が先で横があと・細いうちは字が見えない・字はすぐ入れ替わる・古い字の写しは札の外で先に消える・幅は途中を通る・縮むときは行き過ぎて戻る・› の分も測る・カプセルのまま・12px のまま・transition で大きさを動かしていない）
+- 2026-11-09 (v0.24.70): **直し: 動いている途中の段落の一時的な値（transform / opacity）が、文字起こしに保存されていた**（v0.24.60 から。TODO の 10 に取りかかる前に気づいた）
+  - 実測: 仮の段落が消えた直後に保存すると、上の段落に `style="transform: translate3d(0px, -47px, 0px) scale(1, 1);"` が付いたまま保存された。開き直すと、その段落がずれたまま残る
+  - 保存・戻す記録・Notion に使う HTML から、ばねが書く形の宣言だけを取り除く（`Motion.stripMotionStyles` → `savableHtml`。`snapshotActiveToSession` / `syncBgToSession` / `paneHtml` / `getPaneHtml`）。ほかの style（メモの画像の幅や位置）は残す。取り除くものが無ければ文字列を変えない（変えると「中身が変わった」と見なされ、Notion に保存済みの印が外れる）。本文に書かれた「opacity: 0.5;」は style ではないので消さない
+  - v0.24.60〜69 の間に保存されたものは、読み込むとき（`initSessions`）に取り除く
+  - テスト: `tests/t-motion.js`（取り除き方6通り）、`tests/browser/t-motion-transcript-browser.js`（途中で保存しても入らない・前の版で入ってしまったものも開くと元どおり）

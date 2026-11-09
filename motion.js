@@ -454,5 +454,23 @@
   /** いま出ているか（しまう途中は「出ていない」） */
   function popIsOpen(el, o) { const st = popStates.get(el); return st ? !!st.open : !isHidden(el, o); }
 
-  global.Motion = { SPRINGS, MOTION, animate, set, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, createMorph, Spring1D };
+  /**
+   * 保存する HTML から、ばねが書いた一時的な値を取り除く（ディクテーション用に足した）
+   *
+   * 動いている途中の要素には style="transform: translate3d(...) scale(...); opacity: 0.4;" が付いている。
+   * それをそのまま保存すると、開き直したときに段落がずれたまま・薄いままになる（v0.24.60 で起きていた）。
+   * 取り除くのはばねが書く形の宣言だけ（ほかの style はそのまま）。取り除くものが無ければ、文字列をまったく変えない
+   * （変えると「中身が変わった」と見なされ、Notion に保存済みの印などが外れてしまう）。
+   */
+  function stripMotionStyles(html) {
+    if (!html || html.indexOf('style="') < 0) return html;
+    return html.replace(/ style="([^"]*)"/g, (m, css) => {
+      const decls = css.split(';').map((x) => x.trim()).filter(Boolean);
+      const kept = decls.filter((d) => !/^transform:\s*translate3d\([^)]*\)\s*scale\([^)]*\)$/.test(d) && !/^opacity:\s*[\d.]+$/.test(d));
+      if (kept.length === decls.length) return m;
+      return kept.length ? ` style="${kept.join('; ')};"` : '';
+    });
+  }
+
+  global.Motion = { SPRINGS, MOTION, animate, set, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, createMorph, stripMotionStyles, Spring1D };
 })(typeof window !== 'undefined' ? window : globalThis);

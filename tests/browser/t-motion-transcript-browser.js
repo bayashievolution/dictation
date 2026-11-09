@@ -92,6 +92,9 @@ const wait = (page, ms) => page.waitForTimeout(ms);
     eq('写しも最後は消える', r.ghostGone, true);
     eq('上の段落は、前の場所からばねで動く（一瞬で跳ばない）', r.jumpedNoMore, true);
     eq('止まったら style に値を残さない', r.styleLeft, '');
+    // v0.24.70: 動いている途中に保存しても、ばねの値（transform / opacity）は保存しない。
+    // v0.24.60〜69 では保存されていて、開き直すと段落がずれたまま残った
+    eq('保存した文字起こしに、ばねの途中の値が入っていない', await page.evaluate(() => /translate3d|opacity:/.test(getActiveSession().transcript)), false);
   }
 
   console.log('■ 段落がまとまる・差し替わるとき、下の段落が跳ばない');
@@ -158,6 +161,22 @@ const wait = (page, ms) => page.waitForTimeout(ms);
       return { up: state.userScrolledUp, moving: transcriptScroll.moving };
     });
     eq('止まって、上へ戻したと分かる', [r.moving, r.up], [false, true]);
+  }
+
+  console.log('■ 前の版で、ばねの途中の値が付いたまま保存された文字起こしも、開くと元どおり（v0.24.70）');
+  {
+    const p2 = await browser.newPage({ viewport: { width: 420, height: 640 } });
+    await p2.goto(URL);
+    await p2.evaluate(() => {
+      localStorage.setItem('dictation:sessions', JSON.stringify([{ id: 'X', title: 'ずれたまま', transcript:
+        '<div class="paragraph refined" style="transform: translate3d(0px, -47px, 0px) scale(1, 1);"><div class="p-body">あ</div></div>', memo: '', summary: '', chat: [] }]));
+      localStorage.setItem('dictation:activeTab', 'X');
+    });
+    await p2.reload();
+    await p2.waitForTimeout(800);
+    const r = await p2.evaluate(() => ({ dom: els.confirmed.innerHTML, saved: getActiveSession().transcript }));
+    eq('画面にも保存にも残っていない', [/translate3d/.test(r.dom), /translate3d/.test(r.saved)], [false, false]);
+    await p2.close();
   }
 
   await browser.close();

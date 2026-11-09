@@ -53,5 +53,19 @@ const run = (cfg, from, to, sec = 2) => {
   eq('大きな dt でも発散しない', s.value > 0 && s.value < 1.5, true);
 }
 
+console.log('\n■ 保存する HTML から、ばねの途中の値を取り除く（v0.24.70）');
+{
+  const st = M.stripMotionStyles;
+  eq('ばねが書いた transform だけなら style ごと消す',
+     st('<div class="paragraph" style="transform: translate3d(0px, -47px, 0px) scale(1, 1);">a</div>'), '<div class="paragraph">a</div>');
+  eq('opacity も消す', st('<div style="opacity: 0.400;">a</div>'), '<div>a</div>');
+  eq('ほかの style は残す（メモの画像の幅や位置）',
+     st('<img style="width: 120px; transform: translate3d(1px, 2px, 0px) scale(1, 1); left: 3px;">'), '<img style="width: 120px; left: 3px;">');
+  const plain = '<div style="width: 120px">a</div><p>opacity: 0.5; は本文</p>';
+  eq('取り除くものが無ければ、文字列をまったく変えない（同じ参照）', st(plain) === plain, true);
+  eq('本文に書かれた「opacity: 0.5;」は消さない', st('<p>opacity: 0.5;</p><div style="opacity: 0.1;">x</div>'), '<p>opacity: 0.5;</p><div>x</div>');
+  eq('空・style なしはそのまま', [st(''), st('<p>a</p>')], ['', '<p>a</p>']);
+}
+
 console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');
 process.exit(fail ? 1 : 0);
