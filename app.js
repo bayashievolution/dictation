@@ -6895,14 +6895,22 @@ function applyPaneOrder() {
  * メモは AI が無くても使えるので見ない。Web Speech の文字起こしも AI 無しで動く
  */
 function paneAiProblem(id) {
+  // v0.24.91: 見出しと一言に分けた（やっさん「このくらいの説明がちょうどいい。他のタブもこの感じで」）。
+  // キーが入っているのにトグルを切っているときは「登録されていません」と言わない（できないことをできると言わない、の裏返し）
   const claude = !!state.settings.claudeCode;
+  const off = (has) => has ? 'API がオフになっています' : 'API キーが登録されていません';
   if (id === 'pane-transcript') {
-    if (state.settings.inputMode !== 'gemini-audio') return '';
-    return (geminiKey() || usesGroqTranscribe()) ? '' : '文字起こしに使える AI がありません';
+    if (state.settings.inputMode !== 'gemini-audio') return null;   // Web Speech は AI 無しで動く
+    if (geminiKey() || usesGroqTranscribe()) return null;
+    return { title: off(!!(state.settings.apiKey || state.settings.groqApiKey)), sub: '文字起こしには Gemini API か Groq Whisper のキーが要ります' };
   }
-  if (id === 'pane-live') return claude ? '' : 'ライブ要約には Claude Code が要ります';
-  if (id === 'pane-summary' || id === 'pane-chat') return (geminiKey() || claude) ? '' : '使える AI がありません';
-  return '';
+  if (id === 'pane-live') return claude ? null : { title: 'Claude Code がオフになっています', sub: 'ライブ要約には Claude Code が要ります' };
+  if (id === 'pane-summary' || id === 'pane-chat') {
+    if (geminiKey() || claude) return null;
+    const what = id === 'pane-summary' ? '要約' : '質問';
+    return { title: off(!!state.settings.apiKey), sub: `${what}には Gemini API のキーか Claude Code が要ります` };
+  }
+  return null;
 }
 
 /** いまそのタブの働きを受け持つ AI の名前（空のときの案内の札に出す） (v0.24.89) */
@@ -6934,7 +6942,8 @@ function renderEmptyHints() {
     box.classList.toggle('needs-ai', !!problem);
     box.innerHTML = problem
       ? `<span class="empty-icon" data-icon="sm-warn" data-icon-size="34"></span>`
-        + `<span class="empty-text">${escapeHtmlSimple(problem)}</span>`
+        + `<span class="empty-text">${escapeHtmlSimple(problem.title)}</span>`
+        + `<span class="empty-sub">${escapeHtmlSimple(problem.sub)}</span>`
         + `<button type="button" class="btn btn-ghost btn-sm empty-open-ai">AI 設定を開く</button>`
       : `<span class="empty-icon" data-icon="${h.icon}" data-icon-size="34"></span>`
         + `<span class="empty-text">${escapeHtmlSimple(h.text())}</span>`

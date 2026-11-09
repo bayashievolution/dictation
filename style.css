@@ -1961,7 +1961,10 @@ mark.search-hit.current {
   padding: 1px 10px;
 }
 .empty-hint.needs-ai .empty-icon,
-.empty-hint.needs-ai .empty-text { color: var(--caution); opacity: 1; }
+.empty-hint.needs-ai .empty-text { color: var(--caution); opacity: 1; font-weight: 700; margin-bottom: -6px; }
+.empty-hint .empty-sub { color: var(--text-muted); font-size: 12.5px; text-wrap: balance; max-width: 24em; }
+/* 言葉の途中で折り返さない（SUMADO の仕様書と同じ「アカウ／ント」にしない） */
+.empty-hint .empty-text, .empty-hint .empty-sub { word-break: auto-phrase; }
 /* そのタブに使える AI が無いとき、タブのアイコンは注意のしるし（オレンジ） */
 .inner-tab.needs-ai .inner-tab-icon { color: var(--caution); }
 

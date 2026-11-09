@@ -33,7 +33,7 @@ async function open(browser, settings) {
 const warnTabs = page => page.$$eval('.inner-tab.needs-ai', ns => ns.map(n => n.dataset.pane));
 const hint = (page, id) => page.evaluate(id => {
   const el = document.getElementById(id);
-  return { text: el.querySelector('.empty-text')?.textContent || '', chip: el.querySelector('.empty-chip')?.textContent || '',
+  return { text: el.querySelector('.empty-text')?.textContent || '', sub: el.querySelector('.empty-sub')?.textContent || '', chip: el.querySelector('.empty-chip')?.textContent || '',
            warn: el.classList.contains('needs-ai'), button: !!el.querySelector('.empty-open-ai'), svg: !!el.querySelector('.empty-icon svg') };
 }, id);
 
@@ -46,7 +46,11 @@ const hint = (page, id) => page.evaluate(id => {
     eq('文字起こし・要約・質問のタブが注意のしるし', (await warnTabs(page)).sort(), ['pane-chat', 'pane-summary', 'pane-transcript']);
     eq('しるしは SUMADO の注意の絵', await page.$eval('.inner-tab.needs-ai .inner-tab-icon', n => n.dataset.icon), 'sm-warn');
     const h = await hint(page, 'empty-hint');
-    eq('文字起こしの案内は注意と「AI 設定を開く」', [h.warn, h.text, h.button], [true, '文字起こしに使える AI がありません', true]);
+    eq('文字起こしの案内は注意と「AI 設定を開く」（v0.24.91 の文言）', [h.warn, h.text, h.sub, h.button],
+       [true, 'API キーが登録されていません', '文字起こしには Gemini API か Groq Whisper のキーが要ります', true]);
+    eq('要約の案内', [(await hint(page, 'summary-empty')).text, (await hint(page, 'summary-empty')).sub],
+       ['API キーが登録されていません', '要約には Gemini API のキーか Claude Code が要ります']);
+    eq('質問の案内', (await hint(page, 'chat-empty')).sub, '質問には Gemini API のキーか Claude Code が要ります');
     await page.click('#empty-hint .empty-open-ai');
     await page.waitForTimeout(400);
     eq('「AI 設定を開く」で設定が開く', await page.evaluate(() => !document.getElementById('settings-modal').classList.contains('hidden')), true);
@@ -71,6 +75,13 @@ const hint = (page, id) => page.evaluate(id => {
        ['録音中、15分ごとに目次つきの要約ができます', false]);
     eq('要約', [(await hint(page, 'summary-empty')).text, (await hint(page, 'summary-empty')).chip], ['録音を止めると、ここに要約ができます', '要約・Claude Code']);
     eq('質問', (await hint(page, 'chat-empty')).text, '文字起こし・メモ・要約について質問できます');
+    await ctx.close();
+  }
+
+  console.log('\n■ キーはあるのにトグルを切っている');
+  {
+    const { ctx, page } = await open(browser, { inputMode: 'gemini-audio', apiKey: 'AIza', geminiEnabled: false, claudeCode: false });
+    eq('「登録されていません」とは言わない', (await hint(page, 'empty-hint')).text, 'API がオフになっています');
     await ctx.close();
   }
 
