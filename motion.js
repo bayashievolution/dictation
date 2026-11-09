@@ -456,8 +456,14 @@
    */
   const popStates = new WeakMap();
   // o.hiddenClass を渡すと、hidden 属性ではなくそのクラスで出し入れする（.notion-float.hidden など）
-  const isHidden = (el, o) => (o && o.hiddenClass ? el.classList.contains(o.hiddenClass) : el.hidden);
-  const setHidden = (el, o, v) => { if (o && o.hiddenClass) el.classList.toggle(o.hiddenClass, v); else el.hidden = v; };
+  // o.shownClass を渡すと、そのクラスが付いているあいだ出ている、という逆の形（.float-window.show など）
+  const isHidden = (el, o) => (o && o.shownClass ? !el.classList.contains(o.shownClass)
+    : o && o.hiddenClass ? el.classList.contains(o.hiddenClass) : el.hidden);
+  const setHidden = (el, o, v) => {
+    if (o && o.shownClass) el.classList.toggle(o.shownClass, !v);
+    else if (o && o.hiddenClass) el.classList.toggle(o.hiddenClass, v);
+    else el.hidden = v;
+  };
   function popIn(el, o) {
     o = o || {};
     const from = o.from != null ? o.from : MOTION.popFrom;

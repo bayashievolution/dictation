@@ -3433,3 +3433,8 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 上の余白は外（margin）から中（padding）へ移した（外だと縮みきったところで詰まって跳ぶ）。「録音の保持」は区切り線のあるまとまりで、余白を中に移すと区切り線の位置が変わるので、`reveal` に `withMargin`（外の余白も高さと同じ割合で縮める）を足した
   - 既存の `tests/browser/t-keep-recording-browser.js` は切り替えて 200ms で見ていたので、動き終わってから見るようにした
   - テスト: `tests/browser/t-motion-ease-browser.js` に1場面（開いた直後は動かさない・途中の高さを通る・下の行も途中を通って寄り、最後に余白の分だけ跳ばない・style に値を残さない・ease の transition なし）。旧版では3件落ちる
+- 2026-11-09 (v0.24.75): **質問の小窓の出入りをばねに**（TODO「動きを SUMADO の仕様書に合わせる」の 12 のうち 3 つ目。これで 12 は済み）
+  - 前は CSS の transition（opacity は ease-out、transform は cubic-bezier）。小さいところ（0.9）から少し行き過ぎてぽんと出て、閉じるときは行き過ぎずに縮みながらふわっと（`popIn` / `popOut`。この窓は「show が付いているあいだ出ている」形なので `shownClass` を足した）
+  - 真ん中寄せを transform（translate(-50%)）から margin に変えた（transform はばねが出入りに使う）。見た目の位置は前と同じ（テストで真ん中にあることを見ている）
+  - 閉じる途中は「出ていない」扱いなので、閉じる途中にボタンを押し直すと出し直す。はみ出さないように寄せる計算（`clampFloatWindow`）は、出てくる途中の小さい見た目ではなく、本来の大きさで測るようにした
+  - テスト: `tests/browser/t-motion-ease-browser.js` に1場面（小さいところから・行き過ぎて収まる・真ん中・style に値を残さない・すぐには消えない・押し直し・閉じたら押せない・ease なし）。旧版では3件落ちる

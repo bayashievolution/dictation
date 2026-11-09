@@ -2104,7 +2104,9 @@ mark.search-hit.current {
   position: fixed;
   top: 80px;
   left: 50%;
-  transform: translate(-50%, 8px) scale(0.98);
+  /* v0.24.75: 真ん中寄せは transform ではなく margin で（transform は motion.js のばねが出入りに使う）。
+     出入りはばね（小さいところから少し行き過ぎてぽんと・縮みながらふわっと）。前は transition の ease */
+  margin-left: calc(min(360px, calc(100vw - 20px)) / -2);
   width: min(360px, calc(100vw - 20px));
   max-height: min(560px, calc(100vh - 120px));
   height: auto;
@@ -2119,29 +2121,17 @@ mark.search-hit.current {
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
-  transition:
-    opacity 0.22s ease-out,
-    transform 0.26s cubic-bezier(0.16, 1, 0.3, 1),
-    visibility 0s linear 0.22s;
+  transform-origin: 50% 0;
 }
 .float-window.show {
   opacity: 1;
   pointer-events: auto;
   visibility: visible;
-  transform: translate(-50%, 0) scale(1);
-  transition:
-    opacity 0.2s ease-out,
-    transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-    visibility 0s linear 0s;
 }
-/* ドラッグで移動されたあとは、translateによる中央寄せをやめて left/top 直指定に切り替え */
+/* ドラッグで移動されたあとは、真ん中寄せをやめて left/top 直指定に切り替え */
 .float-window.positioned {
   left: 0;
-  /* transform はJSで制御（show/hide時の scale のみ） */
-  transform: scale(0.98);
-}
-.float-window.positioned.show {
-  transform: scale(1);
+  margin-left: 0;
 }
 
 .float-window-header {

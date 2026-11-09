@@ -11001,7 +11001,8 @@ function clampFloatWindow() {
   const win = els.quickChatModal;
   if (!win || !win.classList.contains('positioned')) return;
   const z = getAppZoom();
-  const rect = win.getBoundingClientRect(); // visual px
+  // v0.24.75: 出てくる途中は小さく描いているので、getBoundingClientRect では測らない（layout の大きさ × 倍率で見る）
+  const rect = { width: win.offsetWidth * z, height: win.offsetHeight * z }; // visual px
   const margin = 4;
   // 視覚上の可動域（visual px）→ layout px に変換して style.left/top と突き合わせ
   const maxX = (window.innerWidth  - rect.width  - margin) / z;
@@ -11026,6 +11027,13 @@ function openQuickChat() {
     els.quickChatModal.style.top = `${pos.y}px`;
   }
   renderChatInto(els.quickChatMessages, els.quickChatEmpty, els.quickChatBody);
+  // v0.24.75: 小さいところから少し行き過ぎてぽんと（TODO「動きを SUMADO の仕様書に合わせる」の 12。前は CSS の transition の ease）
+  if (window.Motion) {
+    Motion.popIn(els.quickChatModal, { from: 0.9, y: 8, shownClass: 'show' });
+    clampFloatWindow();
+    setTimeout(() => els.quickChatInput?.focus(), 60);
+    return;
+  }
   // 次フレームで .show を付けてフェードイン（visibility の hidden→visible の猶予）
   requestAnimationFrame(() => {
     els.quickChatModal.classList.add('show');
@@ -11037,13 +11045,20 @@ function openQuickChat() {
 }
 function closeQuickChat() {
   if (!els.quickChatModal) return;
+  // v0.24.75: 行き過ぎずに縮みながらふわっと消えてから隠す
+  if (window.Motion) { Motion.popOut(els.quickChatModal, { to: 0.94, shownClass: 'show' }); return; }
   els.quickChatModal.classList.remove('show');
   // visibility: hidden は CSS transition の delay で自動的に追いつく
+}
+/** 質問の小窓が出ているか（しまう途中は出ていない扱い。押し直したら出し直す） */
+function quickChatOpen() {
+  if (!els.quickChatModal) return false;
+  return window.Motion ? Motion.popIsOpen(els.quickChatModal, { shownClass: 'show' }) : els.quickChatModal.classList.contains('show');
 }
 if (els.btnQuickChat) {
   els.btnQuickChat.addEventListener('click', () => {
     // トグル: 開いていたら閉じる
-    if (els.quickChatModal?.classList.contains('show')) closeQuickChat();
+    if (quickChatOpen()) closeQuickChat();
     else openQuickChat();
   });
 }
