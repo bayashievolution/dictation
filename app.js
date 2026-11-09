@@ -6640,6 +6640,18 @@ function updateInnerTabsIndicator() {
   const x = activeTab.offsetLeft;
   const w = activeTab.offsetWidth;
   const firstShow = !bar.classList.contains('visible');
+  // v0.24.67: 線はばねで移る（外側のタブの線と同じ。TODO「動きを SUMADO の仕様書に合わせる」の 8）
+  if (window.Motion) {
+    if (!bar.__widthDriver) {
+      bar.__widthDriver = document.createElement('span');
+      Motion.onFrame(bar.__widthDriver, ({ x: bw }) => { bar.style.width = `${bw}px`; });
+    }
+    const go = firstShow ? Motion.set : (e, v) => Motion.animate(e, v, { spring: Motion.SPRINGS.sheet });
+    go(bar, { x });
+    go(bar.__widthDriver, { x: w });
+    if (firstShow) requestAnimationFrame(() => bar.classList.add('visible'));
+    return;
+  }
   if (firstShow) {
     const saved = bar.style.transition;
     bar.style.transition = 'none';
@@ -8077,13 +8089,19 @@ function switchInnerPane(paneId) {
   // 検索バー等のリスナーに通知
   document.dispatchEvent(new CustomEvent('dictation:paneSwitched', { detail: { paneId } }));
   const panes = [els.paneTranscript, els.paneMemo, els.paneSummary, els.paneLive, els.paneChat].filter(Boolean);
+  const oldPane = panes.find((p) => p.classList.contains('active'));
   panes.forEach(p => {
     p.classList.toggle('active', p.id === paneId);
     p.classList.remove('enter-from-right', 'enter-from-left');
   });
 
   const newPane = document.getElementById(paneId);
-  if (newPane && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
+  // v0.24.67: 横に送る（SUMADO の仕様書 2.2「ページ・タブの切り替え：横に送る（page）」）。
+  // 前は入ってくる側だけ keyframes（ease）で動き、出ていく側は一瞬で消えていた（TODO の 8）。
+  // 出ていく側は、動き終わるまで重ねて描いておく（押せない・読み上げない）。その間も state.activePane は新しいほう
+  if (window.Motion && newPane && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
+    slideInnerPanes(oldPane, newPane, direction);
+  } else if (newPane && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
     // reflow で animation を確実に再発火
     void newPane.offsetWidth;
     newPane.classList.add(direction === 'right' ? 'enter-from-right' : 'enter-from-left');
@@ -8101,6 +8119,38 @@ function switchInnerPane(paneId) {
   if (paneId === 'pane-chat') {
     setTimeout(() => { els.chatBody.scrollTop = els.chatBody.scrollHeight; }, 0);
   }
+}
+
+/**
+ * 中のタブの切り替えで、ペインを横に送る (v0.24.67)
+ * 出ていくほうは .pane-leaving（重ねて描くだけ・押せない）にして、反対へ少し動きながら消える。
+ * 入ってくるほうは、送る向きから少し動きながら出る。続けて切り替えたら、いまの位置から続ける
+ */
+function slideInnerPanes(oldPane, newPane, direction) {
+  const S = Motion.SPRINGS;
+  const w = (els.mainArea || newPane.parentElement || document.body).clientWidth || 400;
+  const dist = Math.min(120, w * 0.3);
+  const sign = direction === 'right' ? 1 : -1;
+  // 出ていく途中だったものが、また入ってくる（すばやく行ったり来たり）ときは、その場から戻す
+  if (newPane.classList.contains('pane-leaving')) {
+    newPane.classList.remove('pane-leaving');
+    newPane.__leaving = null;
+  } else {
+    Motion.set(newPane, { x: sign * dist, opacity: 0 });
+  }
+  Motion.animate(newPane, { x: 0 }, { spring: S.page });
+  Motion.animate(newPane, { opacity: 1 }, { spring: S.fade }).then((d) => { if (d) Motion.clear(newPane); });
+  if (!oldPane || oldPane === newPane) return;
+  oldPane.classList.add('pane-leaving');
+  const token = {};
+  oldPane.__leaving = token;
+  Motion.animate(oldPane, { x: -sign * dist }, { spring: S.page });
+  Motion.animate(oldPane, { opacity: 0 }, { spring: S.fade }).then((d) => {
+    if (!d || oldPane.__leaving !== token) return;   // 途中で戻ってきた
+    oldPane.__leaving = null;
+    oldPane.classList.remove('pane-leaving');
+    Motion.clear(oldPane);
+  });
 }
 
 /* ───────── Sessions (outer tabs) ───────── */

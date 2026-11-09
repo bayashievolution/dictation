@@ -698,9 +698,8 @@ html, body {
   z-index: 3;
   opacity: 0;
   transform: translateX(0);
+  /* v0.24.67: 位置と幅は motion.js のばね（外側のタブの線と同じ） */
   transition:
-    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
-    width 0.28s cubic-bezier(0.22, 1, 0.36, 1),
     opacity 0.16s;
   will-change: transform, width;
 }
@@ -1023,6 +1022,16 @@ mark.search-hit.current {
 .pane.active {
   display: flex;
 }
+/* v0.24.67: 中のタブを切り替えたとき、出ていくペインを動き終わるまで重ねて描く（motion.js で横に送る）。
+   押せない・選べない。入ってくるペインを上に重ねる */
+.pane.pane-leaving {
+  display: flex;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.pane.active { z-index: 1; }
 
 /* ───────── Pane transition (zemicale のスライド参考) ───────── */
 @keyframes paneEnterFromRight {
