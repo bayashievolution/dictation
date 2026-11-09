@@ -97,9 +97,10 @@ const clickCode = async (page) => { await page.click('#input-claude-code'); awai
     await ctx.close();
   }
 
-  console.log('■ 「Claude Code 連携」がオフなら、ライブ要約は押せず、要約などは Gemini');
+  // v0.24.93: ライブ要約は Gemini でも作れる。押せないのは Gemini も Claude も使えないときなので、Gemini は切っておく
+  console.log('■ Gemini も Claude Code も使えないなら、ライブ要約は押せない');
   {
-    const { ctx, page } = await open(browser, { apiKey: 'AIza-test', claudeCode: false, liveSummary: true });
+    const { ctx, page } = await open(browser, { apiKey: 'AIza-test', geminiEnabled: false, claudeCode: false, liveSummary: true });
     await openSettings(page);
     eq('ライブ要約は押せず、理由が出る（前の値はオンでも、オフに見せる）', await form(page), {
       code: { checked: false, disabled: false }, live: { checked: false, disabled: true }, liveNote: true,

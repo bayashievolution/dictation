@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.92" />
+  <link rel="stylesheet" href="style.css?v=0.24.93" />
 </head>
 <body>
   <div id="app">
@@ -360,7 +360,7 @@
               <!-- v0.24.92: 「聞き取る AI」は下の「使う AI」の表に移した。ここは、AI で聞き取るのに使える AI が無いときの注意書きだけ -->
               <div class="field ai-caution" id="stt-ai-caution" hidden>
                 <span class="ai-caution-icon" data-icon="sm-warn"></span>
-                <span><strong>API キーが登録されていません</strong><small class="field-hint" style="display:block">文字起こしには Gemini API か Groq Whisper のキーが要ります</small></span>
+                <span><strong>API キーが登録されていないか、有効になっていません</strong><small class="field-hint" style="display:block">文字起こしには Gemini API か Groq Whisper のキーが要ります</small></span>
               </div>
             </div>
           </div>
@@ -443,14 +443,14 @@
         <!-- v0.24.92: 使う AI の表（設定の見本の 3 段目・やっさんの案）。行は働き、列は AI。中身は renderAiTable（app.js）が作る。
              ライブ整形〜質問は 7 個セットで一緒に動く（見えない「文脈の抽出」も一緒）。ライブ要約は Claude Code だけ（live-summary.js の冒頭） -->
         <div class="field-group" id="ai-table-group">
-          <h3 class="field-group-title">使う AI</h3>
+          <h3 class="field-group-title">使用するAI</h3>
+          <div class="field"><small class="field-hint">用途に合わせて使用するAIを選択することができます。</small></div>
           <div class="ai-table-wrap">
-            <table class="ai-table" aria-label="使う AI">
+            <table class="ai-table" aria-label="使用するAI">
               <thead><tr><th></th><th data-col="gemini">Gemini<small>有料</small></th><th data-col="groq">Groq<small>無料</small></th><th data-col="claude">Claude<small>サブスク</small></th></tr></thead>
               <tbody id="ai-table-body"></tbody>
             </table>
           </div>
-          <small class="field-hint">オンにした AI だけ選べます。はじめは無料で済むほうが選ばれます。</small>
         </div>
 
         <!-- v0.24.39: AI まわりの設定を1つにまとめ、やっさんの指定した順に並べた。
@@ -503,7 +503,7 @@
           </label>
           <div class="field">
             <small class="field-hint">文字起こしをしつつ、話題を順に端的にまとめます。</small>
-            <small id="live-summary-note" class="field-hint warn-hint">上の「Claude Code 連携」をオンにすると選べます。</small>
+            <small id="live-summary-note" class="field-hint warn-hint">AI 設定で Gemini API か Claude Code をオンにすると選べます。</small>
           </div>
           <label class="field">
             <span class="field-label">ライブ要約の間隔（分）</span>
@@ -1093,18 +1093,18 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.92"></script>
-  <script src="motion.js?v=0.24.92"></script>
-  <script src="gemini.js?v=0.24.92"></script>
-  <script src="groq.js?v=0.24.92"></script>
-  <script src="notion.js?v=0.24.92"></script>
-  <script src="audio-store.js?v=0.24.92"></script>
-  <script src="claude-bridge.js?v=0.24.92"></script>
-  <script src="claude-installer.js?v=0.24.92"></script>
-  <script src="live-summary.js?v=0.24.92"></script>
-  <script src="image-store.js?v=0.24.92"></script>
-  <script src="gemini-files.js?v=0.24.92"></script>
-  <script src="term-dicts.js?v=0.24.92"></script>
-  <script src="app.js?v=0.24.92"></script>
+  <script src="icons.js?v=0.24.93"></script>
+  <script src="motion.js?v=0.24.93"></script>
+  <script src="gemini.js?v=0.24.93"></script>
+  <script src="groq.js?v=0.24.93"></script>
+  <script src="notion.js?v=0.24.93"></script>
+  <script src="audio-store.js?v=0.24.93"></script>
+  <script src="claude-bridge.js?v=0.24.93"></script>
+  <script src="claude-installer.js?v=0.24.93"></script>
+  <script src="live-summary.js?v=0.24.93"></script>
+  <script src="image-store.js?v=0.24.93"></script>
+  <script src="gemini-files.js?v=0.24.93"></script>
+  <script src="term-dicts.js?v=0.24.93"></script>
+  <script src="app.js?v=0.24.93"></script>
 </body>
 </html>

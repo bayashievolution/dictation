@@ -249,7 +249,8 @@ const PANE_META = {
  */
 function paneVisible(id) {
   // v0.24.39: 「Claude Code」がオフならライブ要約は動かないので、タブも出さない
-  if (id === 'pane-live') return !!(state.settings.liveSummary && state.settings.claudeCode);
+  // v0.24.93: ライブ要約は 7 個セットと同じ AI で作る（Gemini でも作れるようにした・やっさん「Gemini API は全てできるように」）
+  if (id === 'pane-live') return !!(state.settings.liveSummary && postEngineNow());
   return true;
 }
 function visiblePaneOrder() {
@@ -2552,16 +2553,34 @@ function refreshBusyIndicators() {
   if (memoBtn) memoBtn.classList.toggle('firing', isBusy('memoRefine', id));
 }
 
+/**
+ * ライブ要約を Gemini で作る (v0.24.93)
+ * 文面は Claude と同じ（buildLiveSummaryPrompt）。返す形も claudeBridgeRun にそろえる（{ ok, text, seconds, error }）。
+ * feature 'live-summary' は Claude の振り分けの対象に入っていないので、_callGemini はそのまま Gemini に送る
+ */
+async function runLiveSummaryWithGemini(prompt) {
+  const t0 = Date.now();
+  try {
+    const text = await _callGemini({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.3, topP: 0.9, maxOutputTokens: 8192, responseMimeType: 'text/plain' },
+    }, geminiKey(), { feature: 'live-summary' });
+    return { ok: true, text, seconds: Math.round((Date.now() - t0) / 100) / 10 };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
 /** リアルタイム要約で Claude を待つ上限。ほかの処理（180秒）より長くする (v0.24.23) */
 const LIVE_SUMMARY_TIMEOUT_MS = 600000;
 
 /** いま使える状態か。設定がオンで、Claude 連携がオンで、ログイン切れ等で止まっていない */
 function liveSummaryActive() {
   if (!state.settings.liveSummary) return false;
-  // v0.24.39: 見るのは「Claude Code」（連携を使う）。「一部を Claude Code で処理する」はオフでもよい
-  // （ライブ要約は Claude、普通の要約は Gemini、という使い方ができる）
-  if (!state.settings.claudeCode) return false;
-  if (typeof claudeBridgeBrokenReason === 'function' && claudeBridgeBrokenReason()) return false;
+  // v0.24.93: 作るのは 7 個セットの AI（使う AI の表）。Claude ならログイン切れ等で止まっていないかも見る
+  const engine = postEngineNow();
+  if (!engine) return false;
+  if (engine === 'claude' && typeof claudeBridgeBrokenReason === 'function' && claudeBridgeBrokenReason()) return false;
   return true;
 }
 
@@ -2725,8 +2744,11 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
   const dim = manual || fresh || final;
   markBusy('live', sessionId, true);
   if (dim) markBusy('liveDim', sessionId, true);
-  diagLog.info(`ライブ要約を更新します（${fresh ? '最初から' : final ? '最終版' : '途中'} / 文字起こし${src.transcript.length}字）`);
-  if (!state.isRecording || manual) beginStatusTask(`live:${sessionId}`, fresh ? '目次付きで要約し直しています（Claude）' : 'ライブ要約を更新中（Claude）');
+  // v0.24.93: Claude か Gemini か（使う AI の表の 7 個セット）。途中で表を変えても、この回は始めたときの AI で作る
+  const engine = postEngineNow();
+  const who = engine === 'gemini' ? 'Gemini' : 'Claude';
+  diagLog.info(`ライブ要約を更新します（${who} / ${fresh ? '最初から' : final ? '最終版' : '途中'} / 文字起こし${src.transcript.length}字）`);
+  if (!state.isRecording || manual) beginStatusTask(`live:${sessionId}`, fresh ? `目次付きで要約し直しています（${who}）` : `ライブ要約を更新中（${who}）`);
   try {
     const prompt = buildLiveSummaryPrompt({
       transcript: src.transcript, previous: src.previous, memo: src.memo,
@@ -2734,8 +2756,10 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
     });
     // v0.24.23: 考える量を減らし（実測 23秒→14秒・中身はほぼ同じ）、長く待つ。
     // やっさんの手元では 144.8秒かかり、次の回は 180秒で時間切れになっていた
-    const r = await claudeBridgeRun(prompt, { effort: 'low', timeoutMs: LIVE_SUMMARY_TIMEOUT_MS });
-    if (!r.ok) throw new Error(r.error || 'Claude で処理できませんでした');
+    const r = engine === 'gemini'
+      ? await runLiveSummaryWithGemini(prompt)
+      : await claudeBridgeRun(prompt, { effort: 'low', timeoutMs: LIVE_SUMMARY_TIMEOUT_MS });
+    if (!r.ok) throw new Error(r.error || `${who} で処理できませんでした`);
     const norm = normalizeLiveSummary(r.text);
     if (!norm.ok) diagLog.info('ライブ要約: 目次が見つからない形で返ってきました（そのまま表示します）');
     session = state.sessions.find((x) => x.id === sessionId);
@@ -2756,17 +2780,18 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
     persistSessions();
     state.liveSummaryLastLen = src.transcript.length;
     diagLog.info(`ライブ要約を更新しました（${r.seconds != null ? r.seconds + '秒' : '?'}）`);
-    statusNotice('listening', fresh ? '目次付きで要約し直しました（Claude）' : 'ライブ要約を更新しました（Claude）', { ms: 2500 });
+    statusNotice('listening', fresh ? `目次付きで要約し直しました（${who}）` : `ライブ要約を更新しました（${who}）`, { ms: 2500 });
     return true;
   } catch (e) {
     const msg = String((e && e.message) || e);
     diagLog.info('ライブ要約を更新できませんでした: ' + msg);
     // ログイン切れなどは覚えて、10分ごとに同じ失敗を繰り返さない（要約・質問と同じ扱い）
-    if (typeof claudeBridgeIsFatal === 'function' && claudeBridgeIsFatal(msg)) claudeBridgeMarkBroken(msg);
-    // **Gemini には戻さない**。戻すと 10分ごとに黙って Gemini のトークンを使う
-    statusNotice('error', 'ライブ要約を更新できませんでした（Gemini には切り替えていません）', {
+    if (engine === 'claude' && typeof claudeBridgeIsFatal === 'function' && claudeBridgeIsFatal(msg)) claudeBridgeMarkBroken(msg);
+    // Claude で失敗しても **Gemini には戻さない**。戻すと 10分ごとに黙って Gemini のトークンを使う。
+    // Gemini で作るのは、使う AI の表でやっさんが Gemini を選んだときだけ
+    statusNotice('error', engine === 'claude' ? 'ライブ要約を更新できませんでした（Gemini には切り替えていません）' : 'ライブ要約を更新できませんでした（Gemini）', {
       detail: `${msg}\n\n${state.isRecording ? '次の回にもう一度試します。' : ''}`
-        + '「接続を確認」で Claude 連携の状態を見られます。',
+        + (engine === 'claude' ? '「接続を確認」で Claude 連携の状態を見られます。' : ''),
     });
     return false;
   } finally {
@@ -4546,7 +4571,7 @@ function applyAiSettingsVisibility(animated = true) {
  * - 表に出すのは「設定画面でいまオンになっていて、キーが入っている AI」だけ選べる（保存前の欄の値で判断する）
  * - 選んだ AI が使えなくなったら、無料で済むほうへ移ったように見せる（覚えている好みは消さない。戻せば元どおり）
  * - ライブ整形〜質問は 7 個セット。どの行を押しても一緒に変わる。見えない「文脈の抽出」も一緒（claude-bridge の振り分け）
- * - ライブ要約は Claude Code だけ（live-summary.js の冒頭「Gemini には戻さない」）。Gemini の列は — にする
+ * - ライブ要約も 7 個セットに入る（v0.24.93 から Gemini でも作れる。Claude で失敗したときに黙って Gemini に回さないのは今までどおり）
  * - 話者判別は Gemini だけ（音声を聞く処理なので Claude には回せない。Groq には話者判別が無い）
  */
 let aiPickWorking = null;
@@ -4555,7 +4580,7 @@ const AI_TABLE_ROWS = [
   { key: 'stt', label: '文字起こし', can: ['gemini', 'groq'] },
   { key: 'post', label: 'ライブ整形', can: ['gemini', 'claude'], grp: 'start' },
   { key: 'post', label: '全体整形', can: ['gemini', 'claude'], grp: 'mid' },
-  { key: 'live', label: 'ライブ要約', can: ['claude'], grp: 'mid' },
+  { key: 'post', label: 'ライブ要約', can: ['gemini', 'claude'], grp: 'mid' },   // v0.24.93: Gemini でも作れる
   { key: 'post', label: 'メモの整形', can: ['gemini', 'claude'], grp: 'mid' },
   { key: 'post', label: 'タイトル生成', can: ['gemini', 'claude'], grp: 'mid' },
   { key: 'post', label: '要約', can: ['gemini', 'claude'], grp: 'mid' },
@@ -4578,15 +4603,14 @@ function renderAiTable() {
   const now = {
     stt: ws ? null : pickAvailable(aiPickWorking.stt, avail, ['groq', 'gemini']),
     post: pickAvailable(aiPickWorking.post, avail, ['claude', 'gemini']),
-    live: avail.claude ? 'claude' : null,
     dia: avail.gemini ? 'gemini' : null,
   };
   body.innerHTML = AI_TABLE_ROWS.map((r) => {
-    const tag = r.grp === 'start' ? '<span class="ai-table-tag">7個セット</span>'
-      : (r.key === 'stt' && ws) ? '<span class="ai-table-tag">Web Speech</span>' : '';
+    // v0.24.93: 「7個セット」の札は外した（やっさん「説明しすぎの部類」）。一緒に動くことは、押せば分かる（左のうすい線でくくってある）
+    const tag = (r.key === 'stt' && ws) ? '<span class="ai-table-tag">Web Speech</span>' : '';
     const cells = AI_TABLE_COLS.map((a) => {
       if (!r.can.includes(a)) return '<td><span class="ai-pick-none" aria-hidden="true">—</span></td>';
-      const fixed = r.key === 'live' || r.key === 'dia';   // 選ぶものが 1 つしか無い行は押せない（しるしだけ）
+      const fixed = r.key === 'dia';   // 選ぶものが 1 つしか無い行は押せない（しるしだけ）
       const disabled = !avail[a] || (r.key === 'stt' && ws) || fixed;
       const checked = now[r.key] === a;
       return `<td class="${r.grp ? 'ai-grp' : ''}" data-col="${a}"><button type="button" class="ai-pick" role="radio" data-k="${r.key}" data-a="${a}"`
@@ -4996,25 +5020,27 @@ function applyLiveSummaryTab() {
  */
 function applyLiveSummaryAvailability(animated = true) {
   // v0.24.39: ライブ要約と「一部を Claude Code で処理する」は、どちらも「Claude Code」がオンのときだけ選べる
+  // v0.24.93: ライブ要約は Gemini でも作れるようにしたので、Gemini API（キーあり）か Claude Code のどちらかで選べる
   const claudeOn = !!(els.inputClaudeCode && els.inputClaudeCode.checked);
+  const liveOn = claudeOn || (typeof formAiAvail === 'function' && formAiAvail().gemini);
   // v0.24.58: 「失敗したら Gemini で処理する」は連携がオンのときだけ出す（オフなら意味が無い）。値は覚えたまま
   // v0.24.77: 出し入れは高さと濃さをばねで（やっさん「Claude Code 連携をオンにして現れるメニューが唐突に出る」）。
   // 設定を開いた直後（openSettings から呼ぶとき）は動かさずにその状態にする
   revealSettingRow(els.claudeFallbackRow, claudeOn, animated, true);   // 外の余白（.field の 16px）も一緒に縮める
-  for (const [box, note, extra] of [
-    [els.inputLiveSummary, els.liveSummaryNote, els.inputLiveSummaryMin],
-    [els.inputClaudeBridge, els.claudeRouteNote, null],
+  for (const [box, note, extra, ok] of [
+    [els.inputLiveSummary, els.liveSummaryNote, els.inputLiveSummaryMin, liveOn],
+    [els.inputClaudeBridge, els.claudeRouteNote, null, claudeOn],
   ]) {
     if (!box) continue;
     // 押せなかったものを押せるようにするときは、覚えている値に戻す（オフにして戻したら元どおり）
-    if (claudeOn && box.disabled) {
+    if (ok && box.disabled) {
       box.checked = box === els.inputLiveSummary ? !!state.settings.liveSummary : !!state.settings.useClaudeBridge;
     }
-    box.disabled = !claudeOn;
-    if (extra) extra.disabled = !claudeOn;
-    if (!claudeOn) box.checked = false;
+    box.disabled = !ok;
+    if (extra) extra.disabled = !ok;
+    if (!ok) box.checked = false;
     // v0.24.77: 「オンにすると選べます」の断り書きも、ばねで出し入れ（前は一瞬）
-    revealSettingRow(note, !claudeOn, animated, true);
+    revealSettingRow(note, !ok, animated, true);
   }
 }
 
@@ -6977,18 +7003,19 @@ function applyPaneOrder() {
  */
 function paneAiProblem(id) {
   // v0.24.91: 見出しと一言に分けた（やっさん「このくらいの説明がちょうどいい。他のタブもこの感じで」）。
-  // キーが入っているのにトグルを切っているときは「登録されていません」と言わない（できないことをできると言わない、の裏返し）
   const claude = !!state.settings.claudeCode;
-  const off = (has) => has ? 'API がオフになっています' : 'API キーが登録されていません';
+  // v0.24.93: やっさん「API を設定していても、トグルをオフにすると出る。『登録されていないか、有効になっていません』みたいな感じに」。
+  // 登録していない・トグルを切っている、のどちらでも嘘にならない一文にそろえた（設定の注意書きも同じ）
+  const off = () => 'API キーが登録されていないか、有効になっていません';
   if (id === 'pane-transcript') {
     if (state.settings.inputMode !== 'gemini-audio') return null;   // Web Speech は AI 無しで動く
     if (geminiKey() || usesGroqTranscribe()) return null;
     return { title: off(!!(state.settings.apiKey || state.settings.groqApiKey)), sub: '文字起こしには Gemini API か Groq Whisper のキーが要ります' };
   }
-  if (id === 'pane-live') return claude ? null : { title: 'Claude Code がオフになっています', sub: 'ライブ要約には Claude Code が要ります' };
-  if (id === 'pane-summary' || id === 'pane-chat') {
+  if (id === 'pane-summary' || id === 'pane-chat' || id === 'pane-live') {
+    // v0.24.93: ライブ要約も Gemini で作れるようにしたので、要約・質問と同じ
     if (geminiKey() || claude) return null;
-    const what = id === 'pane-summary' ? '要約' : '質問';
+    const what = id === 'pane-summary' ? '要約' : id === 'pane-live' ? 'ライブ要約' : '質問';
     return { title: off(!!state.settings.apiKey), sub: `${what}には Gemini API のキーか Claude Code が要ります` };
   }
   return null;
@@ -7000,7 +7027,6 @@ function paneAiName(id) {
     if (state.settings.inputMode !== 'gemini-audio') return 'Web Speech';
     return usesGroqTranscribe() ? 'Groq Whisper' : 'Gemini';
   }
-  if (id === 'pane-live') return 'Claude Code';
   return postEngineNow() === 'claude' ? 'Claude Code' : 'Gemini';
 }
 
@@ -10383,10 +10409,10 @@ if (els.modeGemini) {
 
 // v0.24.88: AI 設定のトグルを切り替えたら、その下（キーの欄・連携のボタン）を出し入れする
 for (const box of [els.inputGeminiEnabled, els.inputGroqEnabled, els.inputClaudeCode]) {
-  if (box) box.addEventListener('change', () => { applyAiSettingsVisibility(true); renderAiTable(); });
+  if (box) box.addEventListener('change', () => { applyAiSettingsVisibility(true); renderAiTable(); applyLiveSummaryAvailability(); });
 }
 // v0.24.92: キーを入れた・消した、モードを変えたら、表と注意書きも描き直す
-for (const el of [els.inputApiKey, els.inputGroqKey]) if (el) el.addEventListener('input', renderAiTable);
+for (const el of [els.inputApiKey, els.inputGroqKey]) if (el) el.addEventListener('input', () => { renderAiTable(); applyLiveSummaryAvailability(); });
 for (const el of [els.modeGemini, els.modeWebSpeech]) if (el) el.addEventListener('change', renderAiTable);
 if (els.aiTableBody) {
   els.aiTableBody.addEventListener('click', (e) => {

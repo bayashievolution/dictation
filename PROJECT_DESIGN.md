@@ -3535,3 +3535,10 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - AI で聞き取るのに文字起こしの AI が無いときは、モードの下にオレンジの注意書き「API キーが登録されていません／文字起こしには Gemini API か Groq Whisper のキーが要ります」
   - テスト: `tests/browser/t-ai-table-browser.js`（新規）。`t-groq-browser.js`・`t-live-claude-browser.js`・`t-settings-structure.js`・`t-status-label.js` を合わせた。
     **v0.24.88 で `t-live-claude-browser.js` の 2 件（Claude の説明の古い文）を落としたまま気づかなかった**（その版で走らせた範囲に入っていなかった）。今回は tests/browser を全部走らせた（40 本・全部通過）
+- 2026-11-09 (v0.24.93): **ライブ要約も Gemini で作れるように・表と注意書きの言葉を整えた**（やっさん「Gemini API は全てできるようにしよう」）
+  - ライブ要約は、使用するAI の表の「ライブ整形〜質問」と同じ AI で作る（`postEngineNow`）。Gemini のときは `runLiveSummaryWithGemini`（文面は Claude と同じ・使用量は「ライブ要約」として数える）。
+    **Claude で失敗したときに黙って Gemini に回さないのは今までどおり**（Gemini で作るのは表でやっさんが選んだときだけ）
+  - ライブ要約の設定・タブは、Gemini API（キーあり）か Claude Code のどちらかがあれば選べる・出る（前は Claude だけ）
+  - 表: 見出し「使う AI」→「**使用するAI**」、説明はやっさんの一文「用途に合わせて使用するAIを選択することができます。」だけ。「7個セット」の札・左のくくりの線・下の一言は外した（「説明しすぎ」「区切り線で十分」）
+  - 注意書きの見出しを「**API キーが登録されていないか、有効になっていません**」に統一（設定・タブとも。キーを入れたままトグルを切ったときも嘘にならない）
+  - テスト: `t-ai-table-browser.js` に Gemini でライブ要約を作る場面。`t-live-summary-browser.js`・`t-settings-ai-browser.js`・`t-motion-settings-browser.js` は「ライブ要約を選べない」場面を Gemini も切った形に合わせた。tests/browser を全部走らせて全部通過

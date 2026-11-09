@@ -47,9 +47,9 @@ const hint = (page, id) => page.evaluate(id => {
     eq('しるしは SUMADO の注意の絵', await page.$eval('.inner-tab.needs-ai .inner-tab-icon', n => n.dataset.icon), 'sm-warn');
     const h = await hint(page, 'empty-hint');
     eq('文字起こしの案内は注意と「AI 設定を開く」（v0.24.91 の文言）', [h.warn, h.text, h.sub, h.button],
-       [true, 'API キーが登録されていません', '文字起こしには Gemini API か Groq Whisper のキーが要ります', true]);
+       [true, 'API キーが登録されていないか、有効になっていません', '文字起こしには Gemini API か Groq Whisper のキーが要ります', true]);
     eq('要約の案内', [(await hint(page, 'summary-empty')).text, (await hint(page, 'summary-empty')).sub],
-       ['API キーが登録されていません', '要約には Gemini API のキーか Claude Code が要ります']);
+       ['API キーが登録されていないか、有効になっていません', '要約には Gemini API のキーか Claude Code が要ります']);
     eq('質問の案内', (await hint(page, 'chat-empty')).sub, '質問には Gemini API のキーか Claude Code が要ります');
     await page.click('#empty-hint .empty-open-ai');
     await page.waitForTimeout(400);
@@ -81,7 +81,7 @@ const hint = (page, id) => page.evaluate(id => {
   console.log('\n■ キーはあるのにトグルを切っている');
   {
     const { ctx, page } = await open(browser, { inputMode: 'gemini-audio', apiKey: 'AIza', geminiEnabled: false, claudeCode: false });
-    eq('「登録されていません」とは言わない', (await hint(page, 'empty-hint')).text, 'API がオフになっています');
+    eq('切っているときも同じ一文（登録されていないか、有効になっていません）', (await hint(page, 'empty-hint')).text, 'API キーが登録されていないか、有効になっていません');
     await ctx.close();
   }
 

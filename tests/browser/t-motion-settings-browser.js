@@ -8,7 +8,7 @@
 //
 // やっさん「設定モーダルの中 ClaudeCode連携をオンにして現れるメニューが唐突に出る　唐突に出る動きを徹底的にほかにないか調べてみて」。
 //   - 「Claude Codeでの処理に失敗したらGemini APIで処理する」の行（連携をオンにすると出る）
-//   - 「上の Claude Code 連携をオンにすると選べます」の断り書き（連携をオフにすると出る）
+//   - 「AI 設定で Gemini API か Claude Code をオンにすると選べます」の断り書き（v0.24.93。Gemini を切った状態で連携をオフにすると出る）
 //   - 連携・Notion の横の状態（字の長さで折り返して、行の高さが変わる）
 //   - スイッチのつまみ（ease で滑っていた）
 const { chromium } = require('playwright');
@@ -27,7 +27,7 @@ const eq = (label, got, want) => {
   await page.route('**/api/claude/health', r => r.fulfill({ contentType: 'application/json',
     body: JSON.stringify({ ok: true, invocation: 'claude', version: '0.24.77', features: ['effort', 'timeout', 'session'], auth: { ok: true, loggedIn: true } }) }));
   await page.goto(URL);
-  await page.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({ apiKey: 'AIza-test', claudeCode: false })));
+  await page.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({ apiKey: 'AIza-test', geminiEnabled: false, claudeCode: false })));
   await page.reload();
   await page.waitForTimeout(800);
   await page.evaluate(() => document.getElementById('btn-settings').click());

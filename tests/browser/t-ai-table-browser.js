@@ -36,7 +36,6 @@ async function open(browser, settings) {
 }
 const checked = page => page.$$eval('.ai-pick[aria-checked="true"]', bs => bs.map(b => b.dataset.k + ':' + b.dataset.a));
 const disabled = (page, k, a) => page.$eval(`.ai-pick[data-k="${k}"][data-a="${a}"]`, b => b.disabled);
-const POST7 = Array(6).fill('post:claude');
 
 (async () => {
   const browser = await chromium.launch();
@@ -45,16 +44,47 @@ const POST7 = Array(6).fill('post:claude');
   console.log('■ 全部オン（やっさんのいまの設定）');
   {
     const { ctx, page } = await open(browser, all);
-    eq('無料で済むほうが選ばれている（文字起こし Groq・7 個 Claude・ライブ要約 Claude・話者判別 Gemini）', await checked(page),
-       ['stt:groq', ...POST7.slice(0, 2), 'live:claude', ...POST7.slice(2), 'dia:gemini']);
-    eq('ライブ要約の Gemini は —（Claude だけ）', await page.$$eval('tbody#ai-table-body tr:nth-child(4) td', tds => tds.map(t => t.textContent.trim())), ['—', '—', '']);
-    eq('ライブ要約・話者判別は押せない（1 つしか無い）', [await disabled(page, 'live', 'claude'), await disabled(page, 'dia', 'gemini')], [true, true]);
-    await page.click('.ai-pick[data-k="post"][data-a="gemini"] >> nth=4');   // 「要約」の行の Gemini
-    eq('7 個セットは一緒に Gemini へ（ライブ要約は Claude のまま）', (await checked(page)).filter(x => x.startsWith('post')), Array(6).fill('post:gemini'));
+    eq('無料で済むほうが選ばれている（文字起こし Groq・ライブ整形〜質問 Claude・話者判別 Gemini）', await checked(page),
+       ['stt:groq', ...Array(7).fill('post:claude'), 'dia:gemini']);
+    eq('見出しは「使用するAI」・説明はやっさんの一文だけ・セットの札は無い（v0.24.93）',
+       [await page.textContent('#ai-table-group .field-group-title'), await page.$$eval('#ai-table-group .field-hint', n => n.map(x => x.textContent)), await page.$$eval('#ai-table-group .ai-table-tag', n => n.length)],
+       ['使用するAI', ['用途に合わせて使用するAIを選択することができます。'], 0]);
+    eq('ライブ要約も Gemini を選べる（v0.24.93）', await disabled(page, 'post', 'gemini'), false);
+    eq('話者判別は押せない（1 つしか無い）', await disabled(page, 'dia', 'gemini'), true);
+    await page.click('.ai-pick[data-k="post"][data-a="gemini"] >> nth=5');   // 「要約」の行の Gemini
+    eq('ライブ整形〜質問は一緒に Gemini へ（ライブ要約も）', (await checked(page)).filter(x => x.startsWith('post')), Array(7).fill('post:gemini'));
     await page.click('#btn-settings-save');
     await page.waitForTimeout(300);
     const r = await page.evaluate(() => ({ post: state.settings.postEngine, bridge: claudeBridgeIsEnabled(), live: paneAiName('pane-live'), sum: paneAiName('pane-summary') }));
-    eq('保存すると 7 個は Gemini・連携の振り分けは止まる・ライブ要約は Claude のまま', r, { post: 'gemini', bridge: false, live: 'Claude Code', sum: 'Gemini' });
+    eq('保存すると Gemini・連携の振り分けは止まる・ライブ要約も Gemini', r, { post: 'gemini', bridge: false, live: 'Gemini', sum: 'Gemini' });
+    await ctx.close();
+  }
+
+  console.log('\n■ ライブ要約を Gemini で作る（v0.24.93 やっさん「Gemini API は全てできるように」）');
+  {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
+    const seen = { gemini: [], claude: 0 };
+    await page.route('**/generativelanguage.googleapis.com/**', r => {
+      seen.gemini.push(JSON.parse(r.request().postData()).contents[0].parts[0].text);
+      r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '## 目次\n1. 評価の観点\n\n## 評価の観点\n- 三つある' }] }, finishReason: 'STOP' }] }) });
+    });
+    await page.route('**/api/claude**', r => { seen.claude++; r.abort(); });
+    await page.goto(URL);
+    await page.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({ apiKey: 'AIza', claudeCode: false, liveSummary: true, inputMode: 'web-speech', aiEnabled: false })));
+    await page.reload();
+    await page.waitForTimeout(700);
+    eq('Claude が無くてもライブ要約のタブが出る', await page.evaluate(() => !!document.querySelector('.inner-tab[data-pane="pane-live"]')), true);
+    await page.evaluate(() => {
+      const p = document.createElement('div'); p.className = 'paragraph';
+      p.textContent = '今日は評価論の話をします。評価の観点は三つあります。'.repeat(10);
+      document.getElementById('confirmed').appendChild(p); snapshotActiveToSession();
+    });
+    const ok = await page.evaluate(() => runLiveSummary({ sessionId: state.activeId, manual: true }));
+    eq('Gemini で作れる', [ok, seen.gemini.length, seen.claude], [true, 1, 0]);
+    eq('頼む文面は Claude と同じ（目次付き）', seen.gemini[0].includes('目次付きの要約'), true);
+    eq('ライブ要約タブに入る', (await page.textContent('#live-summary')).includes('評価の観点'), true);
     await ctx.close();
   }
 
@@ -80,7 +110,7 @@ const POST7 = Array(6).fill('post:claude');
     await page.waitForTimeout(500);
     eq('モードの下に注意書き', await page.isVisible('#stt-ai-caution'), true);
     eq('注意書きの文', (await page.textContent('#stt-ai-caution')).replace(/\s+/g, ''),
-       'APIキーが登録されていません文字起こしにはGeminiAPIかGroqWhisperのキーが要ります');
+       'APIキーが登録されていないか、有効になっていません文字起こしにはGeminiAPIかGroqWhisperのキーが要ります');
     await page.check('#mode-webspeech');
     await page.waitForTimeout(700);
     eq('Web Speech にすると注意書きは消える', await page.evaluate(() => document.getElementById('stt-ai-caution').hidden), true);

@@ -156,9 +156,10 @@ const summary = (page) => page.evaluate(() => ({
     await ctx.close();
   }
 
-  console.log('■ 設定: Claude 連携がオフのときは選べない');
+  // v0.24.93: ライブ要約は Gemini でも作れるようにした。選べないのは Gemini も Claude も使えないとき
+  console.log('■ 設定: Gemini も Claude も使えないときは選べない');
   {
-    const { ctx, page } = await open(browser, { settings: { useClaudeBridge: false, liveSummary: false } });
+    const { ctx, page } = await open(browser, { settings: { useClaudeBridge: false, liveSummary: false, geminiEnabled: false } });
     await page.evaluate(() => document.getElementById('btn-settings').click());
     await page.waitForTimeout(200);
     const st = () => page.evaluate(() => ({
@@ -170,6 +171,12 @@ const summary = (page) => page.evaluate(() => ({
     await page.evaluate(() => { const b = document.getElementById('input-claude-code'); b.checked = true; b.dispatchEvent(new Event('change')); });
     await page.waitForTimeout(800);   // v0.24.77: 断り書きは高さと濃さをばねでしまうので、しまい終わってから見る
     eq('Claude 連携をオンにすると押せる', await st(), { disabled: false, note: false });
+    await page.evaluate(() => { const b = document.getElementById('input-claude-code'); b.checked = false; b.dispatchEvent(new Event('change')); });
+    await page.waitForTimeout(800);
+    eq('Claude を切るとまた押せない', await st(), { disabled: true, note: true });
+    await page.evaluate(() => { const b = document.getElementById('input-gemini-enabled'); b.checked = true; b.dispatchEvent(new Event('change')); });
+    await page.waitForTimeout(800);
+    eq('Gemini API（キーあり）をオンにしても押せる（v0.24.93）', await st(), { disabled: false, note: false });
     await ctx.close();
   }
 

@@ -3458,7 +3458,8 @@ body.chat-active .dict-menu { bottom: 114px; }
 }
 
 /* ───────── 設定: 使う AI の表 (v0.24.92・設定の見本の 3 段目) ───────── */
-.ai-table-wrap { overflow-x: auto; margin-bottom: 6px; }
+.ai-table-wrap { overflow-x: auto; }
+/* v0.24.93: くくりの線・説明の一言は外した（やっさん「区切り線で十分」「説明しすぎ」） */
 .ai-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ai-table th, .ai-table td { padding: 0; text-align: center; }
 .ai-table thead th { font-size: 11.5px; font-weight: 700; padding: 6px 4px 6px; line-height: 1.35; color: var(--text); }
@@ -3466,7 +3467,6 @@ body.chat-active .dict-menu { bottom: 114px; }
 .ai-table thead th.off { color: var(--text-faint); }
 .ai-table tbody th { text-align: left; font-weight: 500; padding-right: 8px; white-space: nowrap; color: var(--text); }
 .ai-table tbody tr { border-top: 1px solid var(--border); }
-.ai-table tbody tr.ai-grp-mid, .ai-table tbody tr.ai-grp-end { border-top-color: transparent; }
 .ai-table td { height: 34px; }
 .ai-table-tag { display: inline-block; font-size: 10px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; margin-left: 6px; vertical-align: 1px; font-weight: 400; }
 .ai-pick { appearance: none; border: none; background: none; width: 100%; height: 34px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
@@ -3476,9 +3476,6 @@ body.chat-active .dict-menu { bottom: 114px; }
 .ai-pick:disabled:not([aria-checked="true"]) .ai-pick-dot { border-style: dashed; opacity: .45; }
 .ai-pick:focus-visible .ai-pick-dot { outline: 2px solid var(--heading); outline-offset: 2px; }
 .ai-pick-none { color: var(--text-faint); font-size: 12px; }
-/* 7 個セットのくくり: 左にうすい線 */
-.ai-table tbody tr.ai-grp-row th { box-shadow: inset 2px 0 0 var(--accent-dim); padding-left: 8px; }
-.ai-table tbody tr:not(.ai-grp-row) th { padding-left: 0; }
 
 /* 文字起こしに使える AI が無いときの注意書き（文字起こしのモードの下） */
 .ai-caution { display: flex; gap: 8px; align-items: flex-start; }

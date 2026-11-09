@@ -78,7 +78,7 @@ function geminiUsageSnapshot() { return JSON.parse(JSON.stringify(_geminiUsage))
 
 const GEMINI_USAGE_LABELS = {
   transcribe: '文字起こし', diarize: '話者判別', 'context-extract': '文脈', 'live-refine': 'ライブ整形',
-  'live-heading': '見出し追加', 'whole-refine': '全体整形', summary: '要約', title: 'タイトル', chat: '質問',
+  'live-heading': '見出し追加', 'live-summary': 'ライブ要約', 'whole-refine': '全体整形', summary: '要約', title: 'タイトル', chat: '質問',
   osd: '字幕', 'memo-refine': 'メモ整形', other: 'その他',
 };
 /** 診断ログに出す1行。使っていなければ空 */
