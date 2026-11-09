@@ -229,6 +229,10 @@
 
   /* ───────── 出す・しまう（reveal） ───────── */
   const revealStates = new WeakMap();
+  // reveal が毎フレーム書くもの。終わったら「書く前の値」に戻す（'' で消すと、その要素がもともと style に持っていた値まで消える）
+  const REVEAL_PROPS = ['height', 'overflow', 'boxSizing', 'paddingTop', 'paddingBottom', 'marginTop', 'marginBottom'];
+  const saveInline = (el) => { const o = {}; for (const k of REVEAL_PROPS) o[k] = el.style[k]; return o; };
+  const restoreInline = (el, o) => { for (const k of REVEAL_PROPS) el.style[k] = o ? o[k] : ''; };
   // o.withMargin（ディクテーション用に足した）: 外の余白（margin）も高さと同じ割合で縮める。
   // 余白を中に移すと見た目（区切り線の位置など）が変わってしまう要素で、縮みきったところで余白が詰まって跳ばないように
   function reveal(el, show, o) {
@@ -236,11 +240,16 @@
     let st = revealStates.get(el);
     if (!st) {
       const driver = document.createElement('span');
-      st = { driver, shown: !el.hidden, moving: false, full: 0, mt: 0, mb: 0, withMargin: false };
+      st = { driver, shown: !el.hidden, moving: false, full: 0, mt: 0, mb: 0, pt: 0, pb: 0, withMargin: false };
       onFrame(driver, ({ x }) => {
         el.style.height = `${Math.max(0, x)}px`;
+        // 箱は自分の余白（padding）より低くなれないので、余白も高さと同じ割合で縮める（余白だけでできた空の案内でも 0 まで縮む）
+        const f = st.full > 0 ? Math.max(0, Math.min(1, x / st.full)) : 1;
+        if (st.pt || st.pb) {
+          el.style.paddingTop = `${st.pt * f}px`;
+          el.style.paddingBottom = `${st.pb * f}px`;
+        }
         if (st.withMargin && st.full > 0) {
-          const f = Math.max(0, Math.min(1, x / st.full));
           el.style.marginTop = `${st.mt * f}px`;
           el.style.marginBottom = `${st.mb * f}px`;
         }
@@ -251,24 +260,29 @@
     if (st.shown === show && !st.moving) { el.hidden = !show; return Promise.resolve(true); }
     st.shown = show;
     if (instant) {
-      el.hidden = !show; el.style.height = ''; el.style.overflow = '';
+      // 動いている途中なら高さのばねを止める（止めないと、このあとも高さを書き続ける）。止めると一度書くので、そのあとで消す
+      if (st.moving) { set(st.driver, { x: 0 }); st.moving = false; restoreInline(el, st.orig); }
+      el.hidden = !show;
       clear(el);
       return Promise.resolve(true);
     }
     const from = st.moving ? current(st.driver).x : (show ? 0 : el.offsetHeight);
+    if (!st.moving) st.orig = saveInline(el);
     el.hidden = false;
-    el.style.height = '';
+    // 本来の高さ・余白は、書き込んだ値を外して（書く前の値に戻して）測る（動いている途中なら途中の値が入っているため）
+    restoreInline(el, st.orig);
     const to = show ? el.offsetHeight : 0;
-    if (st.withMargin) {
-      // 本来の余白は、書き込んだ値を外して測る（動いている途中なら途中の値が入っているため）
-      el.style.marginTop = ''; el.style.marginBottom = '';
-      const cs = getComputedStyle(el);
-      st.mt = parseFloat(cs.marginTop) || 0;
-      st.mb = parseFloat(cs.marginBottom) || 0;
-      st.full = show ? to : Math.max(from, st.full || 0, 1);
-      if (!show && !st.moving) st.full = from;
-    }
+    const cs = getComputedStyle(el);
+    st.pt = parseFloat(cs.paddingTop) || 0;
+    st.pb = parseFloat(cs.paddingBottom) || 0;
+    st.mt = parseFloat(cs.marginTop) || 0;
+    st.mb = parseFloat(cs.marginBottom) || 0;
+    // 「いっぱいの高さ」: 出すなら出しきった高さ、しまうならしまいはじめの高さ（途中で逆にしたときは大きいほう）
+    st.full = show ? to : (st.moving ? Math.max(from, st.full || 0) : from);
     el.style.overflow = 'hidden';
+    // 高さは余白（padding）も含めて測っているので、書くときも余白込みにする。content-box のままだと、
+    // 余白の分は縮まずに残り、最後に隠したところで跳ぶ（空のときの案内は上下 60px の余白だけでできていて、まったく縮まなかった）
+    el.style.boxSizing = 'border-box';
     el.style.height = `${from}px`;
     set(st.driver, { x: from });
     st.moving = true;
@@ -279,9 +293,7 @@
     return animate(st.driver, { x: to }, { spring: SPRINGS.sheet }).then((done) => {
       if (!done) return false;
       st.moving = false;
-      el.style.height = '';
-      el.style.overflow = '';
-      if (st.withMargin) { el.style.marginTop = ''; el.style.marginBottom = ''; }
+      restoreInline(el, st.orig);
       if (!show) el.hidden = true;
       clear(el);   // 濃さのばねがまだ動いていても止めて、style を CSS に戻す
       return true;
@@ -316,6 +328,7 @@
       if (moving && Math.abs(to - target) < 1) return;
       if (Math.abs(to - from) < 1) { if (!moving) shown = to; return; }
       if (!moving) set(driver, { x: from });
+      box.style.boxSizing = 'border-box';   // 余白込みで測っているので、余白込みで書く（reveal と同じ理由）
       box.style.height = `${from}px`;
       box.style.overflow = 'hidden';
       moving = true;
@@ -325,6 +338,7 @@
         moving = false;
         box.style.height = '';
         box.style.overflow = '';
+        box.style.boxSizing = '';
         shown = box.offsetHeight;
       });
     };

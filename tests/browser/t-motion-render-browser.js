@@ -101,6 +101,31 @@ const eq = (label, got, want) => {
     eq('止まったら濃さ 1・style に値を残さない', [r.end, r.style], [1, '']);
   }
 
+  // v0.24.79: 空のときの案内（大きな余白を持つ）が一瞬で出入りして、下の中身が跳んでいた
+  console.log('■ 空のときの案内');
+  {
+    const r = await page.evaluate(async () => {
+      const hint = els.emptyHint;
+      const trace = async () => { const f = []; for (let i = 0; i < 40; i++) { await new Promise(r => requestAnimationFrame(r)); f.push(hint.hidden ? 0 : hint.offsetHeight); } return f; };
+      clearPane('pane-transcript', { confirmFirst: false });
+      const showing = await trace();
+      await new Promise(r => setTimeout(r, 300));
+      const full = hint.offsetHeight;
+      hideEmptyHint();
+      const hiding = await trace();
+      await new Promise(r => setTimeout(r, 300));
+      // セッションを切り替えたとき（中身ごと横に送る）は動かさない
+      const ids = state.sessions.map(x => x.id);
+      switchSession(ids.find(x => x !== state.activeId));
+      const instant = { hidden: hint.hidden, style: hint.getAttribute('style') || '' };
+      return { showing, full, hiding, hiddenEnd: hint.hidden, style: hint.getAttribute('style') || '', instant };
+    });
+    eq('クリアすると、案内は途中の高さを通って出る（一瞬で出ない）', [r.full > 40, r.showing.some(h => h > 2 && h < r.full - 2)], [true, true]);
+    eq('文字が入ると、途中の高さを通ってしまう', r.hiding.some(h => h > 2 && h < r.full - 2), true);
+    eq('しまいきったら隠れて、style に値を残さない', [r.hiddenEnd, r.style.replace(/\s/g, '')], [true, '']);
+    eq('セッションの切り替えでは動かさずにそのまま', r.instant.style.replace(/\s/g, ''), '');
+  }
+
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\n✓ すべて通過');
   process.exit(fail ? 1 : 0);

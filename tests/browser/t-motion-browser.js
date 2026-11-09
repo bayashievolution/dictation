@@ -45,6 +45,25 @@ const eq = (label, got, want) => {
   eq('しまう途中は縮んでいる途中', r.mid2 > 0 && r.mid2 < 120, true);
   eq('しまいきったら hidden', r.hiddenEnd, true);
 
+  // v0.24.79: 余白（padding）だけでできた箱（空のときの案内）が、まったく縮まなかった
+  console.log('■ reveal: 余白だけでできた箱も 0 まで縮む');
+  {
+    const r = await page.evaluate(async () => {
+      const box = document.createElement('div');
+      box.style.cssText = 'padding: 60px 20px';
+      document.body.appendChild(box);
+      const full = box.offsetHeight;
+      Motion.reveal(box, false);
+      const f = [];
+      for (let i = 0; i < 40; i++) { await new Promise(r => requestAnimationFrame(r)); f.push(box.hidden ? 0 : box.offsetHeight); }
+      Motion.reveal(box, true);
+      await new Promise(r => setTimeout(r, 900));
+      return { full, f, back: box.offsetHeight, style: box.getAttribute('style') };
+    });
+    eq('途中の高さを通って縮む', [r.full, r.f.some(h => h > 2 && h < r.full - 2)], [120, true]);
+    eq('出し直すと元の高さ・余白も元どおり', [r.back, r.style.replace(/\s/g, '')], [120, 'padding:60px20px;']);
+  }
+
   console.log('■ flipList（並びの変化）');
   const f = await page.evaluate(async () => {
     const list = document.createElement('div');

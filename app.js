@@ -1044,7 +1044,7 @@ if (typeof window !== 'undefined' && window.parent !== window) {
 }
 
 function hideEmptyHint() {
-  if (els.emptyHint && !els.emptyHint.hidden) els.emptyHint.hidden = true;
+  showHint(els.emptyHint, false);   // v0.24.79: 空のときの案内は、高さと濃さをばねでしまう
 }
 
 function getActivePaneEl() {
@@ -2667,7 +2667,7 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
     session.updatedAt = Date.now();
     if (session.id === state.activeId) {
       els.liveSummary.innerHTML = html;
-      if (els.liveSummaryEmpty) els.liveSummaryEmpty.hidden = true;
+      showHint(els.liveSummaryEmpty, false);   // v0.24.79
       syncPaneBaselineFromDOM();
       updateActionButtons();
     }
@@ -4368,6 +4368,17 @@ async function listAudioInputDevices() {
  * 前は class（is-hidden）で grid の行の高さと濃さを ease の transition で動かしていた。SUMADO の reveal（高さと濃さをばねで）にした
  * （TODO「動きを SUMADO の仕様書に合わせる」の 12）。開いた直後（animated: false）は動かさずにその状態にする
  */
+/**
+ * 空のときの案内（「ここに文字起こしが出ます」など）を出し入れする (v0.24.79)
+ * 案内は流れの中にあって大きな余白（上下 60px）を持つので、一瞬で出し入れすると下の中身が跳ぶ。高さと濃さをばねで。
+ * セッション・タブの切り替え（中身ごと横に送る）では動かさない（animated: false）
+ */
+function showHint(el, show, animated = true) {
+  if (!el) return;
+  if (window.Motion) Motion.reveal(el, !!show, { instant: !animated });
+  else el.hidden = !show;
+}
+
 function revealSettingRow(el, show, animated, withMargin = false) {
   if (!el) return;
   if (window.Motion) Motion.reveal(el, show, { instant: !animated, withMargin });
@@ -6184,15 +6195,15 @@ function clearPane(paneId, { confirmFirst = true, skipUndo = false } = {}) {
     els.interim.textContent = '';
     state.pendingChunkEl = null;
     state.pendingChunkText = '';
-    if (els.emptyHint) els.emptyHint.hidden = false;
+    showHint(els.emptyHint, true);   // v0.24.79: クリアしたら、案内はばねで出す
   } else if (paneId === 'pane-memo') {
     els.memo.innerHTML = '';
   } else if (paneId === 'pane-summary') {
     els.summary.innerHTML = '';
-    if (els.summaryEmpty) els.summaryEmpty.hidden = false;
+    showHint(els.summaryEmpty, true);
   } else if (paneId === 'pane-live') {
     els.liveSummary.innerHTML = '';
-    if (els.liveSummaryEmpty) els.liveSummaryEmpty.hidden = false;
+    showHint(els.liveSummaryEmpty, true);
   } else if (paneId === 'pane-chat') {
     const session = getActiveSession();
     if (session) session.chat = [];
@@ -6844,10 +6855,10 @@ function renderChatInto(container, emptyHint, scrollContainer) {
   container.__chatDrawn = session ? { sid: session.id, n: chat.length, thinkingAt: chat.findIndex((m) => m.thinking) } : null;
   container.innerHTML = '';
   if (chat.length === 0) {
-    if (emptyHint) emptyHint.hidden = false;
+    showHint(emptyHint, true, same);   // v0.24.79: 同じセッションで描き直したときだけ動かす
     return;
   }
-  if (emptyHint) emptyHint.hidden = true;
+  showHint(emptyHint, false, same);
   for (const msg of chat) {
     const div = document.createElement('div');
     div.className = 'chat-msg ' + msg.role + (msg.thinking ? ' thinking' : '') + (msg.error ? ' error' : '');
@@ -7083,7 +7094,7 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
   }
   // 表示中のセッションだった場合のみ UI にローディング表示
   const wasActive = (targetId === state.activeId);
-  if (wasActive) els.summaryEmpty.hidden = true;
+  if (wasActive) showHint(els.summaryEmpty, false);   // v0.24.79
   markBusy('summary', targetId, true);
   // v0.24.12: どちらの AI で回しているかを出す（やっさんの要望）
   // v0.24.56: 走っている間に別のお知らせが引っ込んでも「停止」に戻らないよう、処理として登録する
@@ -7110,7 +7121,7 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
     // 対象セッションが今も表示中ならDOMにも反映
     if (targetId === state.activeId) {
       els.summary.innerHTML = summaryHtml;
-      els.summaryEmpty.hidden = true;
+      showHint(els.summaryEmpty, false);
       updateActionButtons();
       if (!silent) {
         switchInnerPane('pane-summary');
@@ -8250,10 +8261,10 @@ function switchInnerPane(paneId) {
   }
 
   if (paneId === 'pane-summary') {
-    els.summaryEmpty.hidden = !!getSummaryText();
+    showHint(els.summaryEmpty, !getSummaryText(), false);   // タブの切り替え（ペインごと横に送る）では動かさない
   }
   if (paneId === 'pane-live' && els.liveSummaryEmpty) {
-    els.liveSummaryEmpty.hidden = !!elementToPlainText(els.liveSummary).trim();
+    showHint(els.liveSummaryEmpty, !elementToPlainText(els.liveSummary).trim(), false);
   }
   if (paneId === 'pane-chat') {
     setTimeout(() => { els.chatBody.scrollTop = els.chatBody.scrollHeight; }, 0);
@@ -9033,12 +9044,12 @@ function loadActiveSessionIntoDOM() {
   hydrateMemoImages(els.memo);      // v0.22.0: 画像の実物を差し込む（非同期）
   els.summary.innerHTML = s?.summary || '';
   if (els.liveSummary) { els.liveSummary.innerHTML = s?.liveSummary || ''; decorateLiveSummaryToc(els.liveSummary); }   // v0.24.25 / v0.24.54
-  if (els.liveSummaryEmpty) els.liveSummaryEmpty.hidden = !!(s?.liveSummary || '').replace(/<[^>]*>/g, '').trim();
+  showHint(els.liveSummaryEmpty, !(s?.liveSummary || '').replace(/<[^>]*>/g, '').trim(), false);   // セッションの切り替え（中身ごと横に送る）では動かさない
   els.interim.textContent = '';
   state.pendingChunkEl = null;
   state.pendingChunkText = '';
-  if (els.emptyHint) els.emptyHint.hidden = !!els.confirmed.innerHTML;
-  if (els.summaryEmpty) els.summaryEmpty.hidden = !!getSummaryText();
+  showHint(els.emptyHint, !els.confirmed.innerHTML, false);
+  showHint(els.summaryEmpty, !getSummaryText(), false);
   updateMemoCheatsheetVisibility();
   renderChat();
   updateActionButtons();
