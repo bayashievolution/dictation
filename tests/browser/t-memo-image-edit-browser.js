@@ -249,6 +249,7 @@ async function bulletWithImage(page) {
     await page.keyboard.press('Backspace');
     await page.waitForTimeout(150);
     eq('画像が消えた', await page.evaluate(() => document.querySelectorAll('#memo img').length), 0);
+    await page.waitForTimeout(500);   // v0.24.81: 枠（ハンドル）は薄くしてから隠すので、消え終わってから見る
     eq('枠も消えた', await page.evaluate(() => document.getElementById('img-handles').hidden), true);
     await ctx.close();
   }
