@@ -10,6 +10,7 @@
   --accent-dim: #34d39933;
   --heading: #7dd3fc;
   --danger: #f87171;
+  --caution: #ff9f0a;   /* v0.24.90: 注意のしるし（AI が無いタブなど）。SUMADO の時計・アイランドのオレンジ（やっさんの指定「オレンジ系に」） */
 
   --radius: 10px;
   --radius-sm: 6px;
@@ -1960,9 +1961,9 @@ mark.search-hit.current {
   padding: 1px 10px;
 }
 .empty-hint.needs-ai .empty-icon,
-.empty-hint.needs-ai .empty-text { color: var(--danger); opacity: 1; }
-/* そのタブに使える AI が無いとき、タブのアイコンは注意のしるし（赤） */
-.inner-tab.needs-ai .inner-tab-icon { color: var(--danger); }
+.empty-hint.needs-ai .empty-text { color: var(--caution); opacity: 1; }
+/* そのタブに使える AI が無いとき、タブのアイコンは注意のしるし（オレンジ） */
+.inner-tab.needs-ai .inner-tab-icon { color: var(--caution); }
 
 #confirmed {
   font-family: var(--transcript-font);
