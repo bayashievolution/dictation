@@ -55,6 +55,7 @@ const ICON_DEFS = {
   'sm-clock': '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   'sm-note': '<path d="M6 3.5h9l3.5 3.5V20a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z"/><path d="M8.5 10h7M8.5 13.5h7M8.5 17h4"/>',
   'sm-chat': '<path d="M20 12a7.5 7.5 0 0 1-11 6.6L4 20l1.4-4.5A7.5 7.5 0 1 1 20 12z"/>',
+  'sm-tick': '<path d="M5.5 12.5l4 4 9-9.5"/>',
 };
 
 function icon(name, size = 16) {

@@ -22,7 +22,7 @@ vm.createContext(ctx);
 const hasTasks = app.includes('function beginStatusTask(');
 // v0.24.83: 聞き取りを Groq にしたときの印。旧版には無いので、無ければ飛ばす
 const hasGroq = app.includes('function usesGroqTranscribe(');
-vm.runInContext([grab(app, 'recordingLabel'), grab(app, 'restoreStatus'), ...(hasGroq ? [grab(app, 'usesGroqTranscribe')] : []),
+vm.runInContext([grab(app, 'recordingLabel'), grab(app, 'restoreStatus'), ...(hasGroq ? [grab(app, 'usesGroqTranscribe')] : []), ...(app.includes('function geminiKey(') ? [grab(app, 'geminiKey')] : []),
   ...(hasTasks ? ['var statusTasks = []; var statusNoticeTimer = null;', grab(app, 'beginStatusTask'), grab(app, 'endStatusTask')] : []),
 ].join('\n'), ctx);
 

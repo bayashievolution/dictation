@@ -136,7 +136,11 @@ const DEFAULT_SETTINGS = {
   inputMode: 'web-speech',
   // v0.24.83: Gemini モードの中で、音声を文字にするところだけ Groq の Whisper（無料）に替えられる。
   // 録音・区切り・話者判別（Gemini）はそのまま。新しいキーなので前の版に戻しても読めなくなるものは無い
-  transcribeEngine: 'gemini',   // gemini / groq
+  // v0.24.92: 既定は無料で済む Groq（使えなければ Gemini に回る。usesGroqTranscribe）。前に保存した値はそのまま
+  transcribeEngine: 'groq',   // gemini / groq
+  // v0.24.92: 使う AI の表の「7 個セット」（ライブ整形・全体整形・メモの整形・タイトル・要約・質問・文脈の抽出）。
+  // 未設定は Claude を先に（無料で済むほう）。選んだほうが使えなければ、もう一方に回る（postEngineNow）
+  postEngine: undefined,   // claude / gemini
   groqApiKey: '',
   // v0.24.88: AI 設定のトグル。切ってもキーは消さず「使わない」だけ。未設定（それ以前の設定）はキーがあればオンで始める（loadSettings）
   geminiEnabled: undefined,
@@ -520,8 +524,7 @@ const els = {
   summaryDetailHigh: document.getElementById('summary-detail-high'),
   modeWebSpeech: document.getElementById('mode-webspeech'),
   modeGemini: document.getElementById('mode-gemini'),
-  engineGemini: document.getElementById('engine-gemini'),   // v0.24.83
-  engineGroq: document.getElementById('engine-groq'),
+  aiTableBody: document.getElementById('ai-table-body'),   // v0.24.92
   inputGroqKey: document.getElementById('input-groq-key'),
   inputGeminiEnabled: document.getElementById('input-gemini-enabled'),   // v0.24.88
   inputGroqEnabled: document.getElementById('input-groq-enabled'),
@@ -673,7 +676,24 @@ function recordingLabel() {
 
 /** 音声を文字にするのを Groq に任せるか (v0.24.83)。キーが無ければ Gemini のまま */
 function usesGroqTranscribe() {
-  return state.settings.transcribeEngine === 'groq' && state.settings.groqEnabled !== false && !!state.settings.groqApiKey;
+  if (state.settings.groqEnabled === false || !state.settings.groqApiKey) return false;
+  // v0.24.92: 表で Gemini を選んでいても、Gemini が使えなければ Groq に回る（選んでいた AI を切ったら、もう一方へ）
+  return (state.settings.transcribeEngine || 'groq') === 'groq' || !geminiKey();
+}
+
+/**
+ * 7 個セットを、いまどちらが受け持つか (v0.24.92)
+ * 表で選んだほう（未設定なら無料で済む Claude）が使えればそれ、使えなければもう一方、どちらも無ければ null
+ */
+function postEngineNow() {
+  const avail = { claude: !!state.settings.claudeCode, gemini: !!geminiKey() };
+  return pickAvailable(state.settings.postEngine || 'claude', avail, ['claude', 'gemini']);
+}
+
+/** 選んだものが使えればそれ、使えなければ order の順で最初に使えるもの (v0.24.92) */
+function pickAvailable(pref, avail, order) {
+  if (pref && avail[pref]) return pref;
+  return order.find((a) => avail[a]) || null;
 }
 
 /**
@@ -4520,6 +4540,66 @@ function applyAiSettingsVisibility(animated = true) {
   revealSettingRow(document.getElementById('claude-code-fields'), on(els.inputClaudeCode), animated);
 }
 
+/* ───────── 使う AI の表 (v0.24.92) ─────────
+ *
+ * やっさんの案（設定の見本の 3 段目）。行は働き、列は AI。丸を押して選ぶ。
+ * - 表に出すのは「設定画面でいまオンになっていて、キーが入っている AI」だけ選べる（保存前の欄の値で判断する）
+ * - 選んだ AI が使えなくなったら、無料で済むほうへ移ったように見せる（覚えている好みは消さない。戻せば元どおり）
+ * - ライブ整形〜質問は 7 個セット。どの行を押しても一緒に変わる。見えない「文脈の抽出」も一緒（claude-bridge の振り分け）
+ * - ライブ要約は Claude Code だけ（live-summary.js の冒頭「Gemini には戻さない」）。Gemini の列は — にする
+ * - 話者判別は Gemini だけ（音声を聞く処理なので Claude には回せない。Groq には話者判別が無い）
+ */
+let aiPickWorking = null;
+const AI_TABLE_COLS = ['gemini', 'groq', 'claude'];
+const AI_TABLE_ROWS = [
+  { key: 'stt', label: '文字起こし', can: ['gemini', 'groq'] },
+  { key: 'post', label: 'ライブ整形', can: ['gemini', 'claude'], grp: 'start' },
+  { key: 'post', label: '全体整形', can: ['gemini', 'claude'], grp: 'mid' },
+  { key: 'live', label: 'ライブ要約', can: ['claude'], grp: 'mid' },
+  { key: 'post', label: 'メモの整形', can: ['gemini', 'claude'], grp: 'mid' },
+  { key: 'post', label: 'タイトル生成', can: ['gemini', 'claude'], grp: 'mid' },
+  { key: 'post', label: '要約', can: ['gemini', 'claude'], grp: 'mid' },
+  { key: 'post', label: '質問', can: ['gemini', 'claude'], grp: 'end' },
+  { key: 'dia', label: '話者判別', can: ['gemini'] },
+];
+function formAiAvail() {
+  const on = (box) => !!(box && box.checked);
+  return {
+    gemini: on(els.inputGeminiEnabled) && !!(els.inputApiKey && els.inputApiKey.value.trim()),
+    groq: on(els.inputGroqEnabled) && !!(els.inputGroqKey && els.inputGroqKey.value.trim()),
+    claude: on(els.inputClaudeCode),
+  };
+}
+function renderAiTable() {
+  const body = els.aiTableBody;
+  if (!body || !aiPickWorking) return;
+  const avail = formAiAvail();
+  const ws = !(els.modeGemini && els.modeGemini.checked);   // Web Speech なら文字起こしに AI は使わない
+  const now = {
+    stt: ws ? null : pickAvailable(aiPickWorking.stt, avail, ['groq', 'gemini']),
+    post: pickAvailable(aiPickWorking.post, avail, ['claude', 'gemini']),
+    live: avail.claude ? 'claude' : null,
+    dia: avail.gemini ? 'gemini' : null,
+  };
+  body.innerHTML = AI_TABLE_ROWS.map((r) => {
+    const tag = r.grp === 'start' ? '<span class="ai-table-tag">7個セット</span>'
+      : (r.key === 'stt' && ws) ? '<span class="ai-table-tag">Web Speech</span>' : '';
+    const cells = AI_TABLE_COLS.map((a) => {
+      if (!r.can.includes(a)) return '<td><span class="ai-pick-none" aria-hidden="true">—</span></td>';
+      const fixed = r.key === 'live' || r.key === 'dia';   // 選ぶものが 1 つしか無い行は押せない（しるしだけ）
+      const disabled = !avail[a] || (r.key === 'stt' && ws) || fixed;
+      const checked = now[r.key] === a;
+      return `<td class="${r.grp ? 'ai-grp' : ''}" data-col="${a}"><button type="button" class="ai-pick" role="radio" data-k="${r.key}" data-a="${a}"`
+        + ` aria-checked="${checked}" aria-label="${r.label}: ${a}"${disabled ? ' disabled' : ''}><span class="ai-pick-dot"><span data-icon="sm-tick" data-icon-size="13"></span></span></button></td>`;
+    }).join('');
+    return `<tr class="${r.grp ? 'ai-grp-row ai-grp-' + r.grp : ''}"><th scope="row">${r.label}${tag}</th>${cells}</tr>`;
+  }).join('');
+  document.querySelectorAll('.ai-table thead th[data-col]').forEach((th) => th.classList.toggle('off', !avail[th.dataset.col]));
+  renderIcons(body);
+  // AI で聞き取るのに、文字起こしに使える AI が無ければ、モードの下に注意書き（設定の見本の 1 段目）
+  revealSettingRow(document.getElementById('stt-ai-caution'), !ws && !now.stt, true);
+}
+
 function applyGeminiOnlyVisibility(animated = true) {
   const el = document.getElementById('gemini-only-fields');
   if (!el) return;
@@ -4757,7 +4837,8 @@ function applyClaudeBridgeSetting() {
   if (typeof claudeBridgeSetEnabled === 'function') {
     // v0.24.44: 振り分け（要約・質問などを Claude に回す）は「Claude Code 連携」と同時に有効
     // （v0.24.39〜43 は「一部を Claude Code で処理する」という別のトグルがあった）
-    claudeBridgeSetEnabled(!!state.settings.claudeCode);
+    // v0.24.92: 使う AI の表で 7 個セットを Gemini にしたら、連携はオンのままでも振り分けない（ライブ要約は別。Claude だけで動く）
+    claudeBridgeSetEnabled(!!state.settings.claudeCode && postEngineNow() === 'claude');
   }
   // v0.24.58: 失敗したら Gemini に回すか（オフなら Claude で3回試し直す）
   if (typeof claudeBridgeSetFallback === 'function') claudeBridgeSetFallback(!!state.settings.claudeFallbackGemini);
@@ -6919,7 +7000,8 @@ function paneAiName(id) {
     if (state.settings.inputMode !== 'gemini-audio') return 'Web Speech';
     return usesGroqTranscribe() ? 'Groq Whisper' : 'Gemini';
   }
-  return state.settings.claudeCode ? 'Claude Code' : 'Gemini';
+  if (id === 'pane-live') return 'Claude Code';
+  return postEngineNow() === 'claude' ? 'Claude Code' : 'Gemini';
 }
 
 /**
@@ -8268,10 +8350,9 @@ function openSettings() {
     els.modeWebSpeech.checked = true;
   }
   els.inputChunkSec.value = state.settings.audioChunkSec || 12;
-  if (els.engineGroq) {   // v0.24.83
-    (state.settings.transcribeEngine === 'groq' ? els.engineGroq : els.engineGemini).checked = true;
-    els.inputGroqKey.value = state.settings.groqApiKey || '';
-  }
+  if (els.inputGroqKey) els.inputGroqKey.value = state.settings.groqApiKey || '';
+  // v0.24.92: 使う AI の表は、保存するまで手元の写しで動かす
+  aiPickWorking = { stt: state.settings.transcribeEngine || 'groq', post: state.settings.postEngine || 'claude' };
   if (els.inputGeminiEnabled) els.inputGeminiEnabled.checked = !!state.settings.geminiEnabled;   // v0.24.88
   if (els.inputGroqEnabled) els.inputGroqEnabled.checked = !!state.settings.groqEnabled;
   if (els.inputSilenceCut) els.inputSilenceCut.checked = state.settings.audioSilenceCut !== false;
@@ -8316,6 +8397,7 @@ function openSettings() {
   applyGeminiOnlyVisibility(/* animated */ false);
   applyWebSpeechOnlyVisibility(/* animated */ false);
   applyAiSettingsVisibility(/* animated */ false);
+  renderAiTable();   // v0.24.92
   els.fontTranscript.value = state.settings.transcriptFont;
   els.sizeTranscript.value = state.settings.transcriptSize;
   els.fontMemo.value = state.settings.memoFont;
@@ -8357,9 +8439,10 @@ function saveSettingsFromForm() {
     els.summaryDetailLow.checked ? 'low' :
     els.summaryDetailHigh.checked ? 'high' : 'medium';
   state.settings.inputMode = els.modeGemini.checked ? 'gemini-audio' : 'web-speech';
-  if (els.engineGroq) {   // v0.24.83
-    state.settings.transcribeEngine = els.engineGroq.checked ? 'groq' : 'gemini';
-    state.settings.groqApiKey = els.inputGroqKey.value.trim();
+  if (els.inputGroqKey) state.settings.groqApiKey = els.inputGroqKey.value.trim();
+  if (aiPickWorking) {   // v0.24.92: 使う AI の表
+    state.settings.transcribeEngine = aiPickWorking.stt;
+    state.settings.postEngine = aiPickWorking.post;
   }
   if (els.inputGeminiEnabled) state.settings.geminiEnabled = els.inputGeminiEnabled.checked;   // v0.24.88
   if (els.inputGroqEnabled) state.settings.groqEnabled = els.inputGroqEnabled.checked;
@@ -10300,7 +10383,27 @@ if (els.modeGemini) {
 
 // v0.24.88: AI 設定のトグルを切り替えたら、その下（キーの欄・連携のボタン）を出し入れする
 for (const box of [els.inputGeminiEnabled, els.inputGroqEnabled, els.inputClaudeCode]) {
-  if (box) box.addEventListener('change', () => applyAiSettingsVisibility(true));
+  if (box) box.addEventListener('change', () => { applyAiSettingsVisibility(true); renderAiTable(); });
+}
+// v0.24.92: キーを入れた・消した、モードを変えたら、表と注意書きも描き直す
+for (const el of [els.inputApiKey, els.inputGroqKey]) if (el) el.addEventListener('input', renderAiTable);
+for (const el of [els.modeGemini, els.modeWebSpeech]) if (el) el.addEventListener('change', renderAiTable);
+if (els.aiTableBody) {
+  els.aiTableBody.addEventListener('click', (e) => {
+    const b = e.target.closest('.ai-pick');
+    if (!b || b.disabled || !aiPickWorking) return;
+    const k = b.dataset.k;
+    if (k !== 'stt' && k !== 'post') return;
+    aiPickWorking[k] = b.dataset.a;
+    renderAiTable();
+    // 7 個セットは一緒に変わったことが見えるよう、選んだ列の丸を順にぽんと（少し行き過ぎて戻る）
+    if (window.Motion) {
+      els.aiTableBody.querySelectorAll(`.ai-pick[data-k="${k}"][data-a="${b.dataset.a}"] .ai-pick-dot`).forEach((d, i) => {
+        Motion.set(d, { scale: 0.6 });
+        setTimeout(() => Motion.animate(d, { scale: 1 }, { spring: Motion.SPRINGS.press }), i * 25);
+      });
+    }
+  });
 }
 
 // v0.13.24: btnWebSpeechDefaults クリックハンドラ削除（UI 撤去・WEB_SPEECH_DEFAULTS 撤去に伴う）。

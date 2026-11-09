@@ -119,9 +119,15 @@ async function runConsolidation(page) {
   console.log('■ 設定の説明');
   {
     const { ctx, page } = await open(browser, { apiKey: 'AIza-test' });
+    await page.evaluate(() => openSettings());   // 使う AI の表は設定を開いたときに作る
+    await page.waitForTimeout(300);
     const t = await page.textContent('#settings-modal');
-    eq('「ライブ整形・文字起こしへの項目付け」を Claude と書く', t.includes('ライブ整形・文字起こしへの項目付けを Claude Code で処理します'), true);
-    eq('Gemini は文字起こし・話者判別だけ', t.includes('文字起こし・話者判別は Gemini API で処理します'), true);
+    // v0.24.88〜92: 説明の文は AI 設定の一言と「使う AI」の表に置き換えた
+    eq('Claude Code の説明: 文字起こし・話者判別以外', t.includes('文字起こし・話者判別以外の AI 機能に対応'), true);
+    const rows = await page.$$eval('#ai-table-body tr', trs => trs.map(tr => tr.querySelector('th').firstChild.textContent));
+    eq('表にライブ整形がある（Claude に回せる）', rows.includes('ライブ整形'), true);
+    eq('表の文字起こし・話者判別に Claude の列は無い', await page.$$eval('#ai-table-body tr', trs => trs.filter(tr => ['文字起こし', '話者判別'].includes(tr.querySelector('th').firstChild.textContent))
+       .map(tr => tr.querySelector('td[data-col="claude"]') ? 'あり' : 'なし')), ['なし', 'なし']);
     await ctx.close();
   }
 

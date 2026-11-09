@@ -3526,3 +3526,12 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 要約・質問: 「要約（質問）には Gemini API のキーか Claude Code が要ります」。ライブ要約: 「Claude Code がオフになっています」「ライブ要約には Claude Code が要ります」
   - キーは入っているのにトグルを切っているときは「登録されていません」と言わず「API がオフになっています」
   - 言葉の途中で折り返さない（`word-break: auto-phrase`）
+- 2026-11-09 (v0.24.92): **設定の並べ替え 3/4: 「使う AI」の表**（設定の見本の 3 段目・やっさんの案）
+  - 行は働き（文字起こし／ライブ整形〜質問の 7 個セット／話者判別）、列は Gemini（有料）・Groq（無料）・Claude（サブスク）。丸を押して選ぶ（選んだ列の丸がぽんと出る）
+  - オンにしてキーが入っている AI だけ選べる（保存前の欄で判断）。選んでいた AI を切ったら無料で済むほうへ移ったように見せ、好みは覚えておく（戻せば元どおり）。実行時も同じ（`pickAvailable`・`postEngineNow`・`usesGroqTranscribe`）
+  - **ライブ要約は Claude Code だけ**（live-summary.js は Gemini に戻さない作り。10 分ごとに Gemini のトークンを使わないため）。やっさんの案では Gemini にも ✓ があったが、Gemini の列は — にした。話者判別は Gemini だけ（どちらも押せない行）
+  - 7 個セットの新しいキー `postEngine`（未設定は Claude）。Gemini にすると、連携はオンのままでも振り分けを止める（`claudeBridgeSetEnabled(claudeCode && postEngineNow() === 'claude')`）。見えない「文脈の抽出」も一緒
+  - 文字起こしの既定を無料で済む Groq に（使えなければ Gemini）。上の「聞き取る AI」の選択は表に移して外した
+  - AI で聞き取るのに文字起こしの AI が無いときは、モードの下にオレンジの注意書き「API キーが登録されていません／文字起こしには Gemini API か Groq Whisper のキーが要ります」
+  - テスト: `tests/browser/t-ai-table-browser.js`（新規）。`t-groq-browser.js`・`t-live-claude-browser.js`・`t-settings-structure.js`・`t-status-label.js` を合わせた。
+    **v0.24.88 で `t-live-claude-browser.js` の 2 件（Claude の説明の古い文）を落としたまま気づかなかった**（その版で走らせた範囲に入っていなかった）。今回は tests/browser を全部走らせた（40 本・全部通過）

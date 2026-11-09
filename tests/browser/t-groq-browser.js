@@ -114,7 +114,9 @@ async function sendOne(page) {
       { extraStorage: { 'dictation:sttCompare': JSON.stringify({ 'groq-key': 'gsk_from_compare' }) } });
     await page.evaluate(() => openSettings());
     await page.waitForTimeout(300);
-    eq('最初は Gemini', await page.isChecked('#engine-gemini'), true);
+    // v0.24.92: 「聞き取る AI」は使う AI の表へ。既定は無料で済む Groq（キーを引き継いだので選べる）
+    const picked = (k) => page.$eval(`.ai-pick[data-k="${k}"][aria-checked="true"]`, b => b.dataset.a).catch(() => null);
+    eq('表の文字起こしは、最初から Groq', await picked('stt'), 'groq');
     // v0.24.87: デバイスなどは下の「音声入力」へ移した。AI で聞き取るときだけ出て、Web Speech にすると隠れる
     eq('一番上の見出しは「文字起こしのモード」', await page.evaluate(() => document.querySelector('#settings-modal .field-group-title').textContent), '文字起こしのモード');
     eq('AI で聞き取るなら、下の「音声入力」にデバイスの欄が出ている', await page.isVisible('#voice-input-group #input-audio-device'), true);
@@ -137,7 +139,9 @@ async function sendOne(page) {
     await page.check('#input-groq-enabled');
     await page.waitForTimeout(800);
     eq('Claude Code がオフなら連携のボタンは隠れている', await page.evaluate(() => document.getElementById('claude-code-fields').hidden), true);
-    await page.check('#engine-groq');
+    await page.click('.ai-pick[data-k="stt"][data-a="gemini"]');
+    eq('表で Gemini を押すと Gemini', await picked('stt'), 'gemini');
+    await page.click('.ai-pick[data-k="stt"][data-a="groq"]');
     await page.click('#btn-settings-save');
     await page.waitForTimeout(200);
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('dictation:settings')));
@@ -147,7 +151,7 @@ async function sendOne(page) {
     await page.waitForTimeout(500);
     await page.evaluate(() => openSettings());
     await page.waitForTimeout(300);
-    eq('開き直しても Groq が選ばれている', await page.isChecked('#engine-groq'), true);
+    eq('開き直しても表は Groq', await page.$eval('.ai-pick[data-k="stt"][aria-checked="true"]', b => b.dataset.a), 'groq');
     eq('開き直したとき、キーの欄は出ている', await page.isVisible('#input-groq-key'), true);
     await ctx.close();
   }
@@ -162,9 +166,17 @@ async function sendOne(page) {
     await ctx.close();
   }
   {
+    // v0.24.92: 表で Gemini を選んでいても、Gemini を切っていて Groq が使えるなら Groq に回る（選んでいた AI を切ったら、もう一方へ）
     const { ctx, page, calls } = await open(browser, { ...base, transcribeEngine: 'gemini', geminiEnabled: false, aiEnabled: false });
     const paras = await sendOne(page);
     eq('Gemini を切っていれば Gemini には送らない', calls.gemini, []);
+    eq('Groq が使えるので Groq に回る', [calls.groq, paras.map(p => p.cls)], [1, ['paragraph short-refined']]);
+    await ctx.close();
+  }
+  {
+    const { ctx, page, calls } = await open(browser, { ...base, geminiEnabled: false, groqEnabled: false, aiEnabled: false });
+    const paras = await sendOne(page);
+    eq('どちらも切っていれば、どちらにも送らない', [calls.gemini, calls.groq], [[], 0]);
     eq('失敗と正直に出す', paras.map(p => p.cls), ['paragraph needs-retry']);
     await ctx.close();
   }
