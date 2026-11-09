@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>文字起こし比較 — dictation</title>
+<style>
+  :root {
+    --bg: #1a1a1f; --bg-elevated: #23232a; --bg-subtle: #2d2d36; --border: #3a3a44;
+    --text: #e8e8eb; --text-muted: #9b9ba5; --accent: #34d399; --danger: #f87171; --warn: #fbbf24;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text); padding: 24px 16px;
+    font-family: 'Noto Sans JP', -apple-system, 'Segoe UI', 'Yu Gothic UI', sans-serif;
+    line-height: 1.7; max-width: 1100px; margin: 0 auto;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; }
+  .card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
+  .card h2 { font-size: 15px; margin-bottom: 10px; }
+  button {
+    background: var(--accent); color: #06281c; border: none; border-radius: 6px;
+    padding: 8px 16px; font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  button.ghost { background: var(--bg-subtle); color: var(--text); border: 1px solid var(--border); font-weight: 400; }
+  button:disabled { opacity: .45; cursor: default; }
+  label { font-size: 13px; color: var(--text-muted); }
+  input[type=text], input[type=password], input[type=number], select {
+    background: var(--bg-subtle); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 8px; font-size: 14px; font-family: inherit;
+  }
+  input[type=number] { width: 72px; }
+  .row { display: flex; gap: 10px 16px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .field { display: flex; flex-direction: column; gap: 2px; }
+  .grow { flex: 1 1 260px; }
+  .grow input { width: 100%; }
+  .muted { color: var(--text-muted); font-size: 13px; }
+  .ng { color: var(--danger); } .ok { color: var(--accent); }
+  #sessions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  #sessions button { text-align: left; }
+  .meter { height: 8px; background: var(--bg-subtle); border-radius: 4px; overflow: hidden; width: 200px; }
+  .meter > div { height: 100%; width: 0%; background: var(--accent); }
+  #summary { font-size: 14px; white-space: pre-line; }
+  .chunk { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
+  .chunk-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
+  .chunk-head audio { height: 32px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 700px) { .cols { grid-template-columns: 1fr; } }
+  .col { background: var(--bg-subtle); border-radius: 8px; padding: 10px; min-height: 60px; }
+  .col .who { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .col .text { white-space: pre-wrap; font-size: 14px; }
+  .col.empty .text { color: var(--text-muted); }
+  .warn { color: var(--warn); font-size: 12px; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<h1>文字起こし比較（Gemini / Groq Whisper）</h1>
+<p class="sub">
+  同じ音声を区切って、Gemini（本体と同じ指示）と Groq の Whisper の両方に送り、結果と時間を並べます。
+  本体の設定や記録には触りません。
+</p>
+
+<div class="card">
+  <h2>1. API キー</h2>
+  <div class="row">
+    <div class="muted">Gemini: <span id="gemini-key-state">確認中…</span></div>
+  </div>
+  <div class="row">
+    <div class="field grow">
+      <label for="groq-key">Groq の API キー（このブラウザの中だけに保存します）</label>
+      <input type="password" id="groq-key" autocomplete="off" placeholder="gsk_...">
+    </div>
+    <div class="field">
+      <label for="groq-model">Groq のモデル</label>
+      <select id="groq-model">
+        <option value="whisper-large-v3">whisper-large-v3（精度重視）</option>
+        <option value="whisper-large-v3-turbo">whisper-large-v3-turbo（速さ重視）</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>2. 音声</h2>
+  <div class="row">
+    <button id="btn-rec">マイクで録音</button>
+    <button id="btn-rec-stop" class="ghost" disabled>録音を止める</button>
+    <div class="meter"><div id="meter-bar"></div></div>
+    <span class="muted" id="rec-time"></span>
+  </div>
+  <div class="row">
+    <label for="file">ファイルから:</label>
+    <input type="file" id="file" accept="audio/*,video/webm,.webm,.wav,.mp3,.m4a">
+  </div>
+  <div class="row">
+    <button id="btn-stored" class="ghost">保管された録音から選ぶ</button>
+    <span class="muted">（本体の設定で「録音を残す」にしていた分だけ出ます）</span>
+  </div>
+  <div id="sessions"></div>
+  <div class="row" style="margin-top:10px">
+    <div>いまの音声: <strong id="source-label">まだありません</strong></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>3. 条件</h2>
+  <div class="row">
+    <div class="field">
+      <label for="preprocess">前処理</label>
+      <select id="preprocess">
+        <option value="none">なし</option>
+        <option value="comp">コンプレッサー</option>
+        <option value="comp-norm">コンプレッサー＋ノーマライズ</option>
+      </select>
+    </div>
+    <div class="field"><label for="min-sec">最短（秒）</label><input type="number" id="min-sec" min="5" max="60" value="12"></div>
+    <div class="field"><label for="max-sec">最長（秒）</label><input type="number" id="max-sec" min="6" max="120" value="20"></div>
+    <div class="field"><label for="from-min">どこから（分）</label><input type="number" id="from-min" min="0" step="0.5" value="0"></div>
+    <div class="field"><label for="len-min">何分ぶん</label><input type="number" id="len-min" min="0.5" step="0.5" value="3"></div>
+  </div>
+  <div class="row">
+    <div class="field grow"><label for="ctx-field">分野・場面（Gemini だけに渡す）</label><input type="text" id="ctx-field" placeholder="例: 教育学の講義"></div>
+    <div class="field grow"><label for="ctx-terms">よく出る語（両方に渡す。読点区切り）</label><input type="text" id="ctx-terms" placeholder="例: ルーブリック、形成的評価"></div>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="use-gemini" checked> Gemini に送る</label>
+    <label><input type="checkbox" id="use-groq" checked> Groq に送る</label>
+  </div>
+  <div class="row">
+    <button id="btn-run" disabled>比較する</button>
+    <button id="btn-abort" class="ghost" disabled>止める</button>
+    <span class="muted" id="plan"></span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>結果</h2>
+  <div id="summary" class="muted">まだ実行していません</div>
+  <div class="row" style="margin-top:10px">
+    <button id="btn-copy" class="ghost" disabled>結果をコピー</button>
+    <span class="muted">（カルディに貼れば、どちらが良いか一緒に見られます）</span>
+  </div>
+</div>
+
+<div id="chunks"></div>
+
+<script src="gemini.js"></script>
+<script src="audio-store.js"></script>
+<script src="stt-compare-core.js"></script>
+<script src="stt-compare.js"></script>
+</body>
+</html>
