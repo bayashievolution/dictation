@@ -168,7 +168,7 @@ const summary = (page) => page.evaluate(() => ({
     eq('押せない・理由が出る', await st(), { disabled: true, note: true });
     // v0.24.39: ライブ要約の前提は「Claude Code」（連携を使う）のトグル
     await page.evaluate(() => { const b = document.getElementById('input-claude-code'); b.checked = true; b.dispatchEvent(new Event('change')); });
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(800);   // v0.24.77: 断り書きは高さと濃さをばねでしまうので、しまい終わってから見る
     eq('Claude 連携をオンにすると押せる', await st(), { disabled: false, note: false });
     await ctx.close();
   }

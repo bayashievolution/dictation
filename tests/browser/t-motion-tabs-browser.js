@@ -96,12 +96,17 @@ const raf = 'new Promise(r => requestAnimationFrame(() => r()))';
       const target = tabs[tabs.length - 1].dataset.id === state.activeId ? tabs[0] : tabs[tabs.length - 1];
       switchSession(target.dataset.id);
       const xs = [];
-      for (let i = 0; i < 40; i++) { await new Promise(r => requestAnimationFrame(r)); xs.push(+new DOMMatrix(getComputedStyle(els.mainArea).transform).e.toFixed(1)); }
+      let anim = '';
+      for (let i = 0; i < 40; i++) {
+        await new Promise(r => requestAnimationFrame(r));
+        xs.push(+new DOMMatrix(getComputedStyle(els.mainArea).transform).e.toFixed(1));
+        if (i === 1) anim = getComputedStyle(els.mainArea).animationName;   // 動いている最中に見る（終わってからでは分からない）
+      }
       await new Promise(r => setTimeout(r, 300));
-      return { xs, anim: getComputedStyle(els.mainArea).animationName, style: els.mainArea.getAttribute('style') || '' };
+      return { xs, anim, style: els.mainArea.getAttribute('style') || '' };
     });
     eq('送る向きの端から、途中を通って元の位置へ', [Math.abs(r.xs[0]) > 5, Math.abs(r.xs[r.xs.length - 1]) < 0.5, r.xs.some(x => Math.abs(x) > 0.5 && Math.abs(x) < Math.abs(r.xs[0]) - 0.5)], [true, true, true]);
-    eq('keyframes の動きは使っていない', r.anim, 'none');
+    eq('動いている最中も keyframes ではない（ばねで動かしている）', r.anim, 'none');
     eq('止まったら style に値を残さない', r.style.replace(/\s/g, ''), '');
   }
 
