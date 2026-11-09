@@ -188,6 +188,22 @@
   }
 
   /**
+   * 値をその場で決めるが、ほかのばねは止めない（ディクテーション用に足した）
+   * set() はその要素で動いているばねを全部止める（仕様書 2.1）。FLIP で位置だけ前に戻したいときに set() を使うと、
+   * 同じ要素でふわっと出している途中の濃さまで止まってしまう
+   */
+  function place(el, values) {
+    const st = stateOf(el);
+    for (const k of Object.keys(values)) {
+      if (!(k in DEFAULT_PROPS)) continue;
+      let sp = st.springs[k];
+      if (!sp) sp = st.springs[k] = new Spring1D(values[k]);
+      sp.value = values[k]; sp.target = values[k]; sp.velocity = 0;
+    }
+    apply(el, st);
+  }
+
+  /**
    * ばねで動かしたあとの transform / opacity の書き込みを外し、CSS に戻す（ディクテーション用に足した）
    * ディクテーションは見た目を CSS で決めているので、動き終わったら style に値を残さない
    * （残すと、あとで CSS のクラスで出し入れしているところが効かなくなる）
@@ -472,5 +488,5 @@
     });
   }
 
-  global.Motion = { SPRINGS, MOTION, animate, set, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, createMorph, stripMotionStyles, Spring1D };
+  global.Motion = { SPRINGS, MOTION, animate, set, place, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, createMorph, stripMotionStyles, Spring1D };
 })(typeof window !== 'undefined' ? window : globalThis);

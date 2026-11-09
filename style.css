@@ -1780,7 +1780,7 @@ mark.search-hit.current {
   font-size: var(--chat-size);
   line-height: 1.7;
   word-break: break-word;
-  animation: fadeInUp 0.25s var(--ease-out);
+  /* v0.24.71: 出てくる動きは motion.js（新しい吹き出しだけ）。keyframes は描き直すたびに全部に走っていた */
 }
 
 .chat-msg.user {
@@ -1954,7 +1954,7 @@ mark.search-hit.current {
 
 .paragraph {
   margin-bottom: 1.2em;
-  animation: fadeInUp 0.4s var(--ease-out);
+  /* v0.24.71: 出てくる動きは motion.js（新しい段落だけ）。keyframes はセッションを切り替えるたびに全部に走っていた */
 }
 
 .paragraph h2 {
@@ -1986,9 +1986,7 @@ mark.search-hit.current {
   animation: spin 2s linear infinite;
 }
 
-.paragraph.refined {
-  animation: fadeInReplace 0.4s var(--ease-out);
-}
+/* v0.24.71: .paragraph.refined の keyframes（fadeInReplace）は外した。差し替わったときのふわっとは motion.js */
 
 /* 整形失敗: 静かに「未整形」マーク。あとで「今すぐ整形」で再試行される */
 .paragraph.needs-retry {

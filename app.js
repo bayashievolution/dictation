@@ -1145,7 +1145,8 @@ function transcriptMorph(fn, { removing = [] } = {}) {
     if (!el.isConnected) continue;
     const dy = top - el.getBoundingClientRect().top;
     if (Math.abs(dy) < 1) continue;
-    Motion.set(el, { y: dy });
+    // v0.24.71: place（ほかのばねを止めない）。set だと、差し替えたばかりの段落のふわっと（濃さ）まで止まる
+    Motion.place(el, { y: dy + (Motion.current(el).y || 0) });
     Motion.animate(el, { y: 0 }, { spring: Motion.SPRINGS.sheet }).then((done) => { if (done) Motion.clear(el); });
   }
   return out;
@@ -1285,6 +1286,12 @@ function createParagraphEl(text, className = 'paragraph') {
   body.className = 'p-body';
   body.textContent = text;
   p.appendChild(body);
+  // v0.24.71: 新しい段落だけ、少し下からふわっと出す。前は CSS の keyframes（.paragraph に付いていた）で、
+  // セッションを切り替えて描き直すたびに全部の段落が一斉に出直していた（TODO「動きを SUMADO の仕様書に合わせる」の 10）
+  if (window.Motion) {
+    Motion.set(p, { opacity: 0, y: 8 });
+    Motion.animate(p, { opacity: 1, y: 0 }, { spring: Motion.SPRINGS.fade }).then((d) => { if (d) Motion.clear(p); });
+  }
   return p;
 }
 
@@ -1319,6 +1326,12 @@ function setParagraphContent(pEl, refinedText) {
       pEl.appendChild(body);
     }
     isFirst = false;
+  }
+  // v0.24.71: 整えた中身に差し替わったときの、ふわっと（前は .paragraph.refined の keyframes で、
+  // セッションを切り替えて描き直すたびに整形済みの段落が全部ちらついていた）。いま画面にあるものだけ
+  if (window.Motion && pEl.isConnected && pEl.classList.contains('refined')) {
+    Motion.place(pEl, { opacity: 0.4 });
+    Motion.animate(pEl, { opacity: 1 }, { spring: Motion.SPRINGS.fade }).then((d) => { if (d) Motion.clear(pEl); });
   }
 }
 
@@ -6816,6 +6829,12 @@ function renderChatInto(container, emptyHint, scrollContainer) {
   if (!container) return;
   const session = getActiveSession();
   const chat = session?.chat || [];
+  // v0.24.71: 描き直すたびに全部の吹き出しが一斉に出直していた（CSS の keyframes が、差し込むたびに走るため）。
+  // 前に描いた数を覚えておき、新しく増えた吹き出しだけをふわっと出す。「考え中」が答えに変わったものは、中身だけふわっと。
+  // タブを切り替えたとき（別のセッション）は、動かさずにそのまま出す（TODO「動きを SUMADO の仕様書に合わせる」の 10）
+  const prev = container.__chatDrawn || null;
+  const same = !!(prev && session && prev.sid === session.id);
+  container.__chatDrawn = session ? { sid: session.id, n: chat.length, thinkingAt: chat.findIndex((m) => m.thinking) } : null;
   container.innerHTML = '';
   if (chat.length === 0) {
     if (emptyHint) emptyHint.hidden = false;
@@ -6842,6 +6861,16 @@ function renderChatInto(container, emptyHint, scrollContainer) {
     div.appendChild(header);
     div.appendChild(body);
     container.appendChild(div);
+    if (window.Motion && same) {
+      const i = container.children.length - 1;
+      if (i >= prev.n) {
+        Motion.set(div, { opacity: 0, scale: 0.97 });
+        Motion.animate(div, { opacity: 1, scale: 1 }, { spring: Motion.SPRINGS.fade }).then((d) => { if (d) Motion.clear(div); });
+      } else if (i === prev.thinkingAt && !msg.thinking) {
+        Motion.set(body, { opacity: 0 });
+        Motion.animate(body, { opacity: 1 }, { spring: Motion.MOTION.morph.contentIn }).then((d) => { if (d) Motion.clear(body); });
+      }
+    }
   }
   if (scrollContainer) {
     requestAnimationFrame(() => { scrollContainer.scrollTop = scrollContainer.scrollHeight; });
