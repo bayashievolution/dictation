@@ -3514,3 +3514,9 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 残りの AI の項目（ライブ整形〜要約の詳しさ）の見出しは「AI機能」→「AI の動き」（のちに詳細設定へ）
   - テスト: `tests/browser/t-groq-browser.js`（トグルの出し入れ・切ったら送らない・前の設定の引き継ぎ）。見出しが分かれたので
     `t-settings-structure.js`・`t-claude-bridge-browser.js`（並び）・`t-claude-install-browser.js`（連携のボタンはオンのときだけ）・`t-motion-settings-browser.js`（測る基準を同じまとまりの見出しに）を合わせた
+- 2026-11-09 (v0.24.89): **タブが空のときの案内を作り直し、AI が無いタブは注意のしるしに**（やっさん「AI 設定がされていない時、タブのアイコンを注意マークに」「タブ内の文字も整えて。アイコンやシンボルでビジュアルよく」）
+  - 使える AI が無いタブ（AI で聞き取るのに Gemini も Groq も無い文字起こし・Gemini も Claude も無い要約と質問・Claude が無いライブ要約）は、タブのアイコンが赤い注意の絵（SUMADO の `warn`）。判断は `paneAiProblem`
+  - 空のときの案内（文字起こし・ライブ要約・要約・質問）: SUMADO の線の絵＋一言＋受け持つ AI の札（「聞き取り・Groq Whisper」など）。AI が無ければ赤い注意と「AI 設定を開く」。作るのは `renderEmptyHints`（タブを描き直すたびに呼ぶ＝起動時と設定の保存時）
+  - ライブ要約の前の文「間隔は 設定 → AI機能 で変えられます」は設定の並べ替えで古くなっていたので消した。間隔は文の中に数字で出す
+  - SUMADO の線の絵は `icons.js` に `sm-` で写した（線の太さ 1.8）
+  - テスト: `tests/browser/t-empty-hints-browser.js`

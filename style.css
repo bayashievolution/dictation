@@ -1941,6 +1941,29 @@ mark.search-hit.current {
   opacity: 0.7;
 }
 
+/* v0.24.89: 空のときの案内。SUMADO の線の絵・一言・受け持つ AI の札（やっさん「アイコンやシンボルを使ってビジュアルよく」） */
+.empty-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.6;
+}
+.empty-hint[hidden] { display: none; }
+.empty-hint .empty-icon { color: var(--text-faint); opacity: 0.8; }
+.empty-hint .empty-text { color: var(--text-muted); font-size: 13.5px; text-wrap: balance; max-width: 22em; }
+.empty-hint .empty-chip {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 10px;
+}
+.empty-hint.needs-ai .empty-icon,
+.empty-hint.needs-ai .empty-text { color: var(--danger); opacity: 1; }
+/* そのタブに使える AI が無いとき、タブのアイコンは注意のしるし（赤） */
+.inner-tab.needs-ai .inner-tab-icon { color: var(--danger); }
+
 #confirmed {
   font-family: var(--transcript-font);
   font-size: var(--transcript-size);

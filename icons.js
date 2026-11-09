@@ -48,11 +48,19 @@ const ICON_DEFS = {
   'tag': '<path d="M12.6 2.7l8.7 8.7a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0l-8.7-8.7A2 2 0 0 1 3 10.2V4a1 1 0 0 1 1-1h6.2a2 2 0 0 1 1.4.6z"/><circle cx="7.5" cy="7.5" r="1.2"/>',
   // 置換（⇄ / swap）
   'replace': '<path d="M4 7h13M4 7l4-4M4 7l4 4"/><path d="M20 17H7M20 17l-4-4M20 17l-4 4"/>',
+  // v0.24.89: SUMADO の線の絵（SUMADO の extension/js/line-icons.js から写した。線の太さ 1.8）。名前は sm- で始める
+  // やっさんの指定「シンボル化やアイコンは SUMADO に収録しているものを使ってほしい」
+  'sm-warn': '<path d="M12 4l9 15.5H3z"/><path d="M12 10v4.5M12 17h.01"/>',
+  'sm-wave': '<path d="M4 12h1.5M7.5 8v8M11 5v14M14.5 9v6M18 7v10M20.5 12H20"/>',
+  'sm-clock': '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  'sm-note': '<path d="M6 3.5h9l3.5 3.5V20a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z"/><path d="M8.5 10h7M8.5 13.5h7M8.5 17h4"/>',
+  'sm-chat': '<path d="M20 12a7.5 7.5 0 0 1-11 6.6L4 20l1.4-4.5A7.5 7.5 0 1 1 20 12z"/>',
 };
 
 function icon(name, size = 16) {
   const inner = ICON_DEFS[name] || '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+  const w = name.startsWith('sm-') ? '1.8' : '2';   // SUMADO の線の絵は 1.8
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
 }
 
 function renderIcons(root = document) {

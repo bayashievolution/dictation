@@ -6889,6 +6889,67 @@ function applyPaneOrder() {
   }
 }
 
+/**
+ * そのタブの働きに、いま使える AI があるか (v0.24.89)
+ * 無ければ理由を返す（タブのアイコンを注意のしるしにし、空のときの案内で AI 設定へ誘う）。
+ * メモは AI が無くても使えるので見ない。Web Speech の文字起こしも AI 無しで動く
+ */
+function paneAiProblem(id) {
+  const claude = !!state.settings.claudeCode;
+  if (id === 'pane-transcript') {
+    if (state.settings.inputMode !== 'gemini-audio') return '';
+    return (geminiKey() || usesGroqTranscribe()) ? '' : '文字起こしに使える AI がありません';
+  }
+  if (id === 'pane-live') return claude ? '' : 'ライブ要約には Claude Code が要ります';
+  if (id === 'pane-summary' || id === 'pane-chat') return (geminiKey() || claude) ? '' : '使える AI がありません';
+  return '';
+}
+
+/** いまそのタブの働きを受け持つ AI の名前（空のときの案内の札に出す） (v0.24.89) */
+function paneAiName(id) {
+  if (id === 'pane-transcript') {
+    if (state.settings.inputMode !== 'gemini-audio') return 'Web Speech';
+    return usesGroqTranscribe() ? 'Groq Whisper' : 'Gemini';
+  }
+  return state.settings.claudeCode ? 'Claude Code' : 'Gemini';
+}
+
+/**
+ * 空のときの案内を作る (v0.24.89)
+ * やっさん「いまのデザインだとなしなので、整えて。アイコンやシンボルを使ってビジュアルよく」。
+ * SUMADO の線の絵・短い一言・受け持つ AI の札。使える AI が無ければ注意のしるしと「AI 設定を開く」。
+ * 説明しすぎない（SUMADO の仕様書の 5 章）ので、一言だけにする
+ */
+const EMPTY_HINTS = {
+  'pane-transcript': { el: 'emptyHint', icon: 'sm-wave', role: '聞き取り', text: () => '録音を始めると、ここに文字が出ます' },
+  'pane-live': { el: 'liveSummaryEmpty', icon: 'sm-clock', role: '要約', text: () => `録音中、${clampLiveSummaryMinutes(state.settings.liveSummaryMin)}分ごとに目次つきの要約ができます` },
+  'pane-summary': { el: 'summaryEmpty', icon: 'sm-note', role: '要約', text: () => state.settings.autoSummarize ? '録音を止めると、ここに要約ができます' : '「要約を生成」で作れます' },
+  'pane-chat': { el: 'chatEmpty', icon: 'sm-chat', role: '答える AI', text: () => '文字起こし・メモ・要約について質問できます' },
+};
+function renderEmptyHints() {
+  for (const [id, h] of Object.entries(EMPTY_HINTS)) {
+    const box = els[h.el];
+    if (!box) continue;
+    const problem = paneAiProblem(id);
+    box.classList.toggle('needs-ai', !!problem);
+    box.innerHTML = problem
+      ? `<span class="empty-icon" data-icon="sm-warn" data-icon-size="34"></span>`
+        + `<span class="empty-text">${escapeHtmlSimple(problem)}</span>`
+        + `<button type="button" class="btn btn-ghost btn-sm empty-open-ai">AI 設定を開く</button>`
+      : `<span class="empty-icon" data-icon="${h.icon}" data-icon-size="34"></span>`
+        + `<span class="empty-text">${escapeHtmlSimple(h.text())}</span>`
+        + `<span class="empty-chip">${escapeHtmlSimple(h.role)}・${escapeHtmlSimple(paneAiName(id))}</span>`;
+    renderIcons(box);
+  }
+}
+
+/** 設定を開いて「AI 設定」のところを見せる (v0.24.89) */
+function openAiSettings() {
+  openSettings();
+  const g = document.getElementById('ai-settings-group');
+  if (g) setTimeout(() => g.scrollIntoView({ block: 'start', behavior: 'smooth' }), 120);
+}
+
 function renderInnerTabs() {
   // 内側ラッパ .inner-tabs-list が無ければ作る（外側タブの #tabs-list と同構造）
   // これでアクティブ線 indicator が位置: relative の基準を持てる
@@ -6911,7 +6972,10 @@ function renderInnerTabs() {
     const btn = document.createElement('button');
     btn.className = 'inner-tab' + (state.activePane === id ? ' active' : '');
     btn.dataset.pane = id;
-    btn.innerHTML = `<span class="inner-tab-icon" data-icon="${meta.icon}"></span>${meta.label}`;
+    // v0.24.89: そのタブに使える AI が無いときは、アイコンを注意のしるしに（やっさんの指定）
+    const problem = paneAiProblem(id);
+    btn.classList.toggle('needs-ai', !!problem);
+    btn.innerHTML = `<span class="inner-tab-icon" data-icon="${problem ? 'sm-warn' : meta.icon}"></span>${meta.label}`;
     btn.addEventListener('click', () => switchInnerPane(id));
     listEl.appendChild(btn);
   }
@@ -6925,6 +6989,7 @@ function renderInnerTabs() {
   listEl.appendChild(indicator);
 
   renderIcons(listEl);
+  renderEmptyHints();   // v0.24.89: AI の設定が変わると、案内の札・注意のしるしも変わる
   enablePointerDragSort(listEl, {
     itemSelector: '.inner-tab',
     idAttr: 'pane',
@@ -11420,6 +11485,10 @@ applySummaryDetailSwitch();
 applyPaneOrder();
 renderInnerTabs();
 if (typeof renderIcons === 'function') renderIcons();
+// v0.24.89: 空のときの案内の「AI 設定を開く」（案内は描き直すので、入れ物ごとに 1 回だけ登録）
+for (const box of [els.emptyHint, els.liveSummaryEmpty, els.summaryEmpty, els.chatEmpty]) {
+  if (box) box.addEventListener('click', (e) => { if (e.target.closest('.empty-open-ai')) openAiSettings(); });
+}
 els.zoomRange.value = state.settings.appZoom;
 els.zoomPercent.textContent = state.settings.appZoom + '%';
 if (els.btnClearAudio) {
