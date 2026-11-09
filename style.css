@@ -2423,7 +2423,7 @@ mark.search-hit.current {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.72);
-  animation: fadeIn 0.25s var(--ease-out);
+  /* v0.24.81: 出入りは motion.js のばね（ガイド全体をふわっと） */
   z-index: 1;
 }
 .onboarding-spot {
@@ -2448,8 +2448,8 @@ mark.search-hit.current {
   padding: 14px 16px 12px;
   box-shadow: 0 16px 40px rgba(0,0,0,0.55);
   color: var(--text);
-  animation: bubbleIn 0.25s var(--ease-out);
-  transition: top 0.35s var(--ease-out), left 0.35s var(--ease-out);
+  /* v0.24.81: 出る・次の手順へ移る動きは motion.js のばね（keyframes の ease だった） */
+  /* v0.24.81: 次の手順への移動も motion.js のばね（top / left の ease の transition は外した） */
   z-index: 10;
 }
 @keyframes bubbleIn {

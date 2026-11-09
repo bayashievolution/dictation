@@ -5064,7 +5064,7 @@ function notionProgressOpen(title, { cancellable = true } = {}) {
   els.notionProgressList.innerHTML = '';
   // 1件だけの保存は、区切りが来る前に終わるので中止できない。ボタンを出さない
   // v0.24.80: 前の回の「薄くしてから隠す」が途中なら止める（止めないと、出したあとで隠してしまう）
-  if (window.Motion) for (const el of [els.notionAutoCloseRow, els.btnNotionKeepTabs, els.btnNotionCloseTabs]) if (el) Motion.clear(el);
+  if (window.Motion) for (const el of [els.notionAutoCloseRow, els.btnNotionKeepTabs, els.btnNotionCloseTabs]) if (el) { el.__fadingOut = false; Motion.clear(el); }
   els.btnNotionCancel.hidden = !cancellable;
   els.notionAutoCloseRow.hidden = false;
   // v0.21.4: **毎回オフから始める。** 状態を覚えない。
@@ -5175,24 +5175,9 @@ function notionProgressAddRow(label, state_, detail) {
   els.notionProgressList.scrollTop = els.notionProgressList.scrollHeight;
 }
 
-/** Notion 保存の小窓の中で、出るものをふわっと出す・消えるものを薄くしてから隠す (v0.24.80) */
-function notionFadeIn(el) {
-  if (!el) return;
-  const was = el.hidden;
-  el.hidden = false;
-  if (!window.Motion || !was) return;
-  Motion.set(el, { opacity: 0 });
-  Motion.animate(el, { opacity: 1 }, { spring: Motion.SPRINGS.fade }).then((d) => { if (d) Motion.clear(el); });
-}
-function notionFadeOut(el) {
-  if (!el || el.hidden) return;
-  if (!window.Motion) { el.hidden = true; return; }
-  Motion.animate(el, { opacity: 0 }, { spring: Motion.MOTION.morph.contentOut }).then((d) => {
-    if (!d) return;
-    el.hidden = true;
-    Motion.clear(el);
-  });
-}
+/** Notion 保存の小窓の中で、出るものをふわっと出す・消えるものを薄くしてから隠す (v0.24.80・v0.24.81 で motion.js の部品に) */
+function notionFadeIn(el) { if (window.Motion) Motion.fadeShow(el); else if (el) el.hidden = false; }
+function notionFadeOut(el) { if (window.Motion) Motion.fadeHide(el); else if (el) el.hidden = true; }
 
 function notionProgressClose() {
   // v0.24.64: 一瞬で消さず、少し縮みながらふわっと
@@ -8237,7 +8222,29 @@ function switchInnerPane(paneId) {
   const willBeChat = paneId === 'pane-chat';
   if (wasChat !== willBeChat) {
     const bars = [els.zoomBar, els.dictBar].filter(Boolean);
-    if (bars.length) {
+    if (bars.length && window.Motion) {
+      // v0.24.81: 薄くする・戻すをばねで（前は CSS の transition の ease 0.5 秒）。透明になったところで場所を入れ替える
+      const token = {};
+      switchInnerPane.__barsToken = token;
+      // 札には、指を乗せたときに濃くする transition（opacity）がある。ばねで動かしている間は止める
+      // （止めないと、ばねが毎フレーム書く濃さを CSS がさらに遅らせる）
+      bars.forEach((b) => { b.style.transition = 'none'; });
+      Promise.all(bars.map((b) => Motion.animate(b, { opacity: 0 }, { spring: Motion.SPRINGS.fade }))).then(() => {
+        if (switchInnerPane.__barsToken !== token) return;   // その間にまた切り替えた
+        document.body.classList.toggle('chat-active', willBeChat);
+        for (const b of bars) {
+          // 戻す先は CSS の濃さ（ふだんは薄め・辞書を使っているときは濃い）。書いた値を外して測る
+          Motion.clear(b);
+          const to = parseFloat(getComputedStyle(b).opacity) || 1;
+          Motion.set(b, { opacity: 0 });
+          Motion.animate(b, { opacity: to }, { spring: Motion.SPRINGS.fade }).then((d) => {
+            if (!d) return;
+            Motion.clear(b);
+            b.style.transition = '';
+          });
+        }
+      });
+    } else if (bars.length) {
       bars.forEach(b => b.classList.add('fading'));
       // 0.5s フェード: 480ms で透明、位置切替、480ms でフェードイン
       setTimeout(() => {
@@ -8781,7 +8788,9 @@ function positionImageBox() {
   box.style.top    = `${(r.top  - h.top)  / z + host.scrollTop}px`;
   box.style.width  = `${r.width  / z}px`;
   box.style.height = `${r.height / z}px`;
-  box.hidden = false;
+  // v0.24.81: 選んだときにふわっと出す（前は一瞬）。位置の追いかけ（スクロールなど）は今までどおりその場で
+  if (window.Motion && (box.hidden || box.__fadingOut)) Motion.fadeShow(box);
+  else box.hidden = false;
 }
 
 function selectMemoImage(img) {
@@ -8808,7 +8817,7 @@ function selectMemoImage(img) {
 function clearImageSelection() {
   _selectedImg = null;
   const box = memoImageBox();
-  if (box) box.hidden = true;
+  if (box) { if (window.Motion) Motion.fadeHide(box); else box.hidden = true; }   // v0.24.81: 薄くしてから隠す
   closeImageMenu();
 }
 
@@ -9920,9 +9929,22 @@ function onboardingPosition() {
   bubble.style.left = (leftVisual / z) + 'px';
 }
 
+// v0.24.81: 使い方ガイドの動き（前は暗幕が一瞬で出入りし、吹き出しは keyframes の ease で出て、次の手順へは一瞬で跳んでいた）
+//   - 暗幕はふわっと出る・消える
+//   - 吹き出しは少し小さいところから少し行き過ぎてぽんと出る。次の手順では、前の場所から新しい場所へばねで移り、中の字はふわっと入れ替わる
 function startOnboarding() {
   onboardingIdx = 0;
-  document.getElementById('onboarding').classList.remove('hidden');
+  const ob = document.getElementById('onboarding');
+  const bubble = document.getElementById('onboarding-bubble');
+  if (window.Motion) {
+    Motion.popIn(ob, { from: 1, hiddenClass: 'hidden' });
+    onboardingPosition();
+    Motion.set(bubble, { scale: 0.94, opacity: 0, y: 8 });
+    Motion.animate(bubble, { scale: 1, y: 0 }, { spring: Motion.MOTION.pop });
+    Motion.animate(bubble, { opacity: 1 }, { spring: Motion.MOTION.popFade }).then((d) => { if (d) Motion.clear(bubble); });
+    return;
+  }
+  ob.classList.remove('hidden');
   onboardingPosition();
 }
 function nextOnboarding() {
@@ -9931,11 +9953,27 @@ function nextOnboarding() {
     closeOnboarding();
     return;
   }
+  const bubble = document.getElementById('onboarding-bubble');
+  const before = window.Motion ? bubble.getBoundingClientRect() : null;
   onboardingPosition();
+  if (before) {
+    const after = bubble.getBoundingClientRect();
+    const z = Motion.zoom();
+    Motion.place(bubble, { x: (before.left - after.left) / z + Motion.current(bubble).x, y: (before.top - after.top) / z + Motion.current(bubble).y });
+    Motion.animate(bubble, { x: 0, y: 0 }, { spring: Motion.SPRINGS.sheet }).then((d) => { if (d) Motion.clear(bubble); });
+    for (const id of ['onboarding-title', 'onboarding-text', 'onboarding-step']) {
+      const t = document.getElementById(id);
+      if (!t) continue;
+      Motion.set(t, { opacity: 0 });
+      Motion.animate(t, { opacity: 1 }, { spring: Motion.MOTION.morph.contentIn }).then((d) => { if (d) Motion.clear(t); });
+    }
+  }
 }
 function closeOnboarding() {
   onboardingUnliftTarget();
-  document.getElementById('onboarding').classList.add('hidden');
+  const ob = document.getElementById('onboarding');
+  if (window.Motion) Motion.popOut(ob, { to: 1, hiddenClass: 'hidden' });
+  else ob.classList.add('hidden');
 }
 const btnOnboarding = document.getElementById('btn-onboarding');
 if (btnOnboarding) btnOnboarding.addEventListener('click', startOnboarding);

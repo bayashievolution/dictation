@@ -523,6 +523,32 @@
   function popIsOpen(el, o) { const st = popStates.get(el); return st ? !!st.open : !isHidden(el, o); }
 
   /**
+   * その場でふわっと出す・薄くしてから隠す（hidden 属性。高さは変えない）（ディクテーション用に足した）
+   * 重なって出るもの（画像のハンドル）や、入れ物の高さを別のしくみが伸び縮みさせるもの（Notion の小窓の中）に使う。
+   * 流れの中で場所を取るものは reveal を使う（高さが一瞬で変わって下が跳ぶため）
+   */
+  function fadeShow(el) {
+    if (!el) return Promise.resolve(true);
+    const was = el.hidden || el.__fadingOut;
+    el.__fadingOut = false;
+    el.hidden = false;
+    if (!was) return Promise.resolve(true);
+    if (!states.has(el)) set(el, { opacity: 0 });
+    return animate(el, { opacity: 1 }, { spring: SPRINGS.fade }).then((d) => { if (d) clear(el); return d; });
+  }
+  function fadeHide(el) {
+    if (!el || (el.hidden && !el.__fadingOut)) return Promise.resolve(true);
+    el.__fadingOut = true;
+    return animate(el, { opacity: 0 }, { spring: MOTION.morph.contentOut }).then((d) => {
+      if (!d || !el.__fadingOut) return false;   // 途中で出し直された
+      el.__fadingOut = false;
+      el.hidden = true;
+      clear(el);
+      return true;
+    });
+  }
+
+  /**
    * 保存する HTML から、ばねが書いた一時的な値を取り除く（ディクテーション用に足した）
    *
    * 動いている途中の要素には style="transform: translate3d(...) scale(...); opacity: 0.4;" が付いている。
@@ -540,5 +566,5 @@
     });
   }
 
-  global.Motion = { SPRINGS, MOTION, zoom, animate, set, place, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, createMorph, stripMotionStyles, Spring1D };
+  global.Motion = { SPRINGS, MOTION, zoom, animate, set, place, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, fadeShow, fadeHide, createMorph, stripMotionStyles, Spring1D };
 })(typeof window !== 'undefined' ? window : globalThis);
