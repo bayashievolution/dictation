@@ -3393,6 +3393,8 @@ body.chat-active .dict-menu { bottom: 114px; }
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
+  /* v0.24.68: 右上の札から広がる・札へ縮む（motion.js の popIn / popOut） */
+  transform-origin: calc(100% - 24px) -6px;
   z-index: 60;
   max-width: min(420px, 86vw);
   max-height: 40vh;

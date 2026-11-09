@@ -27,7 +27,8 @@ const eq = (label, got, want) => {
 
 const snap = (page) => page.evaluate(() => {
   const el = els.status;
-  const box = document.querySelector('.status-detail');
+  // v0.24.68: 閉じた吹き出しは、縮みながら消える途中も少しだけ残る（.is-closing）。それは開いているうちに入れない
+  const box = document.querySelector('.status-detail:not(.is-closing)');
   return {
     文言: el.textContent,
     お知らせ中: el.classList.contains('error'),

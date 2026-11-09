@@ -3,6 +3,7 @@
 //   v0.24.64: Notion 保存の小窓（出る・消える・中身で高さが変わる）
 //   v0.24.65: 右クリックのメニュー（タブ・画像）
 //   v0.24.66: 検索と置換のバー（出入り・置換の行の出し入れ）
+//   v0.24.68: 右上の状態の札の、詳細の吹き出し
 //
 // ■ これは `sh tests/run.sh` では走らない（tests/t-*.js の形にしていない）
 //
@@ -193,6 +194,27 @@ async function trace(page, el, open, close) {
     eq('置換の行を出すとき、バーの高さが途中を通って伸びる', r.mid > r.h0 && r.mid < r.h1, true);
     eq('しまうとき、途中を通って縮み、最後は元の高さ（余白が残って跳ばない）', [r.mid2 < r.h1 && r.mid2 > r.h0, r.h2 === r.h0], [true, true]);
     eq('しまいきったら隠れて、style に値を残さない', [r.hidden, r.style.replace(/\s/g, '')], [true, '']);
+  }
+
+  console.log('■ 状態の札の、詳細の吹き出し');
+  {
+    const r = await page.evaluate(async () => {
+      statusNotice('error', 'Gemini で処理しました', { detail: '詳しい理由\n2行目', ms: 60000 });
+      els.status.click();
+      const box = document.querySelector('.status-detail');
+      const sc = () => +new DOMMatrix(getComputedStyle(box).transform).a.toFixed(3);
+      const opening = [];
+      for (let i = 0; i < 60; i++) { await new Promise(r => requestAnimationFrame(r)); opening.push(sc()); }
+      els.status.click();   // 閉じる
+      const closingNow = { connected: box.isConnected, closing: box.classList.contains('is-closing'), open: !!document.querySelector('.status-detail:not(.is-closing)') };
+      const ops = [];
+      for (let i = 0; i < 12; i++) { await new Promise(r => requestAnimationFrame(r)); ops.push(Number(getComputedStyle(box).opacity)); }
+      await new Promise(r => setTimeout(r, 800));
+      return { opening, closingNow, ops, gone: !box.isConnected };
+    });
+    eq('札から、小さいところから出て、少し行き過ぎて 1 に収まる', [r.opening[0] < 0.8, Math.max(...r.opening) > 1.01, Math.abs(r.opening[r.opening.length - 1] - 1) < 0.002], [true, true, true]);
+    eq('閉じたらすぐ「閉じた」扱い。本体は消えるまで残る', [r.closingNow.open, r.closingNow.connected, r.closingNow.closing], [false, true, true]);
+    eq('薄くなって消え、最後は外れる', [r.ops.some(o => o > 0.05 && o < 0.95), r.gone], [true, true]);
   }
 
   await browser.close();

@@ -744,7 +744,19 @@ function dismissStatusNotice() {
 }
 
 function closeStatusDetail() {
-  if (statusDetailEl) { statusDetailEl.remove(); statusDetailEl = null; }
+  if (statusDetailEl) {
+    // v0.24.68: 札へ縮みながらふわっと消してから外す（TODO「動きを SUMADO の仕様書に合わせる」の 9。前は一瞬）。
+    // 「開いているか」はすぐ「閉じた」にする（消える途中のものは押せない）
+    const box = statusDetailEl;
+    statusDetailEl = null;
+    if (window.Motion) {
+      box.style.pointerEvents = 'none';
+      box.classList.add('is-closing');   // 消える途中の印（開いている吹き出しと見分ける）
+      Motion.popOut(box, { to: 0.9 }).then(() => box.remove());
+    } else {
+      box.remove();
+    }
+  }
   if (els.status) els.status.classList.remove('is-open');
 }
 
@@ -761,6 +773,8 @@ function openStatusDetail() {
   box.appendChild(hint);
   (els.status.parentNode || document.body).appendChild(box);
   statusDetailEl = box;
+  // v0.24.68: 札から、小さいところから少し行き過ぎてぽんと出る（前は一瞬）
+  if (window.Motion) { box.hidden = true; Motion.popIn(box); }
   els.status.classList.add('is-open');
 }
 
