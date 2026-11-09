@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.85" />
+  <link rel="stylesheet" href="style.css?v=0.24.86" />
 </head>
 <body>
   <div id="app">
@@ -664,14 +664,16 @@
             <span>話者判別機能を有効にする</span>
           </label>
           <div class="field">
-            <small class="field-hint">話者判別機能が有効になり、それに伴い音声ファイルが端末に一時保存されます。</small>
+            <small class="field-hint">話者判別機能が有効になり、それに伴い音声ファイルがこの PC の Chrome の中に一時保存されます（Google ドライブには保存しません）。</small>
           </div>
           <div class="field">
             <small class="field-hint warn-hint">
-              <strong>この設定が決めるのは「端末に残すかどうか」だけです。</strong>
-              「AI で聞き取る」は、この設定に関係なく文字起こしのために音声を Google（Groq Whisper を選んだときは Groq）へ送信しています。
-              話者判別を実行すると録音全体がアップロードされます。
-              使い終わったファイルはこちらから削除しますが、削除できなかった場合も Google 側で48時間後に自動削除されます。
+              <!-- v0.24.86: 「端末」「Google へアップロード」をドライブのことだと読まれた（やっさん 2026-11-09「ドライブに保存されてると思ってた」）。
+                   保存先はこの PC の Chrome の中（IndexedDB）、送り先は Gemini だとはっきり書く -->
+              <strong>この設定が決めるのは「この PC に残すかどうか」だけです。</strong>
+              「AI で聞き取る」は、この設定に関係なく文字起こしのために音声を Gemini（Groq Whisper を選んだときは Groq）へ送信しています。
+              話者判別を実行すると録音全体が Gemini にアップロードされます。
+              使い終わったファイルはこちらから削除しますが、削除できなかった場合も Gemini 側で48時間後に自動削除されます。
               録音の保存自体が許されない場面では、この設定をオフにしたうえで、
               「AI で聞き取る」を使うことの可否も確認してください。
             </small>
@@ -1058,18 +1060,18 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.85"></script>
-  <script src="motion.js?v=0.24.85"></script>
-  <script src="gemini.js?v=0.24.85"></script>
-  <script src="groq.js?v=0.24.85"></script>
-  <script src="notion.js?v=0.24.85"></script>
-  <script src="audio-store.js?v=0.24.85"></script>
-  <script src="claude-bridge.js?v=0.24.85"></script>
-  <script src="claude-installer.js?v=0.24.85"></script>
-  <script src="live-summary.js?v=0.24.85"></script>
-  <script src="image-store.js?v=0.24.85"></script>
-  <script src="gemini-files.js?v=0.24.85"></script>
-  <script src="term-dicts.js?v=0.24.85"></script>
-  <script src="app.js?v=0.24.85"></script>
+  <script src="icons.js?v=0.24.86"></script>
+  <script src="motion.js?v=0.24.86"></script>
+  <script src="gemini.js?v=0.24.86"></script>
+  <script src="groq.js?v=0.24.86"></script>
+  <script src="notion.js?v=0.24.86"></script>
+  <script src="audio-store.js?v=0.24.86"></script>
+  <script src="claude-bridge.js?v=0.24.86"></script>
+  <script src="claude-installer.js?v=0.24.86"></script>
+  <script src="live-summary.js?v=0.24.86"></script>
+  <script src="image-store.js?v=0.24.86"></script>
+  <script src="gemini-files.js?v=0.24.86"></script>
+  <script src="term-dicts.js?v=0.24.86"></script>
+  <script src="app.js?v=0.24.86"></script>
 </body>
 </html>

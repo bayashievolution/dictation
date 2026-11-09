@@ -3530,9 +3530,9 @@ async function runDiarization() {
     + `保管した録音をまとめて Gemini に通し、話者付きで書き起こし直します。\n\n`
     + `　音声: 約${mins}分 / ${formatBytes(totalBytes)} / ${segments.length}区間\n`
     + `　入力トークン: 約${approxTokens.toLocaleString()}（音声は1秒=32トークン）\n\n`
-    + `⚠️ 録音全体をもう一度 Google にアップロードします。\n`
+    + `⚠️ 録音全体をもう一度 Gemini にアップロードします（Google ドライブではありません）。\n`
     + `　 使い終わったファイルはこちらから削除しますが、\n`
-    + `　 削除できなかった場合も Google 側で48時間後に自動削除されます。\n\n`
+    + `　 削除できなかった場合も Gemini 側で48時間後に自動削除されます。\n\n`
     + `いまの文字起こしは置き換わります（Ctrl+Z で戻せます）。\n\n`
     + `続けますか？`
   )) return;
@@ -3977,7 +3977,7 @@ async function startGeminiAudioRecording() {
         repass: '話者判別が終わったら消す', close: 'タブを閉じたら消す',
         '1d': '1日', '7d': '7日', manual: '手動で消すまで',
       }[state.settings.audioRetention] || state.settings.audioRetention}）`
-    : '録音の保持: オフ（端末に残しません）');
+    : '録音の保持: オフ（この PC に残しません）');
   diagLog.info(`録音開始 (Gemini) session=${state.recordingSessionId?.slice(-6)} `
     + `最短=${state.settings.audioChunkSec || 12}秒 `
     + (state.settings.audioSilenceCut !== false && state.silenceDetector
