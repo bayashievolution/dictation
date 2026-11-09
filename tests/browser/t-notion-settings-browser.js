@@ -73,12 +73,14 @@ const status = (page) => page.evaluate(() => document.getElementById('notion-tes
       return {
         toggle: !!document.getElementById('input-notion-enabled'),
         noTestButton: !document.getElementById('btn-notion-test'),
-        text: ['文字起こしや要約など全てのタブをNotionに送信します。', 'Notionコネクション', 'リセット',
+        text: ['文字起こしや要約など全てのタブをNotionに送信します。', 'Notionコネクション',
                'アップロード時はこの保存先が最初から選ばれた状態で確認ダイアログが出ます。'].every((w) => g.textContent.includes(w)),
         longHintGone: !g.textContent.includes('インテグレーショントークン'),
+        // v0.24.94: 「リセット」の字は、名前の左の赤い丸の × に（やっさんの指定）
+        forgetChip: !!g.querySelector('#btn-notion-forget.clear-chip'),
       };
     });
-    eq('トグルあり・接続テストのボタンなし・文言・長い説明は消えた', r, { toggle: true, noTestButton: true, text: true, longHintGone: true });
+    eq('トグルあり・接続テストのボタンなし・文言・長い説明は消えた', r, { toggle: true, noTestButton: true, text: true, longHintGone: true, forgetChip: true });
     await page.close();
   }
 

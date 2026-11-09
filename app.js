@@ -8345,7 +8345,13 @@ async function testNotionConnection(tokenArg) {
   }
 }
 
-function forgetNotionTarget() {
+async function forgetNotionTarget() {
+  // v0.24.94: 赤い丸の × にしたので、押したら一度確かめる（やっさんの指定）
+  if (!(await confirmDialog({
+    title: '前回の保存先を忘れますか？',
+    message: '次に Notion へ保存するとき、保存先を選び直します。Notion のノートは消えません。',
+    ok: '忘れる', destructive: true,
+  }))) return;
   state.settings.notionLastDataSourceId = '';
   state.settings.notionLastDataSourceTitle = '';
   state.settings.notionLastDatePropName = '';
@@ -9521,12 +9527,62 @@ function switchSession(id) {
   }
 }
 
-function closeSession(id) {
+/**
+ * 確認の小窓（ブラウザの confirm のかわり） (v0.24.94)
+ * やっさん「タブを閉じようとしたときのモーダルがブラウザ依存なので、オリジナルのモーダルに」。
+ * SUMADO の confirmDialog と同じ使い方（{ title, message, ok, destructive }）で、OK なら true。
+ * Esc・暗い背景・キャンセルは false。消すものは赤いボタン。出入りのばねは installModalMotion が付ける
+ */
+function confirmDialog({ title, message = '', ok = 'OK', cancel = 'キャンセル', destructive = false } = {}) {
+  const box = document.getElementById('confirm-dialog');
+  if (!box) return Promise.resolve(window.confirm([title, message].filter(Boolean).join('\n\n')));
+  if (box._resolve) box._resolve(false);   // 前の確認が残っていたら、キャンセル扱いで閉じる
+  document.getElementById('confirm-title').textContent = title || '';
+  document.getElementById('confirm-message').textContent = message || '';
+  const okBtn = document.getElementById('confirm-ok');
+  okBtn.textContent = ok;
+  okBtn.classList.toggle('btn-danger', !!destructive);
+  okBtn.classList.toggle('btn-primary', !destructive);
+  document.getElementById('confirm-cancel').textContent = cancel;
+  return new Promise((resolve) => {
+    const finish = (v) => {
+      box._resolve = null;
+      box.classList.add('hidden');
+      box.removeEventListener('click', onClick);
+      document.removeEventListener('keydown', onKey, true);
+      resolve(v);
+    };
+    const onClick = (e) => {
+      const a = e.target.closest('[data-confirm]');
+      if (a) finish(a.dataset.confirm === 'ok');
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); finish(false); }
+      else if (e.key === 'Enter' && document.activeElement !== document.getElementById('confirm-cancel')) { e.preventDefault(); finish(true); }
+    };
+    box._resolve = finish;
+    box.addEventListener('click', onClick);
+    document.addEventListener('keydown', onKey, true);
+    box.classList.remove('hidden');
+    // 消す確認は、うっかり Enter で消さないよう「キャンセル」に指を置いておく
+    setTimeout(() => (destructive ? document.getElementById('confirm-cancel') : okBtn).focus(), 30);
+  });
+}
+
+async function closeSession(id) {
+  const idx0 = state.sessions.findIndex(s => s.id === id);
+  if (idx0 < 0) return;
+  const session = state.sessions[idx0];
+  const hasContent = session.transcript || session.memo || session.summary;
+  // v0.24.94: ブラウザの confirm をやめ、自前の小窓に
+  if (hasContent && !(await confirmDialog({
+    title: `「${session.title}」を閉じますか？`,
+    message: 'このタブの内容は削除されます。',
+    ok: '閉じる', destructive: true,
+  }))) return;
+  // 待っているあいだに並びが変わっているかもしれないので、場所は確認のあとで探し直す
   const idx = state.sessions.findIndex(s => s.id === id);
   if (idx < 0) return;
-  const session = state.sessions[idx];
-  const hasContent = session.transcript || session.memo || session.summary;
-  if (hasContent && !confirm(`「${session.title}」を閉じます。この内容は削除されます。よろしいですか？`)) return;
   const wasActive = state.activeId === id;
   // 録音対象セッションが閉じられるなら（BGでも）録音を止める
   if (state.isRecording && state.recordingSessionId === id) stopRecording();
@@ -9546,15 +9602,20 @@ function closeSession(id) {
 /* ───────── タブの一括閉じ（Chrome タブ風） ───────── */
 
 /** 指定したIDのリストを一括削除。中身ありは件数付きまとめ確認 */
-function closeMultipleSessions(ids, { skipConfirm = false } = {}) {
+async function closeMultipleSessions(ids, { skipConfirm = false } = {}) {
   const targets = ids.map(id => state.sessions.find(s => s.id === id)).filter(Boolean);
   if (targets.length === 0) return;
   const withContent = targets.filter(s => s.transcript || s.memo || s.summary);
   if (!skipConfirm && withContent.length > 0) {
-    const msg = withContent.length === targets.length
-      ? `${targets.length}個のタブを閉じます。内容はすべて削除されます。よろしいですか？`
-      : `${targets.length}個のタブを閉じます（うち${withContent.length}個に内容あり、削除されます）。よろしいですか？`;
-    if (!confirm(msg)) return;
+    // v0.24.94: 自前の確認の小窓に
+    const ok = await confirmDialog({
+      title: `${targets.length}個のタブを閉じますか？`,
+      message: withContent.length === targets.length
+        ? '内容はすべて削除されます。'
+        : `うち${withContent.length}個に内容があり、削除されます。`,
+      ok: '閉じる', destructive: true,
+    });
+    if (!ok) return;
   }
   // 録音対象が含まれるなら先に停止
   if (state.isRecording && targets.some(s => s.id === state.recordingSessionId)) {

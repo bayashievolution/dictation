@@ -56,6 +56,8 @@ const ICON_DEFS = {
   'sm-note': '<path d="M6 3.5h9l3.5 3.5V20a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z"/><path d="M8.5 10h7M8.5 13.5h7M8.5 17h4"/>',
   'sm-chat': '<path d="M20 12a7.5 7.5 0 0 1-11 6.6L4 20l1.4-4.5A7.5 7.5 0 1 1 20 12z"/>',
   'sm-tick': '<path d="M5.5 12.5l4 4 9-9.5"/>',
+  // SUMADO の検索欄の × と同じ形（丸の中の白い ×）。丸は CSS で塗る
+  'sm-xmark': '<path d="M7 7l10 10M17 7L7 17"/>',
 };
 
 function icon(name, size = 16) {

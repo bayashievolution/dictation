@@ -3542,3 +3542,10 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 表: 見出し「使う AI」→「**使用するAI**」、説明はやっさんの一文「用途に合わせて使用するAIを選択することができます。」だけ。「7個セット」の札・左のくくりの線・下の一言は外した（「説明しすぎ」「区切り線で十分」）
   - 注意書きの見出しを「**API キーが登録されていないか、有効になっていません**」に統一（設定・タブとも。キーを入れたままトグルを切ったときも嘘にならない）
   - テスト: `t-ai-table-browser.js` に Gemini でライブ要約を作る場面。`t-live-summary-browser.js`・`t-settings-ai-browser.js`・`t-motion-settings-browser.js` は「ライブ要約を選べない」場面を Gemini も切った形に合わせた。tests/browser を全部走らせて全部通過
+- 2026-11-09 (v0.24.94): **確認の小窓を自前に（タブを閉じる・Notion の前回の保存先）**（やっさん「タブを閉じようとしたときのモーダルがブラウザ依存なので、オリジナルのモーダルに」「リセットを赤い丸に × に。押したら一応モーダルで確認」）
+  - `confirmDialog({ title, message, ok, destructive })`（SUMADO と同じ使い方・OK なら true）。出入りはほかの小窓と同じばね（installModalMotion）。
+    消す確認は赤いボタンで、うっかり Enter で消さないよう「キャンセル」に指を置く。Esc・暗い背景・キャンセルは false
+  - タブを閉じる（1 枚・まとめて）を置き換えた。`closeSession` / `closeMultipleSessions` は async に（確認が要らないときは待たずにその場で閉じる）
+  - Notion の「前回の保存先」のリセットは、名前の左の赤い丸に白い ×。押すと「前回の保存先を忘れますか？（Notion のノートは消えません）」
+  - **ほかの confirm（クリア・置換・辞書の削除・話者判別の中止など 13 か所）はまだブラウザの小窓のまま。** 呼び出しの流れが同期なので 1 か所ずつ直す（TODO に残した）
+  - テスト: `tests/browser/t-confirm-dialog-browser.js`（新規・ブラウザの小窓が一度も出ないことも見る）。`t-notion-settings-browser.js` の「リセット」の字の確認を × のボタンに。tests/browser を全部走らせて全部通過

@@ -3481,3 +3481,18 @@ body.chat-active .dict-menu { bottom: 114px; }
 .ai-caution { display: flex; gap: 8px; align-items: flex-start; }
 .ai-caution-icon { color: var(--caution); margin-top: 2px; }
 .ai-caution strong { color: var(--caution); }
+
+/* ───────── 確認の小窓 (v0.24.94) ───────── */
+.confirm-card .modal-body { padding: 20px 20px 14px; }
+.confirm-title { font-size: 15px; font-weight: 700; line-height: 1.6; margin: 0; word-break: auto-phrase; }
+.confirm-message { font-size: 13px; color: var(--text-muted); line-height: 1.7; margin: 6px 0 0; white-space: pre-line; word-break: auto-phrase; }
+.confirm-message:empty { display: none; }
+.btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 700; }
+.btn-danger:hover:not(:disabled) { filter: brightness(1.08); }
+
+/* 赤い丸の中に白い ×（Notion の前回の保存先を忘れる・v0.24.94） */
+.clear-chip { appearance: none; width: 18px; height: 18px; border-radius: 50%; border: none; padding: 0; cursor: pointer; flex: none;
+  background: var(--danger); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
+.clear-chip svg { stroke-width: 3; }
+.clear-chip:disabled { display: none; }
+.clear-chip:focus-visible { outline: 2px solid var(--heading); outline-offset: 2px; }

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.93" />
+  <link rel="stylesheet" href="style.css?v=0.24.94" />
 </head>
 <body>
   <div id="app">
@@ -817,10 +817,9 @@
           <div class="field">
             <span class="field-label">前回の保存先</span>
             <div class="diag-log-actions">
+              <!-- v0.24.94: リセットは名前の左の赤い丸に ×（やっさんの指定）。押したら確認の小窓 -->
+              <button type="button" id="btn-notion-forget" class="clear-chip" aria-label="前回の保存先を忘れる"><span data-icon="sm-xmark" data-icon-size="12"></span></button>
               <span id="notion-last-target" class="field-hint">（まだありません）</span>
-              <button type="button" id="btn-notion-forget" class="pane-btn" title="記憶している保存先を忘れる">
-                <span data-icon="trash"></span><span>リセット</span>
-              </button>
             </div>
             <small class="field-hint">アップロード時はこの保存先が最初から選ばれた状態で確認ダイアログが出ます。</small>
           </div>
@@ -1091,20 +1090,36 @@
     </div>
   </div>
 
+  <!-- v0.24.94: 確認の小窓（ブラウザの confirm のかわり）。やっさん「タブを閉じようとしたときのモーダルがブラウザ依存なので、オリジナルに」。
+       中身は confirmDialog（app.js）が入れる。出入りのばねは installModalMotion がほかの小窓と同じく付ける -->
+  <div id="confirm-dialog" class="modal hidden" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-backdrop" data-confirm="cancel"></div>
+    <div class="modal-card modal-small confirm-card">
+      <div class="modal-body">
+        <p id="confirm-title" class="confirm-title"></p>
+        <p id="confirm-message" class="confirm-message"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-confirm="cancel" id="confirm-cancel">キャンセル</button>
+        <button type="button" class="btn btn-primary" data-confirm="ok" id="confirm-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.93"></script>
-  <script src="motion.js?v=0.24.93"></script>
-  <script src="gemini.js?v=0.24.93"></script>
-  <script src="groq.js?v=0.24.93"></script>
-  <script src="notion.js?v=0.24.93"></script>
-  <script src="audio-store.js?v=0.24.93"></script>
-  <script src="claude-bridge.js?v=0.24.93"></script>
-  <script src="claude-installer.js?v=0.24.93"></script>
-  <script src="live-summary.js?v=0.24.93"></script>
-  <script src="image-store.js?v=0.24.93"></script>
-  <script src="gemini-files.js?v=0.24.93"></script>
-  <script src="term-dicts.js?v=0.24.93"></script>
-  <script src="app.js?v=0.24.93"></script>
+  <script src="icons.js?v=0.24.94"></script>
+  <script src="motion.js?v=0.24.94"></script>
+  <script src="gemini.js?v=0.24.94"></script>
+  <script src="groq.js?v=0.24.94"></script>
+  <script src="notion.js?v=0.24.94"></script>
+  <script src="audio-store.js?v=0.24.94"></script>
+  <script src="claude-bridge.js?v=0.24.94"></script>
+  <script src="claude-installer.js?v=0.24.94"></script>
+  <script src="live-summary.js?v=0.24.94"></script>
+  <script src="image-store.js?v=0.24.94"></script>
+  <script src="gemini-files.js?v=0.24.94"></script>
+  <script src="term-dicts.js?v=0.24.94"></script>
+  <script src="app.js?v=0.24.94"></script>
 </body>
 </html>
