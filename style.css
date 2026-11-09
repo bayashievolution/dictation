@@ -2971,6 +2971,8 @@ body.chat-active #dict-bar {
   overflow: hidden;
 }
 .notion-float.hidden { display: none; }
+/* v0.24.64: 右下から広がる・右下へ縮む（motion.js の popIn / popOut）。動かしたあとも、窓の右下が基準 */
+.notion-float { transform-origin: 100% 100%; }
 .notion-float.positioned { right: auto; bottom: auto; }
 .notion-float-body {
   padding: 10px 14px 4px;

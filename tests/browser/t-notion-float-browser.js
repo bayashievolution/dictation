@@ -41,7 +41,8 @@ const eq = (label, got, want) => {
 
   console.log('■ 開いても、後ろの操作を止めない');
   await page.evaluate(() => notionProgressOpen('Notion に追記中…', { cancellable: false }));
-  await page.waitForTimeout(200);
+  // v0.24.64: 小さいところから少し行き過ぎてぽんと出るので、出きってから測る（途中は一瞬 320px を少し超える）
+  await page.waitForTimeout(800);
   const box = await page.locator('#notion-progress').boundingBox();
   eq('右下に小さく出る（幅 320px 以下・下半分）', [box.width <= 320, box.y > 820 / 2], [true, true]);
   eq('後ろを暗くする幕が無い', await page.evaluate(() => !document.querySelector('#notion-progress .modal-backdrop')), true);
@@ -94,7 +95,7 @@ const eq = (label, got, want) => {
   eq('完了と聞き方', [await page.textContent('#notion-progress-title'), (await page.textContent('#notion-progress-body')).includes('タブを閉じますか')],
      ['Notion への追記が完了しました', true]);
   await page.click('#btn-notion-keep-tabs');
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(800);   // v0.24.64: 少し縮みながらふわっと消える
   eq('「残す」で小窓が消える', await page.evaluate(() => els.notionProgress.classList.contains('hidden')), true);
   eq('タブは残っている', await page.evaluate(() => state.sessions.map(x => x.id)), ['A', 'B']);
 

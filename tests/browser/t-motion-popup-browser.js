@@ -1,5 +1,6 @@
 // 小さなメニューの出入り（TODO「動きを SUMADO の仕様書に合わせる」の 4・6）を、本物の Chromium で検査する。
 //   v0.24.63: 左下の辞書メニュー
+//   v0.24.64: Notion 保存の小窓（出る・消える・中身で高さが変わる）
 //
 // ■ これは `sh tests/run.sh` では走らない（tests/t-*.js の形にしていない）
 //
@@ -70,6 +71,37 @@ async function trace(page, el, open, close) {
     });
     eq('しまう途中で押し直したら、出し直す', r.open, true);
     eq('Esc でも閉じる', r.closed, true);
+  }
+
+  console.log('■ Notion 保存の小窓');
+  {
+    const r = await trace(page, '#notion-progress', "notionProgressOpen('Notion に保存中…', { cancellable: true })", "notionProgressClose()");
+    eq('小さいところから出て、少し行き過ぎて 1 に収まる', [r.opening[0].s < 0.97, Math.max(...r.opening.map(x => x.s)) > 1.003, Math.abs(r.opening[r.opening.length - 1].s - 1) < 0.002], [true, true, true]);
+    eq('出きったら style に transform / opacity を残さない', /transform|opacity/.test(r.styleOpen), false);
+    eq('閉じてもすぐには消えず、薄くなって消える', [r.hiddenRightAway, r.closing.some(x => !x.h && x.o > 0.05 && x.o < 0.95)], [false, true]);
+    eq('最後は隠れる', await page.evaluate(() => els.notionProgress.classList.contains('hidden')), true);
+  }
+  {
+    const r = await page.evaluate(async () => {
+      notionProgressOpen('Notion に保存中…', { cancellable: false });
+      await new Promise(r => setTimeout(r, 800));
+      const h0 = els.notionProgress.offsetHeight;
+      // 終わって、下のボタンが出る・文言が長くなる
+      notionProgressSet('2 件を保存しました。タブを閉じますか？（閉じるとアプリ内の内容は削除されます）');
+      els.btnNotionCloseTabs.hidden = false;
+      els.btnNotionKeepTabs.hidden = false;
+      await new Promise(r => requestAnimationFrame(r));
+      await new Promise(r => requestAnimationFrame(r));
+      const mid = els.notionProgress.offsetHeight;
+      await new Promise(r => setTimeout(r, 900));
+      const h1 = els.notionProgress.offsetHeight;
+      const style = els.notionProgress.style.height;
+      notionProgressClose();
+      await new Promise(r => setTimeout(r, 800));
+      return { h0, mid, h1, style };
+    });
+    eq('ボタンが出て高くなるとき、途中の高さを通る（一瞬で伸びない）', [r.h1 > r.h0, r.mid > r.h0 && r.mid < r.h1], [true, true]);
+    eq('止まったら高さを書き込んだままにしない', r.style, '');
   }
 
   await browser.close();

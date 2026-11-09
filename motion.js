@@ -255,14 +255,19 @@
       box.style.height = keep;
       return h;
     };
+    // 描かれているか（display:none のときは false）。高さ 0 で描かれている（空の下書き）のとは分ける
+    let rendered = box.getClientRects().length > 0;
     const check = () => {
       if (!box.isConnected) return;
+      // 隠れているあいだは測れない。隠れていたものが出てきたときは、伸ばさずにその高さから
+      // （出てくる動きは呼ぶ側が別に付ける。ここで 0 から伸ばすと、ぽんと出ながら下から生えてくる二重の動きになる）
+      const now = box.getClientRects().length > 0;
+      if (!now) { rendered = false; return; }
+      if (!rendered) { rendered = true; shown = natural(); return; }
       const from = moving ? current(driver).x : shown;
       const to = natural();
       if (moving && Math.abs(to - target) < 1) return;
       if (Math.abs(to - from) < 1) { if (!moving) shown = to; return; }
-      // 見えていない（display:none の中）ときは測れないので、覚えておくだけ
-      if (!box.offsetParent && box.offsetHeight === 0) { shown = to; return; }
       if (!moving) set(driver, { x: from });
       box.style.height = `${from}px`;
       box.style.overflow = 'hidden';
@@ -355,14 +360,17 @@
    * hidden で出し入れする要素に使う（しまい終わったら hidden を付ける。途中で popIn し直したら付けない）。
    */
   const popStates = new WeakMap();
+  // o.hiddenClass を渡すと、hidden 属性ではなくそのクラスで出し入れする（.notion-float.hidden など）
+  const isHidden = (el, o) => (o && o.hiddenClass ? el.classList.contains(o.hiddenClass) : el.hidden);
+  const setHidden = (el, o, v) => { if (o && o.hiddenClass) el.classList.toggle(o.hiddenClass, v); else el.hidden = v; };
   function popIn(el, o) {
     o = o || {};
     const from = o.from != null ? o.from : MOTION.popFrom;
     const st = popStates.get(el) || {};
     st.open = true;
     popStates.set(el, st);
-    const wasHidden = el.hidden || st.closing;
-    el.hidden = false;
+    const wasHidden = isHidden(el, o) || st.closing;
+    setHidden(el, o, false);
     if (wasHidden && !states.has(el)) set(el, { scale: from, opacity: 0, y: o.y || 0 });
     st.closing = false;
     animate(el, { scale: 1, y: 0 }, { spring: MOTION.pop });
@@ -371,7 +379,7 @@
   function popOut(el, o) {
     o = o || {};
     const st = popStates.get(el) || {};
-    if (el.hidden && !st.closing) return Promise.resolve(true);
+    if (isHidden(el, o) && !st.closing) return Promise.resolve(true);
     st.open = false;
     st.closing = true;
     popStates.set(el, st);
@@ -379,13 +387,13 @@
     return animate(el, { opacity: 0 }, { spring: SPRINGS.fade }).then((d) => {
       if (!d || popStates.get(el).open) return false;   // しまう途中で出し直された
       st.closing = false;
-      el.hidden = true;
+      setHidden(el, o, true);
       clear(el);
       return true;
     });
   }
   /** いま出ているか（しまう途中は「出ていない」） */
-  function popIsOpen(el) { const st = popStates.get(el); return st ? !!st.open : !el.hidden; }
+  function popIsOpen(el, o) { const st = popStates.get(el); return st ? !!st.open : !isHidden(el, o); }
 
   global.Motion = { SPRINGS, MOTION, animate, set, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, Spring1D };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -4926,7 +4926,9 @@ function notionProgressOpen(title, { cancellable = true } = {}) {
     els.notionProgress.style.left = `${pos.x}px`;
     els.notionProgress.style.top = `${pos.y}px`;
   }
-  els.notionProgress.classList.remove('hidden');
+  // v0.24.64: 小さいところからぽんと出る（TODO「動きを SUMADO の仕様書に合わせる」の 5）
+  if (window.Motion) Motion.popIn(els.notionProgress, { from: 0.9, hiddenClass: 'hidden' });
+  else els.notionProgress.classList.remove('hidden');
   if (pos) requestAnimationFrame(() => clampFloatEl(els.notionProgress));
 }
 
@@ -5011,7 +5013,9 @@ function notionProgressAddRow(label, state_, detail) {
 }
 
 function notionProgressClose() {
-  els.notionProgress.classList.add('hidden');
+  // v0.24.64: 一瞬で消さず、少し縮みながらふわっと
+  if (window.Motion) Motion.popOut(els.notionProgress, { to: 0.94, hiddenClass: 'hidden' });
+  else els.notionProgress.classList.add('hidden');
 }
 
 /** 中止ボタン。押した瞬間は止まらない（今のノートは送り切る）のでその旨を出す */
@@ -10652,6 +10656,8 @@ function installModalMotion() {
 }
 installModalMotion();
 
+// v0.24.64: Notion 保存の小窓は、文言・結果の行・下のボタンの出入りで高さが変わる。跳ばずに伸び縮みさせる
+if (window.Motion && els.notionProgress) Motion.smoothHeight(els.notionProgress, els.notionProgress);
 // v0.24.60: 下書き（#interim）の高さを、出る・消える・行が増えるたびにばねで（空は高さ 0）
 if (window.Motion && els.interim) Motion.smoothHeight(els.interim, els.interim);
 // v0.24.60: 人が自分でスクロールしはじめたら、ばねの自動スクロールをその場で止める
