@@ -718,7 +718,10 @@ function installStatusIsland() {
     box.style.width = ''; box.style.height = '';
     const r = box.getBoundingClientRect();
     box.style.width = keepW; box.style.height = keepH;
-    return { w: r.width, h: r.height };
+    // v0.24.76: 画面の拡大率で割る（割らないと 90% のとき 1 割狭くなり、左右の余白が消えて字が切れた）。
+    // 小数の切り捨てで「…」にならないよう、少しだけ広めに
+    const z = Motion.zoom();
+    return { w: Math.ceil(r.width / z * 2) / 2, h: Math.ceil(r.height / z * 2) / 2 };
   };
   let shownText = text.textContent;
   let pending = false;
@@ -743,9 +746,13 @@ function installStatusIsland() {
         g.className = 'status-text-ghost';
         g.setAttribute('aria-hidden', 'true');
         g.textContent = oldText;
-        const cs = getComputedStyle(box);
-        Object.assign(g.style, { position: 'absolute', left: `${r.left - hr.left}px`, top: `${r.top - hr.top}px`,
-          font: cs.font, fontFeatureSettings: cs.fontFeatureSettings, color: cs.color, whiteSpace: 'nowrap', pointerEvents: 'none' });
+        // v0.24.76: 字の形は 1 つずつ写す。Chrome は font（まとめた書き方）を空で返すので、前は 16px の大きな字で消えていた
+        const cs = getComputedStyle(text);
+        const z = Motion.zoom();
+        Object.assign(g.style, { position: 'absolute', left: `${(r.left - hr.left) / z}px`, top: `${(r.top - hr.top) / z}px`,
+          fontSize: cs.fontSize, fontFamily: cs.fontFamily, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight,
+          letterSpacing: cs.letterSpacing, fontFeatureSettings: cs.fontFeatureSettings,
+          padding: cs.padding, boxSizing: 'border-box', color: getComputedStyle(box).color, whiteSpace: 'nowrap', pointerEvents: 'none' });
         host.appendChild(g);
         Motion.animate(g, { opacity: 0 }, { spring: M.contentOut }).then(() => g.remove());
       }
@@ -1132,7 +1139,8 @@ function transcriptMorph(fn, { removing = [] } = {}) {
     const g = el.cloneNode(true);
     g.removeAttribute('id');
     g.setAttribute('aria-hidden', 'true');
-    Object.assign(g.style, { position: 'fixed', left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`,
+    const z = Motion.zoom();   // v0.24.76: 画面の拡大率で割る
+    Object.assign(g.style, { position: 'fixed', left: `${r.left / z}px`, top: `${r.top / z}px`, width: `${r.width / z}px`,
       margin: '0', pointerEvents: 'none', zIndex: '1', animation: 'none' });
     ghosts.push(g);
   }
@@ -1143,7 +1151,7 @@ function transcriptMorph(fn, { removing = [] } = {}) {
   }
   for (const [el, top] of before) {
     if (!el.isConnected) continue;
-    const dy = top - el.getBoundingClientRect().top;
+    const dy = (top - el.getBoundingClientRect().top) / Motion.zoom();   // v0.24.76: 画面の拡大率で割る
     if (Math.abs(dy) < 1) continue;
     // v0.24.71: place（ほかのばねを止めない）。set だと、差し替えたばかりの段落のふわっと（濃さ）まで止まる
     Motion.place(el, { y: dy + (Motion.current(el).y || 0) });
@@ -8952,7 +8960,7 @@ function openImageMenu(img, x, y) {
   menu.style.top  = `${top}px`;
   // v0.24.65: 押したところの小さい大きさから、少し行き過ぎてぽんと（前は一瞬で出ていた）
   if (window.Motion) {
-    menu.style.transformOrigin = `${x - left}px ${y - top}px`;
+    menu.style.transformOrigin = `${(x - left) / Motion.zoom()}px ${(y - top) / Motion.zoom()}px`;
     menu.hidden = true;
     Motion.popIn(menu);
   }
@@ -9296,7 +9304,7 @@ function showTabContextMenu(sessionId, clientX, clientY) {
     menu.style.visibility = '';
     // v0.24.65: 押したところの小さい大きさから、少し行き過ぎてぽんと（端に寄せたときも押したところから）
     if (window.Motion) {
-      menu.style.transformOrigin = `${clientX - x}px ${clientY - y}px`;
+      menu.style.transformOrigin = `${(clientX - x) / Motion.zoom()}px ${(clientY - y) / Motion.zoom()}px`;
       menu.classList.add('hidden');
       Motion.popIn(menu, { hiddenClass: 'hidden' });
     }

@@ -127,6 +127,35 @@ const eq = (label, got, want) => {
     eq('CSS の transition で大きさを動かしていない', /width|height|all/.test(r.transition), false);
   }
 
+  // v0.24.76: やっさん報告（画像つき）「消えるときに文字が大きくなる」「表示しているとき、左右のマージンがなくなっている」。
+  // 画面の拡大率（設定の 90% など）が 1 でないと、測った見た目の px と style に書く px がずれていた。
+  // 消えていく古い字の写しは、Chrome が font（まとめた書き方）を空で返すので 16px になっていた
+  console.log('■ 画面の拡大率が 90% のとき');
+  {
+    const p2 = await browser.newPage({ viewport: { width: 900, height: 600 } });
+    await p2.goto(URL);
+    await p2.evaluate(() => { const s = JSON.parse(localStorage.getItem('dictation:settings') || '{}'); s.appZoom = 90; localStorage.setItem('dictation:settings', JSON.stringify(s)); });
+    await p2.reload();
+    await p2.waitForTimeout(1500);
+    const r = await p2.evaluate(async () => {
+      const s = els.status, t = s.querySelector('.status-text');
+      setStatus('listening', '要約生成中（Claude）');
+      await Promise.resolve();
+      const g = document.querySelector('.status-text-ghost');
+      const ghost = g ? { fs: getComputedStyle(g).fontSize, pad: getComputedStyle(g).paddingLeft,
+                          dx: Math.abs(g.getBoundingClientRect().left - t.getBoundingClientRect().left) } : null;
+      await new Promise(r => setTimeout(r, 1200));
+      const tr = t.getBoundingClientRect(), sr = s.getBoundingClientRect();
+      return { zoom: document.documentElement.style.zoom, ghost, fs: getComputedStyle(t).fontSize,
+               cut: t.scrollWidth > t.clientWidth + 0.5, inside: tr.left >= sr.left - 0.5 && tr.right <= sr.right + 0.5,
+               padL: getComputedStyle(t).paddingLeft };
+    });
+    eq('拡大率 90% で開いている', r.zoom, '0.9');
+    eq('消えていく古い字は、札の字と同じ大きさ・同じ余白・同じ場所', [r.ghost && r.ghost.fs, r.ghost && r.ghost.pad, r.ghost && r.ghost.dx < 1], [r.fs, r.padL, true]);
+    eq('出ている字は切れず、左右の余白も札の中に入っている', [r.cut, r.inside], [false, true]);
+    await p2.close();
+  }
+
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\n✓ すべて通過');
   process.exit(fail ? 1 : 0);

@@ -62,6 +62,17 @@
     },
   };
 
+  /**
+   * 画面全体の倍率（設定の「拡大率」。html の style.zoom）(v0.24.76)
+   * 倍率が 1 でないと、getBoundingClientRect は倍率を掛けた見た目の px を返すのに、style に書く px は倍率を掛ける前の値になる。
+   * 測った差をそのまま transform や left/top に書くと、倍率の分だけずれる（90% のとき札の幅が 1 割狭くなり、左右の余白が消えた）。
+   * 測った値は、これで割ってから書く
+   */
+  function zoom() {
+    const z = parseFloat(document.documentElement.style.zoom);
+    return z > 0 ? z : 1;
+  }
+
   const DEFAULT_PROPS = { x: 0, y: 0, scale: 1, scaleX: 1, scaleY: 1, opacity: 1 };
   const EPS = { x: 0.1, y: 0.1, scale: 0.0005, scaleX: 0.0005, scaleY: 0.0005, opacity: 0.002 };
 
@@ -354,8 +365,9 @@
         const g = old.cloneNode(true);
         g.removeAttribute('id');
         g.setAttribute('aria-hidden', 'true');
-        Object.assign(g.style, { position: 'fixed', left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`,
-          height: `${r.height}px`, margin: '0', pointerEvents: 'none', zIndex: '50', boxSizing: 'border-box' });
+        const z = zoom();
+        Object.assign(g.style, { position: 'fixed', left: `${r.left / z}px`, top: `${r.top / z}px`, width: `${r.width / z}px`,
+          height: `${r.height / z}px`, margin: '0', pointerEvents: 'none', zIndex: '50', boxSizing: 'border-box' });
         document.body.appendChild(g);
         animate(g, { opacity: 0, scale: 0.94 }, { spring: SPRINGS.fade }).then(() => g.remove());
       }
@@ -370,7 +382,7 @@
       if (b && prev && prev !== n && states.has(prev)) {
         const c = current(prev);
         if (c.opacity < 0.999 || Math.abs(c.scale - 1) > 0.001) {
-          set(n, { opacity: c.opacity, scale: c.scale, x: b.left - a.left, y: b.top - a.top });
+          set(n, { opacity: c.opacity, scale: c.scale, x: (b.left - a.left) / zoom(), y: (b.top - a.top) / zoom() });
           animate(n, { opacity: 1, scale: 1, x: 0, y: 0 }, { spring: SPRINGS.fade }).then((d) => { if (d) clear(n); });
           continue;
         }
@@ -381,8 +393,8 @@
         animate(n, { opacity: 1, scale: 1 }, { spring: SPRINGS.fade }).then((d) => { if (d) clear(n); });
         continue;
       }
-      const dx = b.left - a.left;
-      const dy = b.top - a.top;
+      const dx = (b.left - a.left) / zoom();
+      const dy = (b.top - a.top) / zoom();
       if (Math.abs(dy) < 1 && Math.abs(dx) < 1) continue;
       set(n, { x: dx, y: dy });
       animate(n, { x: 0, y: 0 }, { spring: SPRINGS.sheet }).then((d) => { if (d) clear(n); });
@@ -514,5 +526,5 @@
     });
   }
 
-  global.Motion = { SPRINGS, MOTION, animate, set, place, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, createMorph, stripMotionStyles, Spring1D };
+  global.Motion = { SPRINGS, MOTION, zoom, animate, set, place, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, createMorph, stripMotionStyles, Spring1D };
 })(typeof window !== 'undefined' ? window : globalThis);
