@@ -65,6 +65,7 @@ const summarize = (page, chars) => page.evaluate(async (n) => {
   {
     const { ctx, page } = await open(browser, { apiKey: 'AIza-test', claudeCode: false });
     await page.evaluate(() => document.getElementById('btn-settings').click());
+    await page.evaluate(() => expandAllSettingsSections());   // v0.24.95: 詳細設定はたたんであるので、中の欄を触る前にひらく
     await page.waitForTimeout(300);
     const vis = () => page.evaluate(() => { const e = document.getElementById('claude-fallback-row'); return !!e && e.offsetParent !== null; });
     eq('連携オフなら出ない', await vis(), false);

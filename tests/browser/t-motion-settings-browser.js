@@ -30,7 +30,7 @@ const eq = (label, got, want) => {
   await page.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({ apiKey: 'AIza-test', geminiEnabled: false, claudeCode: false })));
   await page.reload();
   await page.waitForTimeout(800);
-  await page.evaluate(() => document.getElementById('btn-settings').click());
+  await page.evaluate(() => { document.getElementById('btn-settings').click(); expandAllSettingsSections(); });   // v0.24.95: AI の動きはたたんである
   await page.waitForTimeout(700);
   await page.evaluate(() => document.getElementById('input-claude-code').scrollIntoView({ block: 'center' }));
   await page.waitForTimeout(200);

@@ -57,6 +57,13 @@ const ICON_DEFS = {
   'sm-chat': '<path d="M20 12a7.5 7.5 0 0 1-11 6.6L4 20l1.4-4.5A7.5 7.5 0 1 1 20 12z"/>',
   'sm-tick': '<path d="M5.5 12.5l4 4 9-9.5"/>',
   // SUMADO の検索欄の × と同じ形（丸の中の白い ×）。丸は CSS で塗る
+  'sm-mic': '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/>',
+  'sm-user': '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/>',
+  'sm-sparkle': '<path d="M12 3.5l1.8 5.2 5.2 1.8-5.2 1.8L12 17.5l-1.8-5.2L5 10.5l5.2-1.8z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
+  'sm-frame': '<rect x="8" y="3" width="8" height="18" rx="2.2"/><path d="M3.5 9v6M20.5 9v6"/>',
+  'sm-folder': '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+  'sm-apps': '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8.5v7M8.5 12h7"/>',
+  'sm-chevron-right': '<path d="M9 4 L17 12 L9 20"/>',   // SUMADO の GLYPHS.chevronRight
   'sm-xmark': '<path d="M7 7l10 10M17 7L7 17"/>',
 };
 

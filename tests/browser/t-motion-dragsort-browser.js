@@ -53,7 +53,7 @@ async function dragAndTrace(page, listSel, itemSel, keyAttr, fromIdx, toIdx) {
 
   console.log('■ 設定のペインの並び順');
   {
-    await page.evaluate(() => document.getElementById('btn-settings').click());
+    await page.evaluate(() => { document.getElementById('btn-settings').click(); expandAllSettingsSections(); });   // v0.24.95: 表示はたたんである
     await page.waitForTimeout(700);
     await page.evaluate(() => document.getElementById('pane-order-list').scrollIntoView({ block: 'center' }));
     await page.waitForTimeout(300);

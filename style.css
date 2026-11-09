@@ -3496,3 +3496,19 @@ body.chat-active .dict-menu { bottom: 114px; }
 .clear-chip svg { stroke-width: 3; }
 .clear-chip:disabled { display: none; }
 .clear-chip:focus-visible { outline: 2px solid var(--heading); outline-offset: 2px; }
+
+/* ───────── 設定: 詳細設定のまとまり (v0.24.95) ───────── */
+.settings-details { margin-bottom: 4px; padding-bottom: 0; border-bottom: none; }
+.settings-acc { padding: 0; margin: 0; border-bottom: 1px solid var(--border); }
+.settings-acc-title { margin: 0; }
+.settings-acc-head { appearance: none; width: 100%; background: none; border: none; color: var(--text); font: inherit; font-size: 14px; font-weight: 600;
+  display: flex; align-items: center; gap: 10px; padding: 12px 2px; cursor: pointer; text-align: left; }
+.settings-acc-icon { color: var(--heading); }
+.settings-acc-label { flex: 1; }
+.settings-acc-chev { color: var(--text-faint); transition: transform .35s cubic-bezier(.34,1.56,.64,1); }
+.settings-acc-head[aria-expanded="true"] .settings-acc-chev { transform: rotate(90deg); }
+.settings-acc-head:focus-visible { outline: 2px solid var(--heading); outline-offset: 2px; border-radius: 6px; }
+.settings-acc-body { padding: 2px 2px 14px; }
+.settings-sub-title { display: block; font-weight: 700; margin: 12px 0 6px; color: var(--text); }
+.settings-sub-title:first-child { margin-top: 2px; }
+@media (prefers-reduced-motion: reduce) { .settings-acc-chev { transition: none; } }

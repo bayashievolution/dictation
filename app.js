@@ -10468,6 +10468,34 @@ if (els.modeGemini) {
   });
 }
 
+/* ───────── 詳細設定のまとまり (v0.24.95・設定の見本の 4 段目) ─────────
+ * 見出しを押すと開く・閉じる。高さと濃さをばねで（Motion.reveal。SUMADO の「すっと出し入れ」）。
+ * 開いているかどうかは覚えない（毎回たたんだ状態から。ふだん触らないものを置く場所なので）。
+ * 中から使う欄（「AI 設定を開く」など）を見せたいときは openSettingsSection を使う
+ */
+function setSettingsSection(group, open, animated = true) {
+  if (!group) return;
+  const head = group.querySelector('.settings-acc-head');
+  const body = group.querySelector('.settings-acc-body');
+  if (!head || !body) return;
+  head.setAttribute('aria-expanded', String(!!open));
+  if (window.Motion) Motion.reveal(body, !!open, { instant: !animated });
+  else body.hidden = !open;
+}
+function openSettingsSection(id, animated = true) {
+  const el = document.getElementById(id);
+  setSettingsSection(el && el.closest('.settings-acc'), true, animated);
+}
+/** テストと、まとめて見たいとき用: 詳細設定を全部ひらく（動かさずに） */
+function expandAllSettingsSections() {
+  document.querySelectorAll('#settings-modal .settings-acc').forEach((g) => setSettingsSection(g, true, false));
+}
+document.querySelectorAll('#settings-modal .settings-acc-head').forEach((head) => {
+  head.addEventListener('click', () => {
+    setSettingsSection(head.closest('.settings-acc'), head.getAttribute('aria-expanded') !== 'true');
+  });
+});
+
 // v0.24.88: AI 設定のトグルを切り替えたら、その下（キーの欄・連携のボタン）を出し入れする
 for (const box of [els.inputGeminiEnabled, els.inputGroqEnabled, els.inputClaudeCode]) {
   if (box) box.addEventListener('change', () => { applyAiSettingsVisibility(true); renderAiTable(); applyLiveSummaryAvailability(); });

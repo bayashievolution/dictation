@@ -3549,3 +3549,8 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - Notion の「前回の保存先」のリセットは、名前の左の赤い丸に白い ×。押すと「前回の保存先を忘れますか？（Notion のノートは消えません）」
   - **ほかの confirm（クリア・置換・辞書の削除・話者判別の中止など 13 か所）はまだブラウザの小窓のまま。** 呼び出しの流れが同期なので 1 か所ずつ直す（TODO に残した）
   - テスト: `tests/browser/t-confirm-dialog-browser.js`（新規・ブラウザの小窓が一度も出ないことも見る）。`t-notion-settings-browser.js` の「リセット」の字の確認を × のボタンに。tests/browser を全部走らせて全部通過
+- 2026-11-09 (v0.24.95): **設定の並べ替え 4/4: 詳細設定をたたんだ**（設定の見本の 4 段目）
+  - 「詳細設定」の見出しの下に、押すと開くまとまり: 音声入力／録音の保持（話者判別）／AI の動き／停止条件／表示／Notion 連携／そのほか（SUMADO・字幕・診断ログを 1 つに）。見出しに SUMADO の線の絵と ›
+  - 開け閉めは高さと濃さをばねで（`Motion.reveal`）。› は回る。毎回たたんだ状態から（ふだん触らないものを置く場所なので覚えない）
+  - 中の欄・保存のキーは変えていない（HTML の入れ子を変えただけ）。`openSettingsSection(id)`・`expandAllSettingsSections()` を足した（テストはたたんだ欄を触る前にひらく）
+  - テスト: `tests/browser/t-settings-acc-browser.js`（新規）、`t-settings-structure.js`（まとまりの並び）。たたんだ欄を触る 4 本（`t-claude-fallback`・`t-groq`・`t-motion-dragsort`・`t-motion-settings`）は開いてから触るように。tests/browser を全部走らせた

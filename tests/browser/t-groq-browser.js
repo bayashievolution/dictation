@@ -112,7 +112,7 @@ async function sendOne(page) {
   {
     const { ctx, page } = await open(browser, { inputMode: 'gemini-audio', apiKey: 'AIza-test' },
       { extraStorage: { 'dictation:sttCompare': JSON.stringify({ 'groq-key': 'gsk_from_compare' }) } });
-    await page.evaluate(() => openSettings());
+    await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });   // v0.24.95: 詳細設定はたたんである
     await page.waitForTimeout(300);
     // v0.24.92: 「聞き取る AI」は使う AI の表へ。既定は無料で済む Groq（キーを引き継いだので選べる）
     const picked = (k) => page.$eval(`.ai-pick[data-k="${k}"][aria-checked="true"]`, b => b.dataset.a).catch(() => null);
@@ -149,7 +149,7 @@ async function sendOne(page) {
     eq('右上の印は (Groq)', await page.evaluate(() => recordingLabel()), '聞き取り中 (Groq)');
     await page.reload();
     await page.waitForTimeout(500);
-    await page.evaluate(() => openSettings());
+    await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });   // v0.24.95: 詳細設定はたたんである
     await page.waitForTimeout(300);
     eq('開き直しても表は Groq', await page.$eval('.ai-pick[data-k="stt"][aria-checked="true"]', b => b.dataset.a), 'groq');
     eq('開き直したとき、キーの欄は出ている', await page.isVisible('#input-groq-key'), true);
