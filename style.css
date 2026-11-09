@@ -2802,26 +2802,14 @@ mark.search-hit.current {
   cursor: pointer;
 }
 
-/* ───────── Conditional field group (slide reveal) ───────── */
+/* ───────── Conditional field group (slide reveal) ─────────
+   v0.24.74: 出し入れは motion.js の reveal（hidden 属性 + 高さと濃さをばねで）。前は grid の行の高さを ease で動かしていた。
+   上の余白は外（margin）ではなく中（padding）に持たせる（外だと、縮みきったところで 12px 詰まって跳ぶ） */
 .field-conditional {
-  display: grid;
-  grid-template-rows: 1fr;
-  opacity: 1;
-  transition:
-    grid-template-rows 0.28s var(--ease-out),
-    opacity 0.2s var(--ease-out),
-    margin 0.28s var(--ease-out);
-  margin-top: 12px;
+  padding-top: 12px;
 }
 .field-conditional > .field-conditional-inner {
-  overflow: hidden;
   min-height: 0;
-}
-.field-conditional.is-hidden {
-  grid-template-rows: 0fr;
-  opacity: 0;
-  margin-top: 0;
-  pointer-events: none;
 }
 
 .field-hint {

@@ -3428,3 +3428,8 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 前は class の hidden で max-height・余白・濃さを ease の transition で動かしていた。本当の高さと関係なく 400px から縮めるので、動きはじめに止まって見えた
   - 早見表を包み（`#memo-cheatsheet-wrap`）に入れ、`Motion.reveal` で高さと濃さをばねで出し入れする。下の余白（14px）は包みの中（padding）に持たせた（外の余白だと、縮みきったところで詰まって跳ぶ）
   - テスト: `tests/browser/t-motion-ease-browser.js`（書くとしまう・途中の高さと濃さを通る・しまいきったら場所を取らない・？で出すと元の高さへ・style に値を残さない・ease の transition が無い・押した回数どおり）
+- 2026-11-09 (v0.24.74): **設定の、モードによって出す・しまう行をばねに**（TODO「動きを SUMADO の仕様書に合わせる」の 12 のうち 2 つ目。Gemini モードだけの行・Web Speech モードだけの行・録音の保持）
+  - 前は class（is-hidden）で grid の行の高さと濃さを ease の transition で動かしていた。「録音の保持」は hidden で一瞬だった。どれも `Motion.reveal`（高さと濃さをばね）にした。設定を開いた直後は動かさずにその状態にする
+  - 上の余白は外（margin）から中（padding）へ移した（外だと縮みきったところで詰まって跳ぶ）。「録音の保持」は区切り線のあるまとまりで、余白を中に移すと区切り線の位置が変わるので、`reveal` に `withMargin`（外の余白も高さと同じ割合で縮める）を足した
+  - 既存の `tests/browser/t-keep-recording-browser.js` は切り替えて 200ms で見ていたので、動き終わってから見るようにした
+  - テスト: `tests/browser/t-motion-ease-browser.js` に1場面（開いた直後は動かさない・途中の高さを通る・下の行も途中を通って寄り、最後に余白の分だけ跳ばない・style に値を残さない・ease の transition なし）。旧版では3件落ちる

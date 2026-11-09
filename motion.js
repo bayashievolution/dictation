@@ -218,15 +218,25 @@
 
   /* ───────── 出す・しまう（reveal） ───────── */
   const revealStates = new WeakMap();
+  // o.withMargin（ディクテーション用に足した）: 外の余白（margin）も高さと同じ割合で縮める。
+  // 余白を中に移すと見た目（区切り線の位置など）が変わってしまう要素で、縮みきったところで余白が詰まって跳ばないように
   function reveal(el, show, o) {
     const instant = !!(o && o.instant);
     let st = revealStates.get(el);
     if (!st) {
       const driver = document.createElement('span');
-      st = { driver, shown: !el.hidden, moving: false };
-      onFrame(driver, ({ x }) => { el.style.height = `${Math.max(0, x)}px`; });
+      st = { driver, shown: !el.hidden, moving: false, full: 0, mt: 0, mb: 0, withMargin: false };
+      onFrame(driver, ({ x }) => {
+        el.style.height = `${Math.max(0, x)}px`;
+        if (st.withMargin && st.full > 0) {
+          const f = Math.max(0, Math.min(1, x / st.full));
+          el.style.marginTop = `${st.mt * f}px`;
+          el.style.marginBottom = `${st.mb * f}px`;
+        }
+      });
       revealStates.set(el, st);
     }
+    st.withMargin = !!(o && o.withMargin);
     if (st.shown === show && !st.moving) { el.hidden = !show; return Promise.resolve(true); }
     st.shown = show;
     if (instant) {
@@ -238,6 +248,15 @@
     el.hidden = false;
     el.style.height = '';
     const to = show ? el.offsetHeight : 0;
+    if (st.withMargin) {
+      // 本来の余白は、書き込んだ値を外して測る（動いている途中なら途中の値が入っているため）
+      el.style.marginTop = ''; el.style.marginBottom = '';
+      const cs = getComputedStyle(el);
+      st.mt = parseFloat(cs.marginTop) || 0;
+      st.mb = parseFloat(cs.marginBottom) || 0;
+      st.full = show ? to : Math.max(from, st.full || 0, 1);
+      if (!show && !st.moving) st.full = from;
+    }
     el.style.overflow = 'hidden';
     el.style.height = `${from}px`;
     set(st.driver, { x: from });
@@ -251,6 +270,7 @@
       st.moving = false;
       el.style.height = '';
       el.style.overflow = '';
+      if (st.withMargin) { el.style.marginTop = ''; el.style.marginBottom = ''; }
       if (!show) el.hidden = true;
       clear(el);   // 濃さのばねがまだ動いていても止めて、style を CSS に戻す
       return true;

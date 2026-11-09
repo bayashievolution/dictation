@@ -39,7 +39,7 @@ const eq = (label, got, want) => {
     eq(`${mode} で開いたとき: ${want ? '出る' : '出ない'}`, await shown(), want);
     // もう一方のモードに切り替える
     await page.click(want ? '#mode-webspeech' : '#mode-gemini');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(800);   // v0.24.74: 高さと濃さをばねで出し入れするので、動き終わってから見る
     eq(`切り替えると: ${want ? '隠れる' : '出る'}`, await shown(), !want);
     await page.close();
   }

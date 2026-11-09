@@ -4355,38 +4355,33 @@ async function listAudioInputDevices() {
   return devices.filter(d => d.kind === 'audioinput');
 }
 
+/**
+ * モードによって出す・しまう設定の行 (v0.24.74)
+ * 前は class（is-hidden）で grid の行の高さと濃さを ease の transition で動かしていた。SUMADO の reveal（高さと濃さをばねで）にした
+ * （TODO「動きを SUMADO の仕様書に合わせる」の 12）。開いた直後（animated: false）は動かさずにその状態にする
+ */
+function revealSettingRow(el, show, animated, withMargin = false) {
+  if (!el) return;
+  if (window.Motion) Motion.reveal(el, show, { instant: !animated, withMargin });
+  else el.hidden = !show;
+}
+
 function applyGeminiOnlyVisibility(animated = true) {
   const el = document.getElementById('gemini-only-fields');
   if (!el) return;
   const isGemini = els.modeGemini && els.modeGemini.checked;
   // v0.24.48: 「録音の保持」（話者判別）も Gemini モードのときだけ出す（やっさんの指定）
-  const keep = document.getElementById('keep-recording-group');
-  if (keep) keep.hidden = !isGemini;
-  if (!animated) {
-    // モーダル開いた直後はトランジション無しで確定状態に
-    const prev = el.style.transition;
-    el.style.transition = 'none';
-    el.classList.toggle('is-hidden', !isGemini);
-    void el.offsetWidth; // reflow
-    el.style.transition = prev;
-  } else {
-    el.classList.toggle('is-hidden', !isGemini);
-  }
+  // v0.24.74: これも一瞬で出し入れしていたので、同じくばねで
+  // 「録音の保持」は区切り線のあるまとまり（下の余白 22px）。余白も一緒に縮める（中に移すと区切り線の位置が変わる）
+  revealSettingRow(document.getElementById('keep-recording-group'), isGemini, animated, true);
+  revealSettingRow(el, isGemini, animated);
 }
 
 function applyWebSpeechOnlyVisibility(animated = true) {
   const el = document.getElementById('webspeech-only-fields');
   if (!el) return;
   const isWs = els.modeWebSpeech && els.modeWebSpeech.checked;
-  if (!animated) {
-    const prev = el.style.transition;
-    el.style.transition = 'none';
-    el.classList.toggle('is-hidden', !isWs);
-    void el.offsetWidth;
-    el.style.transition = prev;
-  } else {
-    el.classList.toggle('is-hidden', !isWs);
-  }
+  revealSettingRow(el, isWs, animated);
 }
 
 async function populateAudioDevices() {

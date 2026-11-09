@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.73" />
+  <link rel="stylesheet" href="style.css?v=0.24.74" />
 </head>
 <body>
   <div id="app">
@@ -355,7 +355,7 @@
               <span><strong>Gemini Audio</strong><small class="field-hint" style="display:block">小さい声に強い・10〜15秒遅延・任意のデバイス選択可</small></span>
             </label>
           </div>
-          <div class="field-conditional is-hidden" id="webspeech-only-fields">
+          <div class="field-conditional" id="webspeech-only-fields" hidden>
             <div class="field-conditional-inner">
               <!-- v0.13.22: Web Speech チャンク間隔（強制 commit）は望む動作達成の鍵
                    （v0.13.20 撤去ミスで判明）。N 秒ごとに recognition.stop() を呼んで
@@ -374,7 +374,7 @@
 
             </div>
           </div>
-          <div class="field-conditional is-hidden" id="gemini-only-fields">
+          <div class="field-conditional" id="gemini-only-fields" hidden>
             <div class="field-conditional-inner">
               <label class="field">
                 <span class="field-label">音声入力デバイス</span>
@@ -1037,17 +1037,17 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.73"></script>
-  <script src="motion.js?v=0.24.73"></script>
-  <script src="gemini.js?v=0.24.73"></script>
-  <script src="notion.js?v=0.24.73"></script>
-  <script src="audio-store.js?v=0.24.73"></script>
-  <script src="claude-bridge.js?v=0.24.73"></script>
-  <script src="claude-installer.js?v=0.24.73"></script>
-  <script src="live-summary.js?v=0.24.73"></script>
-  <script src="image-store.js?v=0.24.73"></script>
-  <script src="gemini-files.js?v=0.24.73"></script>
-  <script src="term-dicts.js?v=0.24.73"></script>
-  <script src="app.js?v=0.24.73"></script>
+  <script src="icons.js?v=0.24.74"></script>
+  <script src="motion.js?v=0.24.74"></script>
+  <script src="gemini.js?v=0.24.74"></script>
+  <script src="notion.js?v=0.24.74"></script>
+  <script src="audio-store.js?v=0.24.74"></script>
+  <script src="claude-bridge.js?v=0.24.74"></script>
+  <script src="claude-installer.js?v=0.24.74"></script>
+  <script src="live-summary.js?v=0.24.74"></script>
+  <script src="image-store.js?v=0.24.74"></script>
+  <script src="gemini-files.js?v=0.24.74"></script>
+  <script src="term-dicts.js?v=0.24.74"></script>
+  <script src="app.js?v=0.24.74"></script>
 </body>
 </html>
