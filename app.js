@@ -138,6 +138,9 @@ const DEFAULT_SETTINGS = {
   // 録音・区切り・話者判別（Gemini）はそのまま。新しいキーなので前の版に戻しても読めなくなるものは無い
   transcribeEngine: 'gemini',   // gemini / groq
   groqApiKey: '',
+  // v0.24.88: AI 設定のトグル。切ってもキーは消さず「使わない」だけ。未設定（それ以前の設定）はキーがあればオンで始める（loadSettings）
+  geminiEnabled: undefined,
+  groqEnabled: undefined,
   audioDeviceId: '',
   audioChunkSec: 12,
   audioMinChunkBytes: 400, // 旧1200から感度↑。小さい発話（小声・短語）もGeminiへ送る
@@ -520,6 +523,8 @@ const els = {
   engineGemini: document.getElementById('engine-gemini'),   // v0.24.83
   engineGroq: document.getElementById('engine-groq'),
   inputGroqKey: document.getElementById('input-groq-key'),
+  inputGeminiEnabled: document.getElementById('input-gemini-enabled'),   // v0.24.88
+  inputGroqEnabled: document.getElementById('input-groq-enabled'),
   inputAudioDevice: document.getElementById('input-audio-device'),
   inputChunkSec: document.getElementById('input-chunk-sec'),
   inputSilenceCut: document.getElementById('input-silence-cut'),
@@ -599,6 +604,9 @@ function loadSettings() {
       if (k) state.settings.groqApiKey = String(k).trim();
     } catch (_) {}
   }
+  // v0.24.88: AI 設定のトグルを足した。キーを入れていたものはオンで始める（オフから始めると、黙って止まる）
+  if (state.settings.geminiEnabled === undefined) state.settings.geminiEnabled = !!state.settings.apiKey;
+  if (state.settings.groqEnabled === undefined) state.settings.groqEnabled = !!state.settings.groqApiKey;
   // v0.24.39: 「Claude Code」（連携を使う）を足した。前の設定で Claude に任せるかライブ要約を
   // オンにしていた人は、オンのまま始める（オフから始めると、どちらも黙って止まる）
   if (state.settings.claudeCode === undefined) {
@@ -625,7 +633,7 @@ function applyAiButtonState() {
     const on = !!state.settings.aiEnabled;
     els.btnRefineTranscript.classList.toggle('on', on);
     els.btnRefineTranscript.setAttribute('aria-pressed', on ? 'true' : 'false');
-    els.btnRefineTranscript.classList.toggle('needs-key', on && !state.settings.apiKey);
+    els.btnRefineTranscript.classList.toggle('needs-key', on && !geminiKey());
   }
   if (els.btnSummaryCombo) {
     const on = !!state.settings.autoSummarize;
@@ -665,7 +673,16 @@ function recordingLabel() {
 
 /** 音声を文字にするのを Groq に任せるか (v0.24.83)。キーが無ければ Gemini のまま */
 function usesGroqTranscribe() {
-  return state.settings.transcribeEngine === 'groq' && !!state.settings.groqApiKey;
+  return state.settings.transcribeEngine === 'groq' && state.settings.groqEnabled !== false && !!state.settings.groqApiKey;
+}
+
+/**
+ * 使ってよい Gemini のキー (v0.24.88)
+ * AI 設定で Gemini API を切ったときは、キーが残っていても無いものとして扱う（切ったのに料金がかかるのがいちばん困る）。
+ * 呼び出し側はこれまで state.settings.apiKey を見ていたので、全部ここを通すように置き換えた（設定の欄の読み書きだけは生の値）
+ */
+function geminiKey() {
+  return state.settings.geminiEnabled === false ? '' : (state.settings.apiKey || '');
 }
 
 /** 録音の状態に応じて右上を戻す。エラー表示などのあとに使う */
@@ -1549,7 +1566,7 @@ function appendRawChunk(text) {
   if (
     state.settings.inputMode === 'web-speech' &&
     state.settings.aiEnabled &&
-    state.settings.apiKey
+    geminiKey()
   ) {
     flushPendingToGemini();
   }
@@ -1574,7 +1591,7 @@ function getContextForGemini(maxChars = 800) {
  */
 function liveRefineReady() {
   if (!state.settings.aiEnabled) return false;
-  if (state.settings.apiKey) return true;
+  if (geminiKey()) return true;
   return typeof claudeBridgeIsEnabled === 'function' && claudeBridgeIsEnabled();
 }
 
@@ -1605,7 +1622,7 @@ async function flushPendingToGemini() {
 
   try {
     const refined = await refineWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
@@ -1635,7 +1652,7 @@ async function flushPendingToGemini() {
  * まとめて Gemini に送って .paragraph として整形置換する。
  */
 async function refineUnstructuredInTranscript({ force = false, showFeedback = true } = {}) {
-  if (!state.settings.apiKey) {
+  if (!geminiKey()) {
     if (showFeedback) { alert('Gemini API キーが未設定です'); openSettings(); }
     return;
   }
@@ -1671,7 +1688,7 @@ async function refineUnstructuredInTranscript({ force = false, showFeedback = tr
 
   try {
     const refined = await refineWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
@@ -1698,7 +1715,7 @@ async function refineUnstructuredInTranscript({ force = false, showFeedback = tr
  * 「今すぐ整形」ボタン押下時に呼ばれる。
  */
 async function retryPendingRefinements({ showFeedback = true } = {}) {
-  if (!state.settings.apiKey && !(typeof claudeBridgeIsEnabled === 'function' && claudeBridgeIsEnabled())) return { tried: 0, ok: 0, failed: 0 };
+  if (!geminiKey() && !(typeof claudeBridgeIsEnabled === 'function' && claudeBridgeIsEnabled())) return { tried: 0, ok: 0, failed: 0 };
   const pending = Array.from(els.confirmed.querySelectorAll('.paragraph.needs-retry'));
   if (pending.length === 0) return { tried: 0, ok: 0, failed: 0 };
   let ok = 0, failed = 0;
@@ -1708,7 +1725,7 @@ async function retryPendingRefinements({ showFeedback = true } = {}) {
     p.className = 'paragraph refining';
     try {
       const refined = await refineWithGemini({
-        apiKey: state.settings.apiKey,
+        apiKey: geminiKey(),
         sessionContext: getSessionContextForAi(),
         context: getContextForGemini(),
         newChunk: rawText,
@@ -1741,7 +1758,7 @@ async function retryPendingRefinements({ showFeedback = true } = {}) {
  * ミドル整形を全体に拡張した版。
  */
 async function refineWholeTranscript({ showFeedback = true } = {}) {
-  if (!state.settings.apiKey) {
+  if (!geminiKey()) {
     if (showFeedback) { alert('Gemini API キーが未設定です'); openSettings(); }
     return;
   }
@@ -1853,7 +1870,7 @@ async function refineWholeTranscript({ showFeedback = true } = {}) {
       refined = await refineByChunks(allText, target);
     } else {
       refined = await refineWithGemini({
-        apiKey: state.settings.apiKey,
+        apiKey: geminiKey(),
         sessionContext: getSessionContextForAi(),
         context: '',
         newChunk: allText,
@@ -1905,7 +1922,7 @@ async function refineByChunks(fullText, progressTargetEl) {
     }
     try {
       const out = await refineWithGemini({
-        apiKey: state.settings.apiKey,
+        apiKey: geminiKey(),
         sessionContext: getSessionContextForAi(),
         context: prevTail.slice(-500),  // 直前チャンクの末尾500字だけ文脈として
         newChunk: blocks[i],
@@ -2014,7 +2031,7 @@ async function consolidateShortChunks(shortParas) {
 
   try {
     const refined = await refineWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
@@ -2470,7 +2487,7 @@ function stopRecording() {
     }
     // v0.24.39: 「要約・タイトル生成」はライブ整形（aiEnabled）と独立。以前はライブ整形をオフにすると
     // 要約も止まっていた（やっさん「ここに矛盾がある。独立させてほしい」）
-    if (state.settings.autoSummarize && state.settings.apiKey) {
+    if (state.settings.autoSummarize && geminiKey()) {
       await generateSummary({ silent: true, sessionId: recSessionId });
       await autoGenerateTitle({ sessionId: recSessionId });
     }
@@ -3470,7 +3487,7 @@ async function runDiarization() {
     return;
   }
 
-  if (!state.settings.apiKey) { alert('Gemini API キーが未設定です'); openSettings(); return; }
+  if (!geminiKey()) { alert('Gemini API キーが未設定です'); openSettings(); return; }
   if (state.isRecording && state.recordingSessionId === state.activeId) {
     alert('録音中は話者判別できません。先に録音を止めてください。');
     return;
@@ -3577,7 +3594,7 @@ async function runDiarization() {
         say(`区間 ${label} を送信中… 0%`);
         setStatus('processing', `話者判別 ${label}`);
         uploaded = await geminiFileUpload({
-          apiKey: state.settings.apiKey,
+          apiKey: geminiKey(),
           blob: seg.blob,
           displayName: `dictation-${session.id}-seg${seg.seg}`,
           cancel: r.cancel,
@@ -3585,12 +3602,12 @@ async function runDiarization() {
         });
         say(`区間 ${label} の準備を待っています…`);
         await geminiFileWaitActive({
-          apiKey: state.settings.apiKey, name: uploaded.name, cancel: r.cancel,
+          apiKey: geminiKey(), name: uploaded.name, cancel: r.cancel,
         });
 
         say(`区間 ${label} を話者付きで書き起こし中…`);
         const out = await diarizeSegmentWithGemini({
-          apiKey: state.settings.apiKey,
+          apiKey: geminiKey(),
           fileUri: uploaded.uri,
           mimeType: uploaded.mimeType,
           sessionContext: getSessionContextForAi(),
@@ -3615,7 +3632,7 @@ async function runDiarization() {
       } finally {
         // 上げたものは、成功でも失敗でも中止でも消す
         if (uploaded && uploaded.name) {
-          const ok = await geminiFileDelete({ apiKey: state.settings.apiKey, name: uploaded.name });
+          const ok = await geminiFileDelete({ apiKey: geminiKey(), name: uploaded.name });
           if (!ok) diagLog.info(`話者判別 ${label}: 上げたファイルを消せませんでした（48時間で自動削除されます）`);
         }
       }
@@ -3840,7 +3857,7 @@ function shouldDropEmptyChunk(provisionalText, edges) {
 
 async function startGeminiAudioRecording() {
   // v0.24.83: 聞き取りが Groq なら Gemini のキーは無くても録音できる（話者判別と、Groq で失敗したときの代わりには要る）
-  if (!state.settings.apiKey && !usesGroqTranscribe()) {
+  if (!geminiKey() && !usesGroqTranscribe()) {
     alert('「AI で聞き取る」は Gemini の API キーが必要です（聞き取る AI を Groq Whisper にしたときは Groq の API キー）');
     openSettings();
     return;
@@ -4325,7 +4342,7 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
       ({ text, engine } = await transcribeChunkWithGroq(blob, targetEl, edges));
     } else {
       text = await transcribeAudioWithGemini({
-        apiKey: state.settings.apiKey,
+        apiKey: geminiKey(),
         sessionContext: getSessionContextForAi(),
         audioBlob: blob,
         contextHint: getContextForGemini(300),   // v0.24.55: 表記の参考だけなので短く
@@ -4429,10 +4446,10 @@ async function transcribeChunkWithGroq(blob, targetEl, edges) {
       contextHint: getContextForGemini(300),
     });
   } catch (e) {
-    if (!state.settings.apiKey) throw e;
+    if (!geminiKey()) throw e;
     diagLog.info(`Groq で文字にできなかったので Gemini で文字にします: ${(e.message || e).toString().slice(0, 120)}`);
     const text = await transcribeAudioWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       sessionContext,
       audioBlob: blob,
       contextHint: getContextForGemini(300),
@@ -4445,7 +4462,7 @@ async function transcribeChunkWithGroq(blob, targetEl, edges) {
   transcriptMorph(() => setParagraphContent(targetEl, raw));
   try {
     const refined = await refineWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       sessionContext,
       context: getContextForGemini(),
       newChunk: raw,
@@ -4492,9 +4509,15 @@ function revealSettingRow(el, show, animated, withMargin = false) {
   else el.hidden = !show;
 }
 
-/** Groq のキーの欄は、聞き取りを Groq にしたときだけ出す (v0.24.83) */
-function applyGroqFieldsVisibility(animated = true) {
-  revealSettingRow(document.getElementById('groq-fields'), !!(els.engineGroq && els.engineGroq.checked), animated);
+/**
+ * AI 設定のトグルの下（キーの欄・連携のボタン）は、オンのときだけ出す (v0.24.88)
+ * v0.24.83〜87 は Groq のキーの欄を「聞き取る AI で Groq を選んだとき」に出していた。キーはトグルの下にまとめた（設定の見本の 2 段目）
+ */
+function applyAiSettingsVisibility(animated = true) {
+  const on = (box) => !!(box && box.checked);
+  revealSettingRow(document.getElementById('gemini-key-fields'), on(els.inputGeminiEnabled), animated);
+  revealSettingRow(document.getElementById('groq-key-fields'), on(els.inputGroqEnabled), animated);
+  revealSettingRow(document.getElementById('claude-code-fields'), on(els.inputClaudeCode), animated);
 }
 
 function applyGeminiOnlyVisibility(animated = true) {
@@ -6711,7 +6734,7 @@ function doUndo() { doPaneUndo(state.activePane || 'pane-transcript'); }
 function doRedo() { doPaneRedo(state.activePane || 'pane-transcript'); }
 
 function toggleAi() {
-  if (!state.settings.apiKey) { openSettings(); return; }
+  if (!geminiKey()) { openSettings(); return; }
   state.settings.aiEnabled = !state.settings.aiEnabled;
   saveSettings();
   applyAiButtonState();
@@ -7050,7 +7073,7 @@ function resizeChatInput() {
 async function sendChatMessageFrom(inputEl, sendBtn) {
   const text = inputEl.value.trim();
   if (!text) return;
-  if (!state.settings.apiKey) {
+  if (!geminiKey()) {
     alert('Gemini API キーが未設定です。設定から登録してください。');
     openSettings();
     return;
@@ -7073,7 +7096,7 @@ async function sendChatMessageFrom(inputEl, sendBtn) {
   try {
     const answer = await chatWithGemini({
       onEngine: (e) => { engine = e; },
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       contextSources: {
         transcript: getConfirmedText(),
         memo: getMemoText(),
@@ -7132,7 +7155,7 @@ async function autoGenerateTitle({ silent = true, force = false, sessionId = nul
   let session = state.sessions.find(s => s.id === targetId);
   if (!session) return;
   if (!force && session.titleIsManual) return;
-  if (!state.settings.apiKey) {
+  if (!geminiKey()) {
     if (!silent) { alert('Gemini API キーが未設定です。設定から登録してください。'); openSettings(); }
     return;
   }
@@ -7151,7 +7174,7 @@ async function autoGenerateTitle({ silent = true, force = false, sessionId = nul
   }
   try {
     const aiTitle = await generateTitleWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       summary,
       transcript,
     });
@@ -7206,7 +7229,7 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
     if (!silent) alert('文字起こしが空です。要約を生成できません。');
     return;
   }
-  if (!state.settings.apiKey) {
+  if (!geminiKey()) {
     if (!silent) { alert('Gemini API キーが未設定です。設定から登録してください。'); openSettings(); }
     return;
   }
@@ -7223,7 +7246,7 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
   beginStatusTask(`summary:${targetId}`, `要約生成中（${typeof aiEngineName === 'function' ? aiEngineName('summary') : 'Gemini'}）`);
   try {
     const summary = await summarizeWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       transcript,
       memo,
       title: session?.title,
@@ -7934,7 +7957,7 @@ async function refreshAutoContext(opts = {}) {
   contextExtractInFlight = true;
   try {
     const out = await extractContextWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       transcript: tail,
       memoOutline: getMemoOutlineText(),
       knownTerms: splitTerms(session.context?.terms),
@@ -8175,6 +8198,8 @@ function openSettings() {
     (state.settings.transcribeEngine === 'groq' ? els.engineGroq : els.engineGemini).checked = true;
     els.inputGroqKey.value = state.settings.groqApiKey || '';
   }
+  if (els.inputGeminiEnabled) els.inputGeminiEnabled.checked = !!state.settings.geminiEnabled;   // v0.24.88
+  if (els.inputGroqEnabled) els.inputGroqEnabled.checked = !!state.settings.groqEnabled;
   if (els.inputSilenceCut) els.inputSilenceCut.checked = state.settings.audioSilenceCut !== false;
   if (els.inputChunkMaxSec) els.inputChunkMaxSec.value = state.settings.audioChunkMaxSec || 20;
   if (els.inputAudioBitrate) els.inputAudioBitrate.value = String(state.settings.audioBitrate || 64000);
@@ -8216,7 +8241,7 @@ function openSettings() {
   populateAudioDevices();
   applyGeminiOnlyVisibility(/* animated */ false);
   applyWebSpeechOnlyVisibility(/* animated */ false);
-  applyGroqFieldsVisibility(/* animated */ false);
+  applyAiSettingsVisibility(/* animated */ false);
   els.fontTranscript.value = state.settings.transcriptFont;
   els.sizeTranscript.value = state.settings.transcriptSize;
   els.fontMemo.value = state.settings.memoFont;
@@ -8262,6 +8287,8 @@ function saveSettingsFromForm() {
     state.settings.transcribeEngine = els.engineGroq.checked ? 'groq' : 'gemini';
     state.settings.groqApiKey = els.inputGroqKey.value.trim();
   }
+  if (els.inputGeminiEnabled) state.settings.geminiEnabled = els.inputGeminiEnabled.checked;   // v0.24.88
+  if (els.inputGroqEnabled) state.settings.groqEnabled = els.inputGroqEnabled.checked;
   state.settings.audioDeviceId = els.inputAudioDevice ? els.inputAudioDevice.value : '';
   state.settings.audioChunkSec = Math.max(5, Math.min(60, Number(els.inputChunkSec.value) || 12));
   if (els.inputSilenceCut) state.settings.audioSilenceCut = els.inputSilenceCut.checked;
@@ -10197,9 +10224,9 @@ if (els.modeGemini) {
   });
 }
 
-// v0.24.83: 聞き取りを Gemini / Groq で切り替えたら、Groq のキーの欄を出し入れする
-for (const r of [els.engineGemini, els.engineGroq]) {
-  if (r) r.addEventListener('change', () => applyGroqFieldsVisibility(true));
+// v0.24.88: AI 設定のトグルを切り替えたら、その下（キーの欄・連携のボタン）を出し入れする
+for (const box of [els.inputGeminiEnabled, els.inputGroqEnabled, els.inputClaudeCode]) {
+  if (box) box.addEventListener('change', () => applyAiSettingsVisibility(true));
 }
 
 // v0.13.24: btnWebSpeechDefaults クリックハンドラ削除（UI 撤去・WEB_SPEECH_DEFAULTS 撤去に伴う）。
@@ -10981,7 +11008,7 @@ els.memo.addEventListener('paste', (e) => {
 });
 
 els.confirmed.addEventListener('paste', () => {
-  if (!state.settings.aiEnabled || !state.settings.apiKey) return;
+  if (!state.settings.aiEnabled || !geminiKey()) return;
   setTimeout(() => { refineUnstructuredInTranscript({ showFeedback: false }); }, 150);
 });
 
@@ -10995,7 +11022,7 @@ if (els.btnRefineTranscript) {
     } else {
       // 本体クリック: トグルON/OFFに関わらず、全体を上から下までまとめて文脈込みで
       // 再整形＋見出し付け。既に整形済みのテキストも一度に整う。
-      if (!state.settings.apiKey) { openSettings(); return; }
+      if (!geminiKey()) { openSettings(); return; }
       // v0.24.27: 印はタブごと（別のタブに移ったら消え、戻ったらまた付く）
       const sid = state.activeId;
       markBusy('refine', sid, true);
@@ -11476,7 +11503,7 @@ bindPaneTypingUndo();
  * メモ内で範囲選択してボタンを押すと、Gemini に送って整形。
  * 訂正箇所は <mark class="mr-diff"> で一時的にハイライト（6秒後にフェード消去）。 */
 async function refineMemoSelection() {
-  if (!state.settings.apiKey) {
+  if (!geminiKey()) {
     alert('Gemini API キーが未設定です。設定から登録してください。');
     openSettings();
     return;
@@ -11524,7 +11551,7 @@ async function refineMemoSelection() {
 
   try {
     const refinedHtml = await window.refineMemoSelectionWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       text: selectedText,
     });
     // プレースホルダを実結果で置換。Gemini は <mark>...</mark> 付きテキストを返す想定。

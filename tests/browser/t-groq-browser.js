@@ -125,11 +125,19 @@ async function sendOne(page) {
     await page.check('#mode-gemini');
     await page.waitForTimeout(800);
     eq('AI で聞き取るに戻すとデバイスの欄が戻る', await page.isVisible('#input-audio-device'), true);
-    eq('Groq のキーの欄は隠れている', await page.evaluate(() => document.getElementById('groq-fields').hidden), true);
-    await page.check('#engine-groq');
-    await page.waitForTimeout(700);
-    eq('Groq を選ぶとキーの欄が出る', await page.isVisible('#input-groq-key'), true);
+    // v0.24.88: キーの欄は AI 設定のトグルの下。キーを引き継いだので Groq はオンで始まり、欄は出ている
+    eq('見出しの 2 つ目は「AI 設定」', await page.evaluate(() => document.querySelectorAll('#settings-modal .field-group-title')[1].textContent), 'AI 設定');
+    eq('キーを引き継いだので Groq Whisper はオン', await page.isChecked('#input-groq-enabled'), true);
+    eq('Gemini API もキーがあるのでオン', await page.isChecked('#input-gemini-enabled'), true);
+    eq('オンなので Groq のキーの欄が出ている', await page.isVisible('#input-groq-key'), true);
     eq('比較ページで入れたキーを引き継いでいる', await page.inputValue('#input-groq-key'), 'gsk_from_compare');
+    await page.uncheck('#input-groq-enabled');
+    await page.waitForTimeout(800);
+    eq('Groq を切るとキーの欄は隠れる', await page.evaluate(() => document.getElementById('groq-key-fields').hidden), true);
+    await page.check('#input-groq-enabled');
+    await page.waitForTimeout(800);
+    eq('Claude Code がオフなら連携のボタンは隠れている', await page.evaluate(() => document.getElementById('claude-code-fields').hidden), true);
+    await page.check('#engine-groq');
     await page.click('#btn-settings-save');
     await page.waitForTimeout(200);
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('dictation:settings')));
@@ -141,6 +149,29 @@ async function sendOne(page) {
     await page.waitForTimeout(300);
     eq('開き直しても Groq が選ばれている', await page.isChecked('#engine-groq'), true);
     eq('開き直したとき、キーの欄は出ている', await page.isVisible('#input-groq-key'), true);
+    await ctx.close();
+  }
+
+  console.log('\n■ AI 設定のトグルを切ったら、キーが残っていても使わない（v0.24.88）');
+  {
+    const { ctx, page, calls } = await open(browser, { ...base, groqEnabled: false, aiEnabled: false });
+    const paras = await sendOne(page);
+    eq('Groq を切っていれば Groq には送らない', calls.groq, 0);
+    eq('代わりに Gemini が聞く', paras.map(p => p.text), ['ジェミニが聞いた文。']);
+    eq('右上の印も (Gemini)', await page.evaluate(() => recordingLabel()), '聞き取り中 (Gemini)');
+    await ctx.close();
+  }
+  {
+    const { ctx, page, calls } = await open(browser, { ...base, transcribeEngine: 'gemini', geminiEnabled: false, aiEnabled: false });
+    const paras = await sendOne(page);
+    eq('Gemini を切っていれば Gemini には送らない', calls.gemini, []);
+    eq('失敗と正直に出す', paras.map(p => p.cls), ['paragraph needs-retry']);
+    await ctx.close();
+  }
+  {
+    // 前の版の設定（トグルが無い）: キーがあるものはオンで始まる
+    const { ctx, page } = await open(browser, { apiKey: 'AIza-test' });
+    eq('前の設定でキーがあれば Gemini API はオン', await page.evaluate(() => [state.settings.geminiEnabled, state.settings.groqEnabled]), [true, false]);
     await ctx.close();
   }
 

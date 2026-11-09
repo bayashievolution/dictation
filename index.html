@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.87" />
+  <link rel="stylesheet" href="style.css?v=0.24.88" />
 </head>
 <body>
   <div id="app">
@@ -371,13 +371,80 @@
                   <span>Groq Whisper</span>
                 </label>
               </div>
-              <label class="field" id="groq-fields" hidden>
-                <span class="field-label">Groq API キー</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- v0.24.88: AI 設定。使う AI ごとのトグルと、その下にキー・連携（設定の見本 docs/設定の見本.html の 2 段目・やっさんの案）。
+             切ってもキーは消さない（geminiKey() が無いものとして扱う）。Claude Code のトグルは前からある「連携」（キー claudeCode）そのもの -->
+        <div class="field-group" id="ai-settings-group">
+          <h3 class="field-group-title">AI 設定</h3>
+          <div class="field"><small class="field-hint">API キーや連携を設定すると、AI 機能を使えます。</small></div>
+          <label class="field field-row">
+            <input id="input-gemini-enabled" type="checkbox" />
+            <span>Gemini API<small class="field-hint" style="display:block">すべての AI 機能に対応。使用量に応じて料金がかかります。</small></span>
+          </label>
+          <div class="field-conditional" id="gemini-key-fields" hidden>
+            <div class="field-conditional-inner">
+              <label class="field">
+                <span class="field-label">API キー</span>
+                <input id="input-api-key" type="password" placeholder="AIza..." autocomplete="off" spellcheck="false" />
+                <span class="field-hint">
+                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で取得
+                </span>
+              </label>
+            </div>
+          </div>
+          <label class="field field-row">
+            <input id="input-groq-enabled" type="checkbox" />
+            <span>Groq Whisper<small class="field-hint" style="display:block">AI 文字起こしを担当。1日8時間ぶんまでなら無料で使えます。</small></span>
+          </label>
+          <div class="field-conditional" id="groq-key-fields" hidden>
+            <div class="field-conditional-inner">
+              <label class="field">
+                <span class="field-label">API キー</span>
                 <input id="input-groq-key" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false" />
                 <span class="field-hint">
                   <a href="https://console.groq.com/keys" target="_blank" rel="noopener">GroqCloud</a> で取得
                 </span>
               </label>
+            </div>
+          </div>
+          <!-- v0.24.44: 「一部を Claude Code で処理する」は隠し、連携をオンにすれば同時に有効（やっさんの指定）。
+               接続の状態はトグルの横に自動で出す（オンにしたとき・アプリを立ち上げたとき）。「接続を確認」ボタンは外した -->
+          <div class="field toggle-with-status">
+            <label class="field-row">
+              <input id="input-claude-code" type="checkbox" />
+              <span>Claude Code<small class="field-hint" style="display:block">文字起こし・話者判別以外の AI 機能に対応。Claude のサブスクリプションの範囲で使えます。</small></span>
+            </label>
+            <span id="claude-bridge-status" class="field-hint"></span>
+          </div>
+          <div class="field-conditional" id="claude-code-fields" hidden>
+            <div class="field-conditional-inner">
+            <!-- v0.24.21: インストール式（拡張のときだけ出す） -->
+            <div class="field" data-claude-native-only>
+              <button type="button" id="btn-claude-install" class="btn btn-ghost btn-sm">連携アプリをダウンロード</button>
+              <small class="field-hint" style="display:block; margin-top:4px">
+                Claude Code のターミナル版が入っている場合、連携アプリをインストールすることで有効にできます。
+              </small>
+            </div>
+            <div class="field" data-claude-web-only>
+              <small class="field-hint">
+                Claude Code のターミナル版が入っている場合、<code>start.bat</code> でサーバーを起動しておくことで有効にできます。
+              </small>
+            </div>
+            <!-- v0.24.12: 中継に必要なファイル（ブラウザ版のときだけ出す） -->
+            <div class="field" data-claude-web-only>
+              <div class="audio-usage-row">
+                <span class="field-hint">中継用のファイルが手元に無いとき</span>
+                <button type="button" id="btn-save-bridge-files" class="btn btn-ghost btn-sm">中継用ファイルを保存</button>
+              </div>
+              <small class="field-hint">
+                ブラウザ版からはパソコンのプログラムを起動できないので、中継役の <code>serve.js</code> を動かしてもらう必要があります。
+                <code>serve.js</code> ・<code>claude-runner.js</code> ・<code>start.bat</code> ・<code>login.bat</code> の4つを保存し、
+                <strong>同じフォルダに置いて</strong> <code>start.bat</code> をダブルクリックしてください（Node.js が必要）。
+              </small>
+            </div>
             </div>
           </div>
         </div>
@@ -387,54 +454,7 @@
              Claude Code は「連携を使う（Claude Code）」と「一部を Claude Code で処理する」の2つに分けた。
              名前のすみ分け（v0.24.29）: ライブ○○ ＝ AI が録音中に処理するもの／リアルタイム表示 ＝ Web Speech をそのまま出すもの -->
         <div class="field-group">
-          <h3 class="field-group-title">AI機能</h3>
-          <label class="field">
-            <span class="field-label">Gemini API キー</span>
-            <input id="input-api-key" type="password" placeholder="AIza..." autocomplete="off" spellcheck="false" />
-            <span class="field-hint">
-              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で取得
-            </span>
-          </label>
-
-          <!-- v0.24.44: 「一部を Claude Code で処理する」は隠し、連携をオンにすれば同時に有効（やっさんの指定）。
-               接続の状態はトグルの横に自動で出す（オンにしたとき・アプリを立ち上げたとき）。「接続を確認」ボタンは外した -->
-          <div class="field toggle-with-status">
-            <label class="field-row">
-              <input id="input-claude-code" type="checkbox" />
-              <span>Claude Code 連携</span>
-            </label>
-            <span id="claude-bridge-status" class="field-hint"></span>
-          </div>
-          <div class="field">
-            <small class="field-hint">
-              要約・質問・タイトル・全体整形・メモの整形・ライブ整形・文字起こしへの項目付けを Claude Code で処理します。
-              音声を処理する必要がある、文字起こし・話者判別は Gemini API で処理します。
-            </small>
-          </div>
-          <!-- v0.24.21: インストール式（拡張のときだけ出す） -->
-          <div class="field" data-claude-native-only>
-            <button type="button" id="btn-claude-install" class="btn btn-ghost btn-sm">連携アプリをダウンロード</button>
-            <small class="field-hint" style="display:block; margin-top:4px">
-              Claude Code のターミナル版が入っている場合、連携アプリをインストールすることで有効にできます。
-            </small>
-          </div>
-          <div class="field" data-claude-web-only>
-            <small class="field-hint">
-              Claude Code のターミナル版が入っている場合、<code>start.bat</code> でサーバーを起動しておくことで有効にできます。
-            </small>
-          </div>
-          <!-- v0.24.12: 中継に必要なファイル（ブラウザ版のときだけ出す） -->
-          <div class="field" data-claude-web-only>
-            <div class="audio-usage-row">
-              <span class="field-hint">中継用のファイルが手元に無いとき</span>
-              <button type="button" id="btn-save-bridge-files" class="btn btn-ghost btn-sm">中継用ファイルを保存</button>
-            </div>
-            <small class="field-hint">
-              ブラウザ版からはパソコンのプログラムを起動できないので、中継役の <code>serve.js</code> を動かしてもらう必要があります。
-              <code>serve.js</code> ・<code>claude-runner.js</code> ・<code>start.bat</code> ・<code>login.bat</code> の4つを保存し、
-              <strong>同じフォルダに置いて</strong> <code>start.bat</code> をダブルクリックしてください（Node.js が必要）。
-            </small>
-          </div>
+          <h3 class="field-group-title">AI の動き</h3>
 
           <!-- v0.24.49: ライブ整形はここ（AI機能）。Web Speech モードでは文字起こしを、Gemini Audio モードでは
                文字起こしの結果を Gemini に送り直してまとめ直す（見出しを付ける）。タイミングは「黙ってから」ではなく「◯秒ごと」 -->
@@ -1069,18 +1089,18 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.87"></script>
-  <script src="motion.js?v=0.24.87"></script>
-  <script src="gemini.js?v=0.24.87"></script>
-  <script src="groq.js?v=0.24.87"></script>
-  <script src="notion.js?v=0.24.87"></script>
-  <script src="audio-store.js?v=0.24.87"></script>
-  <script src="claude-bridge.js?v=0.24.87"></script>
-  <script src="claude-installer.js?v=0.24.87"></script>
-  <script src="live-summary.js?v=0.24.87"></script>
-  <script src="image-store.js?v=0.24.87"></script>
-  <script src="gemini-files.js?v=0.24.87"></script>
-  <script src="term-dicts.js?v=0.24.87"></script>
-  <script src="app.js?v=0.24.87"></script>
+  <script src="icons.js?v=0.24.88"></script>
+  <script src="motion.js?v=0.24.88"></script>
+  <script src="gemini.js?v=0.24.88"></script>
+  <script src="groq.js?v=0.24.88"></script>
+  <script src="notion.js?v=0.24.88"></script>
+  <script src="audio-store.js?v=0.24.88"></script>
+  <script src="claude-bridge.js?v=0.24.88"></script>
+  <script src="claude-installer.js?v=0.24.88"></script>
+  <script src="live-summary.js?v=0.24.88"></script>
+  <script src="image-store.js?v=0.24.88"></script>
+  <script src="gemini-files.js?v=0.24.88"></script>
+  <script src="term-dicts.js?v=0.24.88"></script>
+  <script src="app.js?v=0.24.88"></script>
 </body>
 </html>

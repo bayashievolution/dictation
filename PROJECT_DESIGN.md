@@ -3505,3 +3505,12 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - デバイス・リアルタイム表示・Web Speech のチャンク長・音声チャンク・音質は、AI機能の下の新しい「音声入力」へ移した（のちに詳細設定へたたむ）。
     出し入れはこれまでどおりモードで（`gemini-only-input-fields` を足した）。**置き場所だけで、中身の動き・保存のキーは変えていない**
   - テスト: `tests/t-settings-structure.js`（見出しの並び）、`tests/browser/t-groq-browser.js`（一番上の見出し・移した欄がモードで出入りする）
+- 2026-11-09 (v0.24.88): **設定の並べ替え 2/4: 「AI 設定」に 3 つのトグル**（設定の見本の 2 段目・やっさんの案）
+  - Gemini API（すべての AI 機能・料金は使用量）／Groq Whisper（AI 文字起こし・1日8時間ぶんまで無料）／Claude Code（文字起こし・話者判別以外・サブスクの範囲）。
+    オンにするとその下にキーの欄（Claude は連携アプリのボタンと状態）がばねで出る
+  - 新しいキー `geminiEnabled` / `groqEnabled`。前の設定（キーが無い）は、キーが入っていればオンで始める。Claude Code は前からある `claudeCode` そのもの
+  - **切ってもキーは消さない。** 使うところは全部 `geminiKey()` を通す（35 か所の `state.settings.apiKey` を置き換えた。設定の欄の読み書きだけ生の値）。
+    字幕の窓（captions.js）も同じ。Groq は `usesGroqTranscribe` が `groqEnabled` を見る
+  - 残りの AI の項目（ライブ整形〜要約の詳しさ）の見出しは「AI機能」→「AI の動き」（のちに詳細設定へ）
+  - テスト: `tests/browser/t-groq-browser.js`（トグルの出し入れ・切ったら送らない・前の設定の引き継ぎ）。見出しが分かれたので
+    `t-settings-structure.js`・`t-claude-bridge-browser.js`（並び）・`t-claude-install-browser.js`（連携のボタンはオンのときだけ）・`t-motion-settings-browser.js`（測る基準を同じまとまりの見出しに）を合わせた

@@ -40,12 +40,14 @@ const eq = (label, got, want) => {
     const row = document.getElementById('claude-fallback-row');
     const note = document.getElementById('live-summary-note');
     const below = document.getElementById('input-ai-enabled').closest('label');
+    // v0.24.88: 連携をオンにすると、上の「AI 設定」でも連携のボタンがばねで出る。この行の動きだけを見るため、同じまとまりの見出しからの距離で測る
+    const head = below.closest('.field-group').querySelector('.field-group-title');
     const h = (e) => (e.hidden ? 0 : e.offsetHeight);
     const f = [];
     document.getElementById('input-claude-code').click();
     for (let i = 0; i < 50; i++) {
       await new Promise(r => requestAnimationFrame(r));
-      f.push({ row: h(row), note: h(note), below: Math.round(below.getBoundingClientRect().top), ro: Number(getComputedStyle(row).opacity) });
+      f.push({ row: h(row), note: h(note), below: Math.round(below.getBoundingClientRect().top - head.getBoundingClientRect().top), ro: Number(getComputedStyle(row).opacity) });
     }
     return { f, rowHidden: row.hidden, noteHidden: note.hidden, style: (row.getAttribute('style') || '') + (note.getAttribute('style') || '') };
   });

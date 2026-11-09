@@ -293,17 +293,14 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
                    'input-live-summary', 'input-auto-summarize', 'summary-detail-low'];
       const els = ids.map((id) => document.getElementById(id));
       const inOrder = els.every((el, i) => i === 0 || !!(els[i - 1].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING));
-      const group = els[0].closest('.field-group');
-      return {
-        missing: ids.filter((id, i) => !els[i]),
-        inOrder,
-        oneGroup: els.every((el) => el.closest('.field-group') === group),
-        title: group.querySelector('.field-group-title').textContent.trim(),
-      };
+      // v0.24.88: キーと連携は「AI 設定」、ライブ整形から下は「AI の動き」に分けた（設定の見本・やっさんの案）
+      const title = (el) => el && el.closest('.field-group').querySelector('.field-group-title').textContent.trim();
+      return { missing: ids.filter((id, i) => !els[i]), inOrder, titles: els.map(title) };
     });
     eq('全部ある', r.missing, []);
     eq('指定どおりの順番', r.inOrder, true);
-    eq('1つの見出し「AI機能」の中', [r.oneGroup, r.title], [true, 'AI機能']);
+    eq('キーと連携は「AI 設定」、整形・要約は「AI の動き」', r.titles,
+       ['AI 設定', 'AI 設定', 'AI 設定', 'AI 設定', 'AI の動き', 'AI の動き', 'AI の動き', 'AI の動き']);
     await ctx.close();
   }
 

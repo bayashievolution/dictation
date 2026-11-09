@@ -26,6 +26,8 @@ const eq = (label, got, want) => {
 };
 
 async function open(browser, { extension, nativeReply, nativeError, settings } = {}) {
+  // v0.24.88: 連携のボタンは AI 設定の「Claude Code」をオンにしたときだけ出る（トグルの下にまとめた）。ボタンを見る検査なのでオンで開く
+  settings = settings || { claudeCode: true };
   const ctx = await browser.newContext({ acceptDownloads: true });
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
@@ -100,7 +102,10 @@ const visible = (page, sel) => page.evaluate((s) => {
     eq('保存したと言う', (await page.textContent('#claude-bridge-status')).startsWith('dictation-claude-setup.bat を保存しました'), true);
 
     // v0.24.44: 「接続を確認」ボタンは外した。連携をオンにしたときに確かめる
-    await page.click('#input-claude-code');
+    // v0.24.88: ボタンを見るためにオンで開いているので、いったん切ってからオンにする
+    await page.uncheck('#input-claude-code');
+    await page.waitForTimeout(300);
+    await page.check('#input-claude-code');
     await page.waitForTimeout(700);
     eq('連携をオンにすると、未インストールと言う（start.bat とは言わない）',
        (await page.textContent('#claude-bridge-status')).startsWith('Claude 連携がインストールされていません'), true);
