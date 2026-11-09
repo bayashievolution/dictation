@@ -9099,6 +9099,9 @@ function renderTabs() {
     state.sessions.some(s => s.id === id)
   ));
 
+  // v0.24.61: 増える・閉じるで全部作り直すと、残りのタブが一瞬で跳んでいた（TODO「動きを SUMADO の仕様書に合わせる」の 2）。
+  // 作り直す前の位置を覚えておき、前の位置から新しい位置へばねで（FLIP）。新しいタブはふわっと、閉じたタブは写しがふわっと消える
+  const rebuild = () => {
   els.tabsList.innerHTML = '';
   for (const session of state.sessions) {
     const tab = document.createElement('div');
@@ -9195,6 +9198,9 @@ function renderTabs() {
     tab.appendChild(closeBtn);
     els.tabsList.appendChild(tab);
   }
+  };
+  if (window.Motion) Motion.flipList(els.tabsList, rebuild, { selector: '.tab', key: (n) => n.dataset.id, ghost: true });
+  else rebuild();
   // アクティブ線（再利用するため renderTabs を跨いで保持）
   let indicator = els.tabsList.__activeIndicator;
   if (!indicator) {
@@ -9245,7 +9251,18 @@ function updateActiveTabIndicator() {
   const w = activeTab.offsetWidth;
 
   const firstShow = !bar.classList.contains('visible');
-  if (firstShow) {
+  // v0.24.61: 線の移り先へは、ばねで（SUMADO の仕様書 2.2「選んだしるしは 1 つだけ置き、新しい場所へばねで移る」。
+  // 切り替え（segmented）と同じく、位置も幅も SPRINGS.sheet）。前は CSS の transition（cubic-bezier）だった
+  if (window.Motion) {
+    if (!bar.__widthDriver) {
+      bar.__widthDriver = document.createElement('span');
+      Motion.onFrame(bar.__widthDriver, ({ x: bw }) => { bar.style.width = `${bw}px`; });
+    }
+    const go = firstShow ? Motion.set : (e, v) => Motion.animate(e, v, { spring: Motion.SPRINGS.sheet });
+    go(bar, { x });
+    go(bar.__widthDriver, { x: w });
+    if (firstShow) requestAnimationFrame(() => bar.classList.add('visible'));
+  } else if (firstShow) {
     // 初回は transition 切ってジャンプ → rAF で visible にしてフェードイン
     const savedTransition = bar.style.transition;
     bar.style.transition = 'none';

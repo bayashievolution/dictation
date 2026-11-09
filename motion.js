@@ -287,24 +287,53 @@
   /**
    * @param {Element} container
    * @param {Function} redraw
-   * @param {object} [o] { key: 行を見分ける関数（既定は data-key）, selector: 行の選び方, fadeIn: 新しい行をふわっと }
+   * @param {object} [o] { key: 行を見分ける関数（既定は data-key）, selector: 行の選び方, fadeIn: 新しい行をふわっと,
+   *                       ghost: 消えた行の写しを置いてふわっと消す（ディクテーション用に足した。SUMADO の flipList は消えた行をそのまま消す） }
    */
   function flipList(container, redraw, o) {
     o = o || {};
     const selector = o.selector || '[data-key]';
     const keyOf = o.key || ((n) => n.dataset.key);
     const before = new Map();
+    const nodes = new Map();
     for (const n of container.querySelectorAll(selector)) {
       const k = keyOf(n);
-      if (k != null) before.set(k, n.getBoundingClientRect());
+      if (k != null) { before.set(k, n.getBoundingClientRect()); nodes.set(k, n); }
     }
     const firstTime = before.size === 0;
     redraw();
     if (firstTime) return;
+    const after = new Set();
+    for (const n of container.querySelectorAll(selector)) after.add(keyOf(n));
+    if (o.ghost) {
+      for (const [k, old] of nodes) {
+        if (after.has(k)) continue;
+        const r = before.get(k);
+        if (!r || !r.width) continue;
+        const g = old.cloneNode(true);
+        g.removeAttribute('id');
+        g.setAttribute('aria-hidden', 'true');
+        Object.assign(g.style, { position: 'fixed', left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`,
+          height: `${r.height}px`, margin: '0', pointerEvents: 'none', zIndex: '50', boxSizing: 'border-box' });
+        document.body.appendChild(g);
+        animate(g, { opacity: 0, scale: 0.94 }, { spring: SPRINGS.fade }).then(() => g.remove());
+      }
+    }
     for (const n of container.querySelectorAll(selector)) {
       const k = keyOf(n);
       const b = before.get(k);
       const a = n.getBoundingClientRect();
+      // 作り直しが続いたとき（増えた直後にもう一度描き直す等）、前の要素で途中だった濃さ・大きさを引き継ぐ。
+      // 引き継がないと、ふわっと出ている途中のものが、いきなり濃くなる
+      const prev = nodes.get(k);
+      if (b && prev && prev !== n && states.has(prev)) {
+        const c = current(prev);
+        if (c.opacity < 0.999 || Math.abs(c.scale - 1) > 0.001) {
+          set(n, { opacity: c.opacity, scale: c.scale, x: b.left - a.left, y: b.top - a.top });
+          animate(n, { opacity: 1, scale: 1, x: 0, y: 0 }, { spring: SPRINGS.fade }).then((d) => { if (d) clear(n); });
+          continue;
+        }
+      }
       if (!b) {
         if (o.fadeIn === false) continue;
         set(n, { opacity: 0, scale: 0.97 });
