@@ -9126,7 +9126,16 @@ function switchSession(id) {
   requestAnimationFrame(scrollActiveTabIntoView);
 
   // main-area 全体をスライドで切替
-  if (els.mainArea && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
+  // v0.24.78: 横に送る動きをばねで（SUMADO の仕様書 2.2「ページ・タブの切り替え：横に送る（page）」）。前は keyframes の ease
+  if (window.Motion && els.mainArea && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
+    const dist = Math.min(120, (els.mainArea.clientWidth || 400) * 0.3);
+    // 中身はもう新しいセッションに入れ替わっているので、位置は送る向きの端から始める。
+    // 濃さは、続けて切り替えたときに一瞬濃くならないよう、いまの濃さより上げない
+    const cur = Motion.current(els.mainArea);
+    Motion.place(els.mainArea, { x: (direction === 'right' ? 1 : -1) * dist, opacity: Math.min(cur.opacity, 0.2) });
+    Motion.animate(els.mainArea, { x: 0 }, { spring: Motion.SPRINGS.page });
+    Motion.animate(els.mainArea, { opacity: 1 }, { spring: Motion.SPRINGS.fade }).then((d) => { if (d) Motion.clear(els.mainArea); });
+  } else if (els.mainArea && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
     els.mainArea.classList.remove('enter-from-right', 'enter-from-left');
     void els.mainArea.offsetWidth;
     els.mainArea.classList.add(direction === 'right' ? 'enter-from-right' : 'enter-from-left');
