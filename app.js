@@ -5063,6 +5063,8 @@ function notionProgressOpen(title, { cancellable = true } = {}) {
   els.notionProgressBody.textContent = '';
   els.notionProgressList.innerHTML = '';
   // 1件だけの保存は、区切りが来る前に終わるので中止できない。ボタンを出さない
+  // v0.24.80: 前の回の「薄くしてから隠す」が途中なら止める（止めないと、出したあとで隠してしまう）
+  if (window.Motion) for (const el of [els.notionAutoCloseRow, els.btnNotionKeepTabs, els.btnNotionCloseTabs]) if (el) Motion.clear(el);
   els.btnNotionCancel.hidden = !cancellable;
   els.notionAutoCloseRow.hidden = false;
   // v0.21.4: **毎回オフから始める。** 状態を覚えない。
@@ -5171,6 +5173,25 @@ function notionProgressAddRow(label, state_, detail) {
   row.textContent = (state_ === 'ok' ? '✓ ' : '✕ ') + label + (detail ? ` — ${detail}` : '');
   els.notionProgressList.appendChild(row);
   els.notionProgressList.scrollTop = els.notionProgressList.scrollHeight;
+}
+
+/** Notion 保存の小窓の中で、出るものをふわっと出す・消えるものを薄くしてから隠す (v0.24.80) */
+function notionFadeIn(el) {
+  if (!el) return;
+  const was = el.hidden;
+  el.hidden = false;
+  if (!window.Motion || !was) return;
+  Motion.set(el, { opacity: 0 });
+  Motion.animate(el, { opacity: 1 }, { spring: Motion.SPRINGS.fade }).then((d) => { if (d) Motion.clear(el); });
+}
+function notionFadeOut(el) {
+  if (!el || el.hidden) return;
+  if (!window.Motion) { el.hidden = true; return; }
+  Motion.animate(el, { opacity: 0 }, { spring: Motion.MOTION.morph.contentOut }).then((d) => {
+    if (!d) return;
+    el.hidden = true;
+    Motion.clear(el);
+  });
 }
 
 function notionProgressClose() {
@@ -5384,9 +5405,11 @@ function notionFinish({ results, cancelled, remaining, verb }) {
   if (changed.length) { persistSessions(); renderTabs(); }
   const closable = ok.filter((r) => !changed.includes(r));
 
+  // v0.24.80: 終わったときの入れ替え。前は「中止」や「確認せずに閉じる」の行が一瞬で消え、「残す」「閉じる」が一瞬で出ていた。
+  // 小窓の高さは smoothHeight が伸び縮みさせるので、ここでは消える行を薄くしてから隠し、出るボタンをふわっと出す
   els.btnNotionCancel.hidden = true;
-  els.notionAutoCloseRow.hidden = true;
-  els.btnNotionKeepTabs.hidden = false;
+  notionFadeOut(els.notionAutoCloseRow);
+  notionFadeIn(els.btnNotionKeepTabs);
 
   if (ok.length === 0) {
     els.notionProgressTitle.textContent = cancelled ? `Notion への${act}を中止しました` : `Notion への${act}に失敗しました`;
@@ -5432,7 +5455,7 @@ function notionFinish({ results, cancelled, remaining, verb }) {
     return;
   }
 
-  els.btnNotionCloseTabs.hidden = false;
+  notionFadeIn(els.btnNotionCloseTabs);
   els.btnNotionKeepTabs.textContent = '残す';
   notionProgressSet(`${label}を${act}しました。タブを閉じますか？（閉じるとアプリ内の内容は削除されます）${note}`);
 

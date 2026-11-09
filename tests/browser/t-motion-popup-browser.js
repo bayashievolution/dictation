@@ -4,6 +4,7 @@
 //   v0.24.65: 右クリックのメニュー（タブ・画像）
 //   v0.24.66: 検索と置換のバー（出入り・置換の行の出し入れ）
 //   v0.24.68: 右上の状態の札の、詳細の吹き出し
+//   v0.24.80: Notion 保存の小窓が終わったときの入れ替え（消える行・出るボタン）
 //
 // ■ これは `sh tests/run.sh` では走らない（tests/t-*.js の形にしていない）
 //
@@ -215,6 +216,27 @@ async function trace(page, el, open, close) {
     eq('札から、小さいところから出て、少し行き過ぎて 1 に収まる', [r.opening[0] < 0.8, Math.max(...r.opening) > 1.01, Math.abs(r.opening[r.opening.length - 1] - 1) < 0.002], [true, true, true]);
     eq('閉じたらすぐ「閉じた」扱い。本体は消えるまで残る', [r.closingNow.open, r.closingNow.connected, r.closingNow.closing], [false, true, true]);
     eq('薄くなって消え、最後は外れる', [r.ops.some(o => o > 0.05 && o < 0.95), r.gone], [true, true]);
+  }
+
+  console.log('■ Notion 保存の小窓が終わったときの入れ替え');
+  {
+    const r = await page.evaluate(async () => {
+      notionProgressOpen('Notion に保存中…', { cancellable: true });
+      await new Promise(r => setTimeout(r, 800));
+      const s = state.sessions[0];
+      notionFinish({ results: [{ session: s, ok: true, sentSig: sessionContentSig(s) }], cancelled: false, remaining: [], verb: 'save' });
+      const row = els.notionAutoCloseRow, keep = els.btnNotionKeepTabs;
+      const f = [];
+      for (let i = 0; i < 30; i++) { await new Promise(r => requestAnimationFrame(r)); f.push({ ro: row.hidden ? 0 : Number(getComputedStyle(row).opacity), ko: keep.hidden ? 0 : Number(getComputedStyle(keep).opacity) }); }
+      await new Promise(r => setTimeout(r, 400));
+      const res = { f, rowHidden: row.hidden, keepShown: !keep.hidden, style: (row.getAttribute('style') || '') + (keep.getAttribute('style') || '') };
+      notionProgressClose();
+      await new Promise(r => setTimeout(r, 700));
+      return res;
+    });
+    eq('「確認せずに閉じる」の行は、薄くなってから隠れる（一瞬で消えない）', [r.f.some(x => x.ro > 0.05 && x.ro < 0.95), r.rowHidden], [true, true]);
+    eq('「残す」のボタンは、ふわっと出る', [r.f.some(x => x.ko > 0.05 && x.ko < 0.95), r.keepShown], [true, true]);
+    eq('止まったら style に値を残さない', r.style.replace(/\s/g, ''), '');
   }
 
   await browser.close();
