@@ -699,7 +699,9 @@ function buildMemoRule() {
  * @param {string} [args.title] - セッションタイトル（文脈補助）
  * @returns {Promise<string>} Markdown形式の要約
  */
-async function summarizeWithGemini({ apiKey, transcript, memo, title, detail }) {
+// onEngine: 実際に答えるほう（'claude' / 'gemini'）が決まったら呼ぶ (v0.24.57)。
+// Claude が失敗して Gemini に戻ったとき、右上の「要約生成中（Claude）」を直すため
+async function summarizeWithGemini({ apiKey, transcript, memo, title, detail, onEngine = null }) {
   if (!apiKey) throw new Error('Gemini API キーが設定されていません');
   if (!transcript || !transcript.trim()) throw new Error('要約対象のテキストがありません');
 
@@ -745,7 +747,7 @@ async function summarizeWithGemini({ apiKey, transcript, memo, title, detail }) 
     },
   };
 
-  const text = await _callGemini(body, apiKey, { feature: 'summary' });
+  const text = await _callGemini(body, apiKey, { feature: 'summary', onEngine });
   return text.trim();
 }
 

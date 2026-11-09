@@ -6798,6 +6798,9 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
       memo,
       title: session?.title,
       detail: state.settings.summaryDetail || 'medium',
+      // v0.24.57: やっさん報告「Claude が時間内に返さないので…で Gemini での要約になったのに、要約中（Claude）って出てた」。
+      // 表示は始める前に「回る予定のほう」で出していて、Gemini に戻っても書き換えていなかった
+      onEngine: (e) => beginStatusTask(`summary:${targetId}`, `要約生成中（${e === 'claude' ? 'Claude' : 'Gemini'}）`),
     });
     // 非同期戻り後にセッションが生きているか再確認
     session = state.sessions.find(s => s.id === targetId);

@@ -86,6 +86,43 @@ const LIVE_MD = '## 目次\n1. 評価の観点\n\n## 1. 評価の観点\n- 観�
   eq('要約ができた', await page.evaluate(() => document.getElementById('summary').textContent.includes('要約の中身')), true);
   eq('「停止」に戻る', await status(), '停止');
 
+  // v0.24.57: やっさん報告「Claude が時間内に返さないので…というエラーで Gemini での要約になったのに、
+  // 要約中（Claude）って出てた」
+  console.log('■ Claude が時間切れで Gemini に戻ったら、表示も Gemini にする');
+  {
+    const ctx2 = await browser.newContext();
+    const pg = await ctx2.newPage();
+    pg.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
+    await pg.route('**/generativelanguage.googleapis.com/**', async r => {
+      await new Promise(res => setTimeout(res, 9000));   // Gemini の要約にも時間がかかる
+      r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '## 概要\n- Gemini の要約' }] }, finishReason: 'STOP' }] }) });
+    });
+    await pg.route('**/api/claude/health', r => r.fulfill({ contentType: 'application/json',
+      body: JSON.stringify({ ok: true, invocation: 'claude', features: ['effort', 'timeout', 'session'], auth: { ok: true, loggedIn: true } }) }));
+    await pg.route('**/api/claude', r => r.fulfill({ status: 502, contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: '180秒待っても返事がありませんでした' }) }));
+    await pg.goto(URL);
+    await pg.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({ apiKey: 'AIza-test', claudeCode: true })));
+    await pg.reload();
+    await pg.waitForTimeout(1000);
+    const st = () => pg.evaluate(() => document.getElementById('status-indicator').textContent);
+    await pg.evaluate(() => {
+      const p = document.createElement('div'); p.className = 'paragraph';
+      p.textContent = '今日は評価論の話をします。'.repeat(30);
+      document.getElementById('confirmed').appendChild(p);
+      snapshotActiveToSession();
+      window.alert = () => {};
+      generateSummary({ silent: true });
+    });
+    await pg.waitForTimeout(500);
+    eq('Gemini に戻ったことをお知らせする', (await st()).includes('時間内に返さないので Gemini で処理'), true);
+    await pg.waitForTimeout(6500);   // お知らせ（6秒）が引っ込んだあと、まだ Gemini が要約している
+    eq('表示は「要約生成中（Gemini）」（Claude のままにしない）', await st(), '要約生成中（Gemini）');
+    await pg.waitForTimeout(3000);
+    eq('終わったら「停止」', await st(), '停止');
+    await ctx2.close();
+  }
+
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\n✓ すべて通過');
   process.exit(fail ? 1 : 0);
