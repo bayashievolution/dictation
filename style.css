@@ -1488,24 +1488,16 @@ mark.search-hit.current {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 14px 16px 12px;
-  margin-bottom: 14px;
-  transition: opacity 0.25s var(--ease-out), transform 0.25s var(--ease-out), margin 0.25s var(--ease-out), max-height 0.3s var(--ease-out);
+  /* v0.24.73: 出し入れは motion.js の reveal（包み .memo-cheatsheet-wrap ごと）。前は max-height などを ease で動かしていて、
+     本当の高さと関係なく 400px から縮めるので、動きはじめに止まって見えた */
   max-height: 400px;
   overflow: hidden;
   /* 狭い画面（拡張サイドパネル）では横いっぱい、広くなったらそれ以上広がらない */
   width: 100%;
   max-width: 420px;
 }
-.memo-cheatsheet.hidden {
-  opacity: 0;
-  transform: translateY(-4px);
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  margin-bottom: 0;
-  border-width: 0;
-  pointer-events: none;
-}
+/* 早見表の下の余白は包みの中に持たせる（縮みきったところで余白が詰まって跳ばないように） */
+.memo-cheatsheet-wrap { padding-bottom: 14px; }
 .memo-cheatsheet .cheatsheet-head {
   display: flex;
   align-items: center;

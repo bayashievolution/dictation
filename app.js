@@ -10363,14 +10363,19 @@ function updateMemoCheatsheetVisibility() {
     // auto: メモが空の時だけ表示
     show = !els.memo.textContent.trim() && !els.memo.querySelector('*:not(br)');
   }
-  sheet.classList.toggle('hidden', !show);
+  // v0.24.73: 高さと濃さをばねで出し入れする（SUMADO の reveal。TODO「動きを SUMADO の仕様書に合わせる」の 12）
+  const wrap = document.getElementById('memo-cheatsheet-wrap') || sheet;
+  wrap.__shown = show;
+  if (window.Motion) Motion.reveal(wrap, show);
+  else wrap.hidden = !show;
   if (helpBtn) helpBtn.classList.toggle('active', show);
 }
 
 function toggleMemoCheatsheet() {
   const sheet = document.getElementById('memo-cheatsheet');
   if (!sheet) return;
-  const currentlyShown = !sheet.classList.contains('hidden');
+  const wrap = document.getElementById('memo-cheatsheet-wrap') || sheet;
+  const currentlyShown = wrap.__shown !== undefined ? wrap.__shown : !wrap.hidden;
   state.cheatsheetForced = currentlyShown ? 'hidden' : 'shown';
   updateMemoCheatsheetVisibility();
 }

@@ -3424,3 +3424,7 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - `.pane-order-item` の CSS に `transition: transform 0.15s` があり、ばねが毎フレーム書く値を CSS がさらに遅らせて、行き過ぎて戻るような変な動きになった（テストで見つけた）。transition から transform を外した
   - 下の線は並べ替えたらすぐ新しい場所へ（線もばねで動く。前は FLIP が終わる 340ms 後に動かしていた）
   - テスト: `tests/browser/t-motion-dragsort-browser.js`（本物のマウスで: 並べ替わる・描き直したあとも前の場所から途中を通って動く・style に値を残さない・transition に transform を入れていない。タブも同じ）。旧版では3件落ちる
+- 2026-11-09 (v0.24.73): **メモの Markdown 早見表の出し入れをばねに**（TODO「動きを SUMADO の仕様書に合わせる」の 12 のうち 1 つ目）
+  - 前は class の hidden で max-height・余白・濃さを ease の transition で動かしていた。本当の高さと関係なく 400px から縮めるので、動きはじめに止まって見えた
+  - 早見表を包み（`#memo-cheatsheet-wrap`）に入れ、`Motion.reveal` で高さと濃さをばねで出し入れする。下の余白（14px）は包みの中（padding）に持たせた（外の余白だと、縮みきったところで詰まって跳ぶ）
+  - テスト: `tests/browser/t-motion-ease-browser.js`（書くとしまう・途中の高さと濃さを通る・しまいきったら場所を取らない・？で出すと元の高さへ・style に値を残さない・ease の transition が無い・押した回数どおり）
