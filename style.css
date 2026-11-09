@@ -1044,6 +1044,12 @@ mark.search-hit.current {
   scroll-behavior: smooth;
   position: relative;
 }
+/* v0.24.60: 文字起こしのスクロールは motion.js のばねで動かす（autoScroll）。
+   ブラウザの smooth（ease の曲線）が残っていると、ばねが毎フレーム書く scrollTop のたびに
+   ブラウザが自分でも動かしはじめて、2 つが取り合って最下部に着かなかった（テストで見つけた） */
+#pane-transcript .pane-body {
+  scroll-behavior: auto;
+}
 
 
 /* ───────── Pane header (per-tab actions) ───────── */
@@ -1997,8 +2003,10 @@ mark.search-hit.current {
   transition: opacity 0.2s;
 }
 
+/* v0.24.60: 空のときに display:none で消すと、出る・消えるたびに高さが跳ぶ。
+   空なら高さ 0 にして、高さの変化は motion.js の smoothHeight がばねで動かす */
 #interim:empty {
-  display: none;
+  min-height: 0;
 }
 
 /* ───────── Scroll-to-bottom button ───────── */

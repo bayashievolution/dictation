@@ -922,11 +922,103 @@ function isPinnedToBottom() {
   return pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 40;
 }
 
-function autoScroll(force = false) {
+/* ───────── 文字起こしの動き（v0.24.60・SUMADO の仕様書 1 章「唐突な動きをしない」）─────────
+ *
+ * TODO「動きを SUMADO の仕様書に合わせる」の 1。
+ * 仮の段落が消える・段落がまとまる・差し替わると、そこから下が一瞬で跳んでいた。
+ * 一番下に張りついているときの自動スクロールも、いきなり最下部へ飛んでいた。
+ *
+ * - 自動スクロールはばねで（見えない要素をばねで動かし、毎フレーム scrollTop に写す。仕様書 2.1 の onFrame の形）
+ * - 段落を差し替える・消すときは、見えている段落の「前の画面上の位置」を覚え、差し替えたあと前の位置から
+ *   新しい位置へばねで動かす（FLIP）。画面上の位置で測るので、末尾が縮んでスクロールが詰められた分も一緒に滑らかになる
+ * - 消える段落は、写し（ゴースト）を同じ場所に置いてふわっと消す。本物はすぐ消す
+ *   （本物を残したまま消えるのを待つと、その間に保存した文字起こしに「（文字起こし中…）」が入ってしまう）
+ */
+const transcriptScroll = { driver: null, moving: false };
+
+function transcriptScrollDriver() {
+  if (transcriptScroll.driver || !window.Motion) return transcriptScroll.driver;
+  const d = document.createElement('span');
+  Motion.onFrame(d, ({ x }) => { els.paneTranscriptBody.scrollTop = x; });
+  transcriptScroll.driver = d;
+  return d;
+}
+
+/** ばねのスクロールを止める（人が自分で動かしたとき。その場から人の操作に任せる） */
+function stopTranscriptScroll() {
+  if (!transcriptScroll.moving || !transcriptScroll.driver) return;
+  transcriptScroll.moving = false;
+  Motion.set(transcriptScroll.driver, { x: els.paneTranscriptBody.scrollTop });
+}
+
+function autoScroll(force = false, { instant = false } = {}) {
   if (state.activePane !== 'pane-transcript') return;
   if (force || !state.userScrolledUp) {
-    els.paneTranscriptBody.scrollTop = els.paneTranscriptBody.scrollHeight;
+    const pane = els.paneTranscriptBody;
+    const to = Math.max(0, pane.scrollHeight - pane.clientHeight);
+    const d = !instant && transcriptScrollDriver();
+    if (!d) { stopTranscriptScroll(); pane.scrollTop = pane.scrollHeight; return; }
+    if (Math.abs(to - pane.scrollTop) < 1 && !transcriptScroll.moving) return;
+    // 動いている途中なら、その速さのまま行き先だけ変える（文字が続けて届いても途切れない）
+    if (!transcriptScroll.moving) Motion.set(d, { x: pane.scrollTop });
+    transcriptScroll.moving = true;
+    Motion.animate(d, { x: to }, { spring: Motion.SPRINGS.sheet }).then((done) => {
+      if (!done) return;
+      // 動いている間に下が伸びた（仮の段落が長い文に差し替わった等）なら、着いたところで止めずに追いかける。
+      // ここで止めると、着いたときのスクロールで「人が上へ戻した」と見なして、自動スクロールが止まってしまう
+      // （テストで見つけた。前は scrollTop を一気に書いていたので、伸びた分は次の自動スクロールで追いついていた）
+      const again = Math.max(0, pane.scrollHeight - pane.clientHeight);
+      if (Math.abs(again - pane.scrollTop) > 1 && state.activePane === 'pane-transcript') {
+        Motion.animate(d, { x: again }, { spring: Motion.SPRINGS.sheet }).then((d2) => { if (d2) transcriptScroll.moving = false; });
+        return;
+      }
+      transcriptScroll.moving = false;
+    });
   }
+}
+
+/**
+ * 文字起こしの段落を差し替える・消すときに包む（FLIP）(v0.24.60)
+ * @param {Function} fn       差し替え・消す処理
+ * @param {object} [o]
+ * @param {Element[]} [o.removing]  fn の中で消す段落（写しを置いてふわっと消す）
+ */
+function transcriptMorph(fn, { removing = [] } = {}) {
+  const pane = els.paneTranscriptBody;
+  if (!window.Motion || state.activePane !== 'pane-transcript' || !pane || !pane.offsetParent) return fn();
+  const view = pane.getBoundingClientRect();
+  const near = (r) => r.bottom > view.top - 80 && r.top < view.bottom + 80;
+  const items = Array.from(els.confirmed.children).concat([els.interim]);
+  const before = new Map();
+  for (const el of items) {
+    const r = el.getBoundingClientRect();
+    if (near(r)) before.set(el, r.top);
+  }
+  const ghosts = [];
+  for (const el of removing) {
+    if (!el || !el.isConnected || !els.confirmed.contains(el)) continue;
+    const r = el.getBoundingClientRect();
+    if (!near(r) || r.height === 0) continue;
+    const g = el.cloneNode(true);
+    g.removeAttribute('id');
+    g.setAttribute('aria-hidden', 'true');
+    Object.assign(g.style, { position: 'fixed', left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`,
+      margin: '0', pointerEvents: 'none', zIndex: '1', animation: 'none' });
+    ghosts.push(g);
+  }
+  const out = fn();
+  for (const g of ghosts) {
+    document.body.appendChild(g);
+    Motion.animate(g, { opacity: 0 }, { spring: Motion.SPRINGS.fade }).then(() => g.remove());
+  }
+  for (const [el, top] of before) {
+    if (!el.isConnected) continue;
+    const dy = top - el.getBoundingClientRect().top;
+    if (Math.abs(dy) < 1) continue;
+    Motion.set(el, { y: dy });
+    Motion.animate(el, { y: 0 }, { spring: Motion.SPRINGS.sheet }).then((done) => { if (done) Motion.clear(el); });
+  }
+  return out;
 }
 
 /**
@@ -1322,14 +1414,18 @@ async function flushPendingToGemini() {
       context: getContextForGemini(),
       newChunk: rawText,
     });
-    targetEl.className = 'paragraph refined';
-    setParagraphContent(targetEl, refined || rawText);
+    transcriptMorph(() => {   // v0.24.60: 整形で高さが変わっても下を跳ばさない
+      targetEl.className = 'paragraph refined';
+      setParagraphContent(targetEl, refined || rawText);
+    });
     updateActionButtons();
     persist();
   } catch (e) {
     console.warn('[refine] skipped (marked for retry):', e.message || e);
-    targetEl.className = 'paragraph needs-retry';
-    setParagraphContent(targetEl, rawText);
+    transcriptMorph(() => {
+      targetEl.className = 'paragraph needs-retry';
+      setParagraphContent(targetEl, rawText);
+    });
     persist();
   } finally {
     if (!inBg) autoScroll();
@@ -1707,11 +1803,14 @@ async function consolidateShortChunks(shortParas) {
   // 先頭を refining に、2つ目以降は削除
   // v0.24.51: 待っている間も元の文字を出しておく（.refining で薄く見える）。以前は「（文脈整形中…）」の
   // 1行に置き換えていたが、5分ぶんまとめるようになって、その間に5分ぶんが見えなくなるため
-  firstPara.className = 'paragraph refining';
-  setParagraphContent(firstPara, rawText);
-  for (let i = 1; i < shortParas.length; i++) {
-    shortParas[i].remove();
-  }
+  // v0.24.60: まとめるときに、残りの段落が一瞬で詰まらないように（FLIP）
+  transcriptMorph(() => {
+    firstPara.className = 'paragraph refining';
+    setParagraphContent(firstPara, rawText);
+    for (let i = 1; i < shortParas.length; i++) {
+      shortParas[i].remove();
+    }
+  });
   if (inBg) syncBgToSession(); else snapshotActiveToSession();
   persistSessions();
 
@@ -1733,13 +1832,17 @@ async function consolidateShortChunks(shortParas) {
       // v0.24.54 ①: ライブ要約の目次と見出しの言葉をそろえる
       headingHints: liveSummaryTocTitles(inBg ? (state.recordingSessionId || state.activeId) : state.activeId),
     });
-    firstPara.className = 'paragraph refined';
-    setParagraphContent(firstPara, refined || rawText);
+    transcriptMorph(() => {   // v0.24.60
+      firstPara.className = 'paragraph refined';
+      setParagraphContent(firstPara, refined || rawText);
+    });
     diagLog.info(`ミドル整形完了 → ${(refined || rawText).length}字`);
   } catch (e) {
     console.warn('[consolidate] failed:', e.message || e);
-    firstPara.className = 'paragraph needs-retry';
-    setParagraphContent(firstPara, rawText);
+    transcriptMorph(() => {
+      firstPara.className = 'paragraph needs-retry';
+      setParagraphContent(firstPara, rawText);
+    });
   } finally {
     state.isConsolidatingShortChunks = false;
     if (inBg) syncBgToSession(); else snapshotActiveToSession();
@@ -4028,15 +4131,18 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
     if (text && text.trim() && isFillerOnly(text) && isFillerOnly(previousParagraphText(targetEl))) {
       // v0.24.34: 相づちだけのチャンクが続いたら、2つ目以降は出さない（判断根拠は isFillerOnly）
       diagLog.info(`相づちだけのチャンクが続いたので表示しない（${text.trim().slice(0, 20)}）`);
-      targetEl.remove();
+      transcriptMorph(() => targetEl.remove(), { removing: [targetEl] });   // v0.24.60: 仮の段落はふわっと消す
       persist();
     } else if (text && text.trim()) {
       // Geminiオーディオ経由の短チャンクは `.short-refined` とマーク。
       // このあと maybeConsolidateShortChunks() が 3つ溜まったら
       // refineWithGemini（見出し付き）でまとめて整形する。
-      targetEl.className = 'paragraph short-refined';
-      targetEl.dataset.shortTs = String(Date.now());
-      setParagraphContent(targetEl, text);
+      // v0.24.60: 仮の段落を差し替えると高さが変わる。下を跳ばさない
+      transcriptMorph(() => {
+        targetEl.className = 'paragraph short-refined';
+        targetEl.dataset.shortTs = String(Date.now());
+        setParagraphContent(targetEl, text);
+      });
       if (state.isRecording) resetLongSilenceTimer();
       persist();
       maybeWarnLiveSilent();   // v0.24.19
@@ -4046,13 +4152,13 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
       // 沈黙だけのチャンク。従来はこれが「（音声不明瞭・再試行可）」として
       // 画面に残っていた（判断根拠は shouldDropEmptyChunk のコメント）
       diagLog.info('沈黙のみのチャンクだったので表示しない');
-      targetEl.remove();
+      transcriptMorph(() => targetEl.remove(), { removing: [targetEl] });   // v0.24.60: 仮の段落はふわっと消す
       persist();
     } else if (isDuplicateOfTail(provisionalText, confirmedTailText(targetEl))) {
       // v0.18.8: Web Speech の確定が遅れて次のチャンクに付いた分。
       // 同じ内容がすでに画面にあるので出さない（判断根拠は上のコメント）
       diagLog.info('Web Speech の確定が直前の内容と重複していたので表示しない');
-      targetEl.remove();
+      transcriptMorph(() => targetEl.remove(), { removing: [targetEl] });   // v0.24.60: 仮の段落はふわっと消す
       persist();
     } else {
       // 空テキストも「要再試行」として残す（消さない）
@@ -4072,9 +4178,9 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
        * 変調スペクトルのような別の特徴量が要る。ここで得られるものに対して
        * 大きすぎる。**何秒ぶんが文字にならなかったか**が分かれば用は足りる。 */
       const sec = ((edges && edges.durationMs) || 0) / 1000;
-      setParagraphContent(targetEl, provisionalText
+      transcriptMorph(() => setParagraphContent(targetEl, provisionalText
         ? provisionalText + '　[Gemini は聞き取れず・Web Speech の結果です]'
-        : `（この${sec ? sec.toFixed(1) + '秒' : '区間'}は言葉として聞き取れませんでした。音楽や物音の可能性があります）`);
+        : `（この${sec ? sec.toFixed(1) + '秒' : '区間'}は言葉として聞き取れませんでした。音楽や物音の可能性があります）`));
       persist();
     }
   } catch (e) {
@@ -4083,9 +4189,9 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
     // v0.17.0: 失敗しても Web Speech の結果は残す。ここで捨てると、
     // 聞き取れていたのに何も残らないという最悪の結果になる
     targetEl.className = 'paragraph needs-retry';
-    setParagraphContent(targetEl, provisionalText
+    transcriptMorph(() => setParagraphContent(targetEl, provisionalText
       ? provisionalText + '　[Gemini 失敗・Web Speech の結果です: ' + (e.message || '').slice(0, 40) + ']'
-      : '[文字起こし失敗: ' + (e.message || '').slice(0, 60) + ']');
+      : '[文字起こし失敗: ' + (e.message || '').slice(0, 60) + ']'));
     persist();
   } finally {
     state.audioInFlightCount--;
@@ -8721,7 +8827,7 @@ function loadActiveSessionIntoDOM() {
   // タイピングUndoの基準状態をDOMから再同期（プログラム変更で baseline が古くなるのを防ぐ）
   if (typeof syncPaneBaselineFromDOM === 'function') syncPaneBaselineFromDOM();
   state.userScrolledUp = false;
-  requestAnimationFrame(() => autoScroll(true));
+  requestAnimationFrame(() => autoScroll(true, { instant: true }));   // タブを開いたときは、最初から最下部に
 }
 
 function switchSession(id) {
@@ -10445,7 +10551,15 @@ if (els.btnDiarize) {
   updateDiarizeButton();
 }
 
+// v0.24.60: 下書き（#interim）の高さを、出る・消える・行が増えるたびにばねで（空は高さ 0）
+if (window.Motion && els.interim) Motion.smoothHeight(els.interim, els.interim);
+// v0.24.60: 人が自分でスクロールしはじめたら、ばねの自動スクロールをその場で止める
+for (const ev of ['wheel', 'touchstart', 'pointerdown', 'keydown']) {
+  els.paneTranscriptBody.addEventListener(ev, stopTranscriptScroll, { passive: true });
+}
 els.paneTranscriptBody.addEventListener('scroll', () => {
+  // ばねの自動スクロールの途中は、まだ最下部に着いていないだけ（人が上へ戻したのではない）
+  if (transcriptScroll.moving) return;
   state.userScrolledUp = !isPinnedToBottom();
   els.btnScrollBottom.classList.toggle('hidden', !state.userScrolledUp);
 });
