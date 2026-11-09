@@ -4765,11 +4765,13 @@ function applyLiveSummaryTab() {
  * リアルタイム要約は Claude 連携がオンのときだけ選べる (v0.24.22)
  * オフのときはチェックを外して押せなくし、なぜ押せないかを書く
  */
-function applyLiveSummaryAvailability() {
+function applyLiveSummaryAvailability(animated = true) {
   // v0.24.39: ライブ要約と「一部を Claude Code で処理する」は、どちらも「Claude Code」がオンのときだけ選べる
   const claudeOn = !!(els.inputClaudeCode && els.inputClaudeCode.checked);
   // v0.24.58: 「失敗したら Gemini で処理する」は連携がオンのときだけ出す（オフなら意味が無い）。値は覚えたまま
-  if (els.claudeFallbackRow) els.claudeFallbackRow.hidden = !claudeOn;
+  // v0.24.77: 出し入れは高さと濃さをばねで（やっさん「Claude Code 連携をオンにして現れるメニューが唐突に出る」）。
+  // 設定を開いた直後（openSettings から呼ぶとき）は動かさずにその状態にする
+  revealSettingRow(els.claudeFallbackRow, claudeOn, animated, true);   // 外の余白（.field の 16px）も一緒に縮める
   for (const [box, note, extra] of [
     [els.inputLiveSummary, els.liveSummaryNote, els.inputLiveSummaryMin],
     [els.inputClaudeBridge, els.claudeRouteNote, null],
@@ -4782,7 +4784,8 @@ function applyLiveSummaryAvailability() {
     box.disabled = !claudeOn;
     if (extra) extra.disabled = !claudeOn;
     if (!claudeOn) box.checked = false;
-    if (note) note.hidden = claudeOn;
+    // v0.24.77: 「オンにすると選べます」の断り書きも、ばねで出し入れ（前は一瞬）
+    revealSettingRow(note, !claudeOn, animated, true);
   }
 }
 
@@ -4912,7 +4915,8 @@ async function loadNotionPickerNotes(dsId, seq) {
  */
 function updateNotionPickerMode() {
   const appending = !!(els.notionPickerNote && els.notionPickerNote.value);
-  if (els.notionPickerDateRow) els.notionPickerDateRow.hidden = appending;
+  // v0.24.77: 開いている保存先の窓の中で切り替わるので、ばねで出し入れ（閉じているあいだは動かさない）
+  revealSettingRow(els.notionPickerDateRow, !appending, !els.notionPicker.classList.contains('hidden'), true);
   if (els.btnNotionPickerOk) els.btnNotionPickerOk.textContent = appending ? '追記' : '保存';
 }
 
@@ -8044,7 +8048,7 @@ function openSettings() {
   if (els.inputClaudeBridge) els.inputClaudeBridge.checked = !!state.settings.useClaudeBridge;   // v0.24.0
   // v0.24.22: Claude 連携のチェックを入れた**あと**で見る。先に見ると、連携オフと読み違えて
   // リアルタイム要約のチェックを外してしまい、そのまま保存するとオフになる（テストで見つけた）
-  applyLiveSummaryAvailability();
+  applyLiveSummaryAvailability(/* animated */ false);   // v0.24.77: 開いた直後は動かさない
   refreshAudioUsage();
   if (els.inputGeminiLiveDisplay) els.inputGeminiLiveDisplay.checked = state.settings.geminiLiveDisplay !== false;
   if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
@@ -10876,6 +10880,14 @@ function installModalMotion() {
 }
 installModalMotion();
 
+// v0.24.77: 設定の「Claude Code 連携」「Notion 連携」の横の状態（確認中… → 長い結果）は、字の長さで折り返して
+// 行の高さが変わる。跳ばずに伸び縮みさせる（やっさん「唐突に出る動きを徹底的にほかにないか調べてみて」）
+if (window.Motion) {
+  for (const id of ['claude-bridge-status', 'notion-test-result']) {
+    const row = document.getElementById(id) && document.getElementById(id).closest('.field');
+    if (row) Motion.smoothHeight(row, row);
+  }
+}
 // v0.24.69: 右上の状態の札を、SUMADO のダイナミックアイランドのように（点 → 縦 → 横で出る・字が変わると形が伸び縮み）
 installStatusIsland();
 // v0.24.64: Notion 保存の小窓は、文言・結果の行・下のボタンの出入りで高さが変わる。跳ばずに伸び縮みさせる

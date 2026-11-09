@@ -2695,7 +2695,9 @@ mark.search-hit.current {
   border-radius: 50%;
   top: 2px;
   left: 2px;
-  transition: transform 0.18s, background 0.18s;
+  /* v0.24.77: つまみはばねで動く（SUMADO のスイッチと同じ SPRINGS.press）。つまみは ::before なのでスクリプトで動かせない。
+     motion.js と同じ計算でばねを 1/120 秒ごとに解いた値を linear() に並べた（少し行き過ぎて戻る）。前は ease の 0.18 秒 */
+  transition: transform 0.3s linear(0, 0.04, 0.117, 0.217, 0.326, 0.437, 0.543, 0.641, 0.727, 0.801, 0.863, 0.913, 0.952, 0.982, 1.003, 1.018, 1.027, 1.032, 1.034, 1.034, 1.032, 1.029, 1.025, 1.021, 1.017, 1.014, 1.011, 1.008, 1.006, 1.004, 1.002, 1.001, 1, 1, 0.999, 0.999, 1), background 0.18s;
 }
 .field-row input[type="checkbox"]:hover,
 .field input[type="checkbox"]:hover { border-color: var(--accent); }
