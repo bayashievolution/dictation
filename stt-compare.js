@@ -268,7 +268,7 @@
         });
       } catch (e) {
         // 拡張なら host_permissions、ブラウザ版なら Groq が CORS を許しているかで決まる。ここに来たら通信自体が通っていない
-        return { text: '', ms: performance.now() - t0, error: '通信できませんでした（' + (e.message || e) + '）' };
+        return { text: '', ms: performance.now() - t0, error: groqFetchFailReason(e) };
       }
       if (res.status === 429 && attempt < 2) {
         const ra = Number(res.headers.get('retry-after')) || 10;
@@ -284,6 +284,23 @@
       return { text: String(data.text || '').trim(), ms, suspicious: sttSuspiciousSegments(data.segments) };
     }
     return { text: '', ms: 0, error: 'Groq の回数の上限に当たり続けました' };
+  }
+
+  /*
+   * Groq に届かなかった理由を言い分ける（2026-11-09 やっさんの実機で「Failed to fetch」だけが出た）
+   * fetch の失敗はどれも同じ「Failed to fetch」になり、画面からは原因が分からない。
+   *   - 拡張の CSP で止められた → securitypolicyviolation が出る。拡張が古い manifest のまま（↻ していない）
+   *   - ブラウザ版（http://127.0.0.1:8765）→ Groq が CORS を許していないと止まる。拡張の住所で開けば通る
+   */
+  let groqCspBlocked = false;
+  document.addEventListener('securitypolicyviolation', e => {
+    if (/api\.groq\.com/.test(e.blockedURI || '')) groqCspBlocked = true;
+  });
+  function groqFetchFailReason(e) {
+    const base = '通信できませんでした（' + (e.message || e) + '）';
+    if (groqCspBlocked) return base + '。拡張が Groq への通信を許していない古い設定のままです。chrome://extensions でこの拡張の ↻ を押してから、このページを開き直してください';
+    if (location.protocol !== 'chrome-extension:') return base + '。ブラウザ版からは Groq に届かないようです。chrome-extension://（拡張の ID）/stt-compare.html で開いてください';
+    return base + '。ネットにつながっているか、Groq のキーが正しいかを確かめてください';
   }
 
   /* ───────── 実行 ───────── */

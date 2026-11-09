@@ -117,9 +117,29 @@ async function runOnce(browser, { preprocess }) {
   await ctx.close();
 }
 
+// Groq に届かないとき「Failed to fetch」だけで終わらせず、どうすればいいかを出す（2026-11-09 やっさんの実機）
+async function unreachable(browser) {
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
+  await page.route('**/api.groq.com/**', r => r.abort('failed'));
+  await page.goto(URL);
+  await page.fill('#groq-key', 'gsk_test');
+  await page.uncheck('#use-gemini');
+  await page.setInputFiles('#file', makeWav());
+  await page.waitForFunction(() => !document.getElementById('btn-run').disabled, null, { timeout: 10000 });
+  await page.fill('#len-min', '0.2'); await page.dispatchEvent('#len-min', 'change');
+  await page.click('#btn-run');
+  await page.waitForFunction(() => /終わりました/.test(document.getElementById('summary').textContent), null, { timeout: 30000 });
+  const msg = await page.textContent('.col .text');
+  eq('[届かない] ブラウザ版なら拡張の住所で開くよう案内', /Failed to fetch.*chrome-extension:/.test(msg), true);
+  await ctx.close();
+}
+
 (async () => {
   const browser = await chromium.launch();
   try {
+    await unreachable(browser);
     for (const preprocess of ['none', 'comp', 'comp-norm']) await runOnce(browser, { preprocess });
   } finally { await browser.close(); }
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');
