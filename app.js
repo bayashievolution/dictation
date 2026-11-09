@@ -10209,48 +10209,62 @@ if (els.inputNotionToken) {
 if (els.btnNotionForget) els.btnNotionForget.addEventListener('click', forgetNotionTarget);
 
 /* ───────── Onboarding ───────── */
+/*
+ * v0.24.97: 今の画面に合わせて書き直した（やっさん「ヘルプメニューが古くなっている」）。
+ * 前の文は「Gemini が段落分け」「Gemini に質問」「詳細度は低/中/高」など、AI を選べるようになる前のままだった。
+ * ガイドは「何ができるか」を説明する場所なので、行のまわりの字（説明しすぎない）より少し詳しく書いてよい（SUMADO の仕様書の 5 章・heroCard と同じ考え）。
+ * optional: その場所が今の画面に無ければ飛ばす（ライブ要約のタブは、オンのときだけ出る）
+ */
 const ONBOARDING_STEPS = [
   {
     target: '#btn-toggle',
-    title: '録音開始',
-    text: 'ここを押すと文字起こしが始まります。認識中も本文を直接編集できます。新しい認識結果は末尾に自動追加されます。',
+    title: '録音',
+    text: '押すと文字起こしが始まり、もう一度押すと止まります。録音中も本文を直接直せます。新しく聞き取った文は末尾に足されます。',
   },
   {
     target: '.inner-tab[data-pane="pane-transcript"]',
     title: '文字起こし',
-    text: 'リアルタイムで音声がテキスト化されます。「文字起こし整形」をONにすると Gemini が段落分け・句読点を自動調整します。',
+    text: '話した内容がここに出ます。聞き取り方は設定の「文字起こしのモード」で選べます（Web Speech／AI で聞き取る）。「文字起こし整形」をオンにすると、AI が句読点・段落・見出しを整えます。',
   },
   {
     target: '.inner-tab[data-pane="pane-memo"]',
     title: 'メモ',
-    text: 'Markdown ショートカット対応（# 見出し / - 箇条書き / [] チェック等）。講義・会議中の気づきを自由に書けます。',
+    text: 'Markdown のショートカットが使えます（# 見出し／- 箇条書き／[] チェックなど）。講義や会議中の気づきを自由に書けます。メモも要約や質問の資料になります。',
+  },
+  {
+    target: '.inner-tab[data-pane="pane-live"]',
+    optional: true,
+    title: 'ライブ要約',
+    text: '録音中、決めた間隔ごとに目次つきの要約ができます。目次を押すと、その話題の場所へ飛べます。オン・オフと間隔は設定の「詳細設定 → AI の動き」で変えられます。',
   },
   {
     target: '.inner-tab[data-pane="pane-summary"]',
     title: '要約',
-    text: '録音停止後に自動生成されます。「要約を生成」ボタンで手動生成も可能。詳細度は低/中/高から選択できます。',
+    text: '録音を止めると自動で作られます。「要約を生成」で作り直せます。詳しさは「詳細・バランス・概要」から選べます。',
   },
   {
     target: '.inner-tab[data-pane="pane-chat"]',
     title: '質問',
-    text: '資料（文字起こし・メモ・要約）について Gemini に質問できます。「この会議で決まったことは？」「◯◯について言及は？」など。推測はせず、資料に無いことは「分かりません」と答えます。',
+    text: '文字起こし・メモ・要約について質問できます（「この会議で決まったことは？」など）。資料に書かれていないことは、無いと答えます。',
   },
   {
     target: '#btn-quick-chat',
     title: 'クイック質問',
-    text: '文字起こしを見ながらすぐに質問したい時はこのボタン。下からモーダルが出て、タブを切替えずに問えます。',
+    text: '文字起こしを見ながらすぐに質問したいときはこのボタン。タブを切り替えずに質問できます。',
   },
   {
     target: '#btn-settings',
     title: '設定',
-    text: 'Gemini API キー、フォント・サイズ、要約の詳細度、音声入力モード（Web Speech / AI で聞き取る）などをここで調整します。',
+    text: 'AI の API キーと連携（Gemini API・Groq Whisper・Claude Code）、使用するAI（文字起こし・整形・要約などをどの AI で動かすか）、文字起こしのモードはここで決めます。細かい設定は「詳細設定」にまとめてあります。',
   },
   {
     target: '#btn-captions',
-    title: '字幕設定',
-    text: 'OS レベルの透過字幕オーバーレイ（ネイティブヘルパー dictation-overlay と連携）。Zoom や Meet・他アプリの上に直接字幕が乗ります。フォント・色・縁取り・影・背景・パディング・行間・改行ルール・AI整形などをここで調整。**Windows 専用**で、初回のみインストーラが必要です。',
+    title: '字幕設定（開発中）',
+    text: 'ほかのアプリの上に字幕を重ねて出す機能の設定です。Windows 専用で、はじめにインストーラが必要です。',
   },
 ];
+/** v0.24.97: 今の画面にある手順だけ（optional で場所が無いものは飛ばす）。startOnboarding で決める */
+let onboardingSteps = ONBOARDING_STEPS;
 
 let onboardingIdx = 0;
 let onboardingLiftedTarget = null;
@@ -10282,16 +10296,16 @@ function onboardingUnliftTarget() {
 }
 
 function onboardingPosition() {
-  const step = ONBOARDING_STEPS[onboardingIdx];
+  const step = onboardingSteps[onboardingIdx];
   if (!step) { closeOnboarding(); return; }
   const target = document.querySelector(step.target);
   const spot = document.getElementById('onboarding-spot');
   const bubble = document.getElementById('onboarding-bubble');
   document.getElementById('onboarding-title').textContent = step.title;
   document.getElementById('onboarding-text').textContent = step.text;
-  document.getElementById('onboarding-step').textContent = `${onboardingIdx + 1} / ${ONBOARDING_STEPS.length}`;
+  document.getElementById('onboarding-step').textContent = `${onboardingIdx + 1} / ${onboardingSteps.length}`;
   document.getElementById('onboarding-next-btn').textContent =
-    onboardingIdx === ONBOARDING_STEPS.length - 1 ? '完了' : '次へ';
+    onboardingIdx === onboardingSteps.length - 1 ? '完了' : '次へ';
 
   // 対象を前面に持ち上げ（暗幕の上に出して見やすく）
   onboardingLiftTarget(target);
@@ -10328,6 +10342,7 @@ function onboardingPosition() {
 //   - 吹き出しは少し小さいところから少し行き過ぎてぽんと出る。次の手順では、前の場所から新しい場所へばねで移り、中の字はふわっと入れ替わる
 function startOnboarding() {
   onboardingIdx = 0;
+  onboardingSteps = ONBOARDING_STEPS.filter((st) => !st.optional || document.querySelector(st.target));
   const ob = document.getElementById('onboarding');
   const bubble = document.getElementById('onboarding-bubble');
   if (window.Motion) {
@@ -10343,7 +10358,7 @@ function startOnboarding() {
 }
 function nextOnboarding() {
   onboardingIdx++;
-  if (onboardingIdx >= ONBOARDING_STEPS.length) {
+  if (onboardingIdx >= onboardingSteps.length) {
     closeOnboarding();
     return;
   }
