@@ -8947,12 +8947,121 @@ async function storePastedImage(blob) {
  * 知らない種類が来たときに独自処理を挟むほうが、かえって壊れやすい。
  * 受け取れないファイル（PDF など）は、黙って無視せず一言出す。
  */
+/* ───────── 貼り付けのオプション（書式ごと／文字だけ） (v0.24.98) ─────────
+ *
+ * やっさん「メモに Ctrl+V でコピペした時、スタイルごとペーストされる。Word のように、スタイルごとか文字だけか、
+ * 貼り付けた後に選べるようにしてほしい」。
+ *
+ * 貼り付けそのものは今までどおりブラウザに任せる（書式ごと）。v0.24.2 で分かったとおり、Chrome が text/html を
+ * どんな入れ子で入れるかは推測すると外すので、こちらで組み立て直さない。
+ * そのかわり、貼る前のメモの中身とカーソルの場所を覚えておき、「文字だけ」を選んだら、
+ * 貼る前に戻してから text/plain を insertText で入れ直す（打鍵と同じ入り方になるので、箇条書きなどの変換も効く）。
+ * もう一度「書式ごと」を押せば、書式つきの結果に戻す。
+ * 書式の無い貼り付け（text/html が無い）では出さない（選ぶ意味がない）
+ */
+let _pasteOpt = null;   // { before, beforeSel, rich, richSel, plain, mode }
+let _pasteApplying = false;
+function nodePathIn(root, node) {
+  const path = [];
+  while (node && node !== root) {
+    const par = node.parentNode;
+    if (!par) return null;
+    path.unshift(Array.prototype.indexOf.call(par.childNodes, node));
+    node = par;
+  }
+  return node === root ? path : null;
+}
+function nodeAtPath(root, path) {
+  let n = root;
+  for (const i of path || []) { n = n && n.childNodes[i]; if (!n) return null; }
+  return n;
+}
+function saveMemoSelection() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  const sp = nodePathIn(els.memo, r.startContainer), ep = nodePathIn(els.memo, r.endContainer);
+  if (!sp || !ep) return null;
+  return { sp, so: r.startOffset, ep, eo: r.endOffset };
+}
+function restoreMemoSelection(saved) {
+  if (!saved) return false;
+  const sn = nodeAtPath(els.memo, saved.sp), en = nodeAtPath(els.memo, saved.ep);
+  if (!sn || !en) return false;
+  const r = document.createRange();
+  try { r.setStart(sn, saved.so); r.setEnd(en, saved.eo); } catch { return false; }
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+  return true;
+}
+function showPasteOptions() {
+  const box = document.getElementById('paste-options');
+  if (!box) return;
+  box.querySelectorAll('[data-paste]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.paste === _pasteOpt.mode)));
+  placePasteOptions();
+  if (window.Motion) Motion.popIn(box); else box.hidden = false;
+}
+/** カーソルのすぐ下に置く（無ければメモの下）。貼った分でメモが流れたときも、ついていく */
+function placePasteOptions() {
+  const box = document.getElementById('paste-options');
+  if (!box) return;
+  const sel = window.getSelection();
+  let rect = null;
+  if (sel && sel.rangeCount) {
+    const rs = sel.getRangeAt(0).getClientRects();
+    rect = rs.length ? rs[rs.length - 1] : null;
+  }
+  if (!rect || (!rect.width && !rect.height)) rect = els.memo.getBoundingClientRect();
+  const z = parseFloat(document.documentElement.style.zoom) || 1;
+  box.style.left = (Math.max(8, Math.min(window.innerWidth - 170, rect.left)) / z) + 'px';
+  box.style.top = (Math.min(window.innerHeight - 40, rect.bottom + 6) / z) + 'px';
+}
+function hidePasteOptions() {
+  const box = document.getElementById('paste-options');
+  _pasteOpt = null;
+  if (!box || box.hidden) return;
+  if (window.Motion) Motion.popOut(box); else box.hidden = true;
+}
+function applyPasteMode(mode) {
+  if (!_pasteOpt || _pasteOpt.mode === mode) return;
+  els.memo.focus();
+  if (mode === 'plain') {
+    els.memo.innerHTML = _pasteOpt.before;
+    restoreMemoSelection(_pasteOpt.beforeSel);
+    _pasteApplying = true;   // この insertText で引っ込めない
+    try { document.execCommand('insertText', false, _pasteOpt.plain); } finally { _pasteApplying = false; }
+  } else {
+    els.memo.innerHTML = _pasteOpt.rich;
+    restoreMemoSelection(_pasteOpt.richSel);
+  }
+  _pasteOpt.mode = mode;
+  memoUndoCommit();
+  const box = document.getElementById('paste-options');
+  if (box) box.querySelectorAll('[data-paste]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.paste === mode)));
+  diagLog.info(`メモ: 貼り付けを${mode === 'plain' ? '文字だけ' : '書式ごと'}にしました`);
+}
+
 async function handleMemoPaste(e) {
   const dt = e.clipboardData;
   if (!dt) return;
   const decision = classifyPaste(dt.items);
 
-  if (decision.action === 'text') return;   // 標準に任せる
+  if (decision.action === 'text') {
+    // 標準に任せる（書式ごと）。書式つきなら、貼ったあとに「文字だけ」を選べるようにする (v0.24.98)
+    hidePasteOptions();
+    const types = Array.from(dt.types || []);
+    const plain = dt.getData('text/plain');
+    if (types.includes('text/html') && plain) {
+      memoUndoCheckpoint('貼り付け');
+      const before = els.memo.innerHTML, beforeSel = saveMemoSelection();
+      setTimeout(() => {
+        _pasteOpt = { before, beforeSel, rich: els.memo.innerHTML, richSel: saveMemoSelection(), plain, mode: 'rich' };
+        showPasteOptions();
+      }, 0);
+    }
+    return;
+  }
 
   if (decision.action === 'reject') {
     e.preventDefault();
@@ -11306,6 +11415,25 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* v0.22.0: メモの貼り付け。画像は保管庫へ、受け取れないものは一言出す */
+// v0.24.98: 貼り付けのオプション。押したら切り替え、打ち始めたり外を触ったりしたら引っ込める（Word と同じ）
+(() => {
+  const box = document.getElementById('paste-options');
+  if (!box) return;
+  // 押してもメモのカーソルを奪わない
+  box.addEventListener('pointerdown', (e) => e.preventDefault());
+  box.addEventListener('click', (e) => { const b = e.target.closest('[data-paste]'); if (b) applyPasteMode(b.dataset.paste); });
+  // 先に見る（capture）。メモのほかのキーの処理（Markdown の変換など）が止めても、引っ込めは効くように
+  document.addEventListener('keydown', (e) => {
+    if (!_pasteOpt || e.ctrlKey || e.metaKey || ['Control', 'Meta', 'Shift', 'Alt'].includes(e.key)) return;
+    hidePasteOptions();
+  }, true);
+  // 日本語の入力（IME）や、キーを押さずに入る文字でも引っ込める。自分の「文字だけ」の入れ直しは除く
+  els.memo.addEventListener('beforeinput', () => { if (_pasteOpt && !_pasteApplying) hidePasteOptions(); }, true);
+  document.addEventListener('pointerdown', (e) => { if (_pasteOpt && !box.contains(e.target)) hidePasteOptions(); }, true);
+  // 流れたら引っ込めずについていく（大きな字を貼ると、貼った直後にメモが流れる。最初は引っ込めていて、出た瞬間に消えていた）
+  els.paneMemoBody.addEventListener('scroll', () => { if (_pasteOpt) placePasteOptions(); });
+})();
+
 els.memo.addEventListener('paste', (e) => {
   // ここで throw すると貼り付け操作ごと落ちるので、必ず受け止める
   handleMemoPaste(e).catch(err => {

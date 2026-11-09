@@ -3512,3 +3512,12 @@ body.chat-active .dict-menu { bottom: 114px; }
 .settings-sub-title { display: block; font-weight: 700; margin: 12px 0 6px; color: var(--text); }
 .settings-sub-title:first-child { margin-top: 2px; }
 @media (prefers-reduced-motion: reduce) { .settings-acc-chev { transition: none; } }
+
+/* ───────── メモの貼り付けのオプション (v0.24.98) ───────── */
+.paste-options { position: fixed; z-index: 90; display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px;
+  background: var(--bg-elevated); border: 1px solid var(--border); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.paste-options[hidden] { display: none; }
+.paste-options button { appearance: none; border: none; background: none; color: var(--text-muted); font: inherit; font-size: 12px;
+  padding: 3px 10px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.paste-options button[aria-pressed="true"] { background: var(--accent-dim); color: var(--text); font-weight: 700; }
+.paste-options button:focus-visible { outline: 2px solid var(--heading); outline-offset: 1px; }
