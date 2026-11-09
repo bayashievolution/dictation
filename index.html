@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.95" />
+  <link rel="stylesheet" href="style.css?v=0.24.96" />
 </head>
 <body>
   <div id="app">
@@ -952,74 +952,82 @@
         <button class="modal-close" data-dismiss><span data-icon="x"></span></button>
       </div>
       <div class="modal-body">
-        <p class="field-hint" style="margin-bottom:14px">
-          ここに書いた内容は<strong>語彙のヒント</strong>として文字起こしに渡されます。
-          同音異義語（家庭／課程／過程）や固有名詞は音だけでは決められないので、
-          先に教えておくと精度が上がります。<strong>台本としては使われません</strong>（書いた内容が勝手に本文に入ることはありません）。
-        </p>
-
-        <label class="field">
-          <span class="field-label">分野・場面</span>
-          <input id="input-context-field" type="text" placeholder="例: 講義 / 会議 / 打ち合わせ / インタビュー" />
-          <small class="field-hint">分野があれば「〇〇学の講義」のように書くと、その分野の語が選ばれやすくなります</small>
-        </label>
-
-        <label class="field">
-          <span class="field-label">話者</span>
-          <input id="input-context-speakers" type="text" placeholder="例: 山田さん、佐藤さん、司会" />
-          <small class="field-hint">話者判別を入れたときに名前で出せるようになります</small>
-        </label>
-
-        <label class="field">
-          <span class="field-label">よく出る語・固有名詞</span>
-          <textarea id="input-context-terms" rows="5" placeholder="製品名・サービス名&#10;社名・団体名&#10;略語&#10;人名"></textarea>
-          <small class="field-hint">改行かカンマ区切り。人名・専門用語・製品名など、誤変換されやすいものを</small>
-        </label>
-
-        <div class="field">
-          <span class="field-label">語彙辞書</span>
-          <small class="field-hint" style="margin-bottom:6px">
-            選んだ辞書の語が、上の「よく出る語」と自動で拾った語に<strong>足されます</strong>。
-            合計50語まで（手入力 → 辞書 → 自動 の順に残ります）。
-          </small>
-          <div id="context-dict-list" class="context-dict-list"></div>
-          <div class="diag-log-actions" style="margin-top:8px">
-            <button type="button" id="btn-save-auto-dict" class="pane-btn" title="いま育っている自動辞書と手入力の語に名前を付けて保存する">
-              <span data-icon="tag"></span><span>いまの語を辞書として保存</span>
-            </button>
-          </div>
+        <!-- v0.24.96: 設定と同じ形（見出しのあるまとまり）に並べ直した（やっさん「このメニューのスタイルすごくいいので、この録音の文脈もこのスタイルに」）。
+             欄の id・保存のしかた・説明の字は変えていない（字を減らすのは 1 か所ずつやっさんに見てもらう・CLAUDE.md） -->
+        <div class="field-group">
+          <h3 class="field-group-title">この録音について</h3>
+          <p class="field-hint" style="margin:0 0 12px">
+            ここに書いた内容は<strong>語彙のヒント</strong>として文字起こしに渡されます。
+            同音異義語（家庭／課程／過程）や固有名詞は音だけでは決められないので、
+            先に教えておくと精度が上がります。<strong>台本としては使われません</strong>（書いた内容が勝手に本文に入ることはありません）。
+          </p>
+          <label class="field">
+            <span class="field-label">分野・場面</span>
+            <input id="input-context-field" type="text" placeholder="例: 講義 / 会議 / 打ち合わせ / インタビュー" />
+            <small class="field-hint">分野があれば「〇〇学の講義」のように書くと、その分野の語が選ばれやすくなります</small>
+          </label>
+          <label class="field">
+            <span class="field-label">話者</span>
+            <input id="input-context-speakers" type="text" placeholder="例: 山田さん、佐藤さん、司会" />
+            <small class="field-hint">話者判別を入れたときに名前で出せるようになります</small>
+          </label>
+          <label class="field">
+            <span class="field-label">よく出る語・固有名詞</span>
+            <textarea id="input-context-terms" rows="5" placeholder="製品名・サービス名&#10;社名・団体名&#10;略語&#10;人名"></textarea>
+            <small class="field-hint">改行かカンマ区切り。人名・専門用語・製品名など、誤変換されやすいものを</small>
+          </label>
         </div>
 
-        <div class="field">
-          <div class="diag-log-actions">
-            <button type="button" id="btn-context-from-memo" class="pane-btn" title="メモペインに書いた見出しや箇条書きから語を拾う">
-              <span data-icon="pencil"></span><span>メモから取り込む</span>
-            </button>
-            <span id="context-memo-result" class="field-hint"></span>
-          </div>
-        </div>
-
-        <div class="field">
-          <div class="diag-log-head">
-            <span class="field-label">自動で拾った内容</span>
-            <div class="diag-log-actions">
-              <button type="button" id="btn-context-adopt-auto" class="pane-btn" title="拾った語を上の欄に移して自分で直せるようにする">
-                <span data-icon="check"></span><span>上の欄に取り込む</span>
+        <div class="field-group">
+          <h3 class="field-group-title">語彙辞書</h3>
+          <div class="field">
+            <small class="field-hint" style="display:block; margin-bottom:8px">
+              選んだ辞書の語が、上の「よく出る語」と自動で拾った語に<strong>足されます</strong>。
+              合計50語まで（手入力 → 辞書 → 自動 の順に残ります）。
+            </small>
+            <div id="context-dict-list" class="context-dict-list"></div>
+            <div class="diag-log-actions" style="margin-top:8px">
+              <button type="button" id="btn-save-auto-dict" class="pane-btn" title="いま育っている自動辞書と手入力の語に名前を付けて保存する">
+                <span data-icon="tag"></span><span>いまの語を辞書として保存</span>
               </button>
             </div>
           </div>
-          <div id="auto-context-box" class="auto-context-box"></div>
-          <small class="field-hint">
-            録音中に記録から自動で拾っています。誤変換をそのまま覚えないよう、
-            単純な頻度ではなく AI に「正しい表記」を判断させています。
-            おかしければ取り込んで直してください（<strong>上の欄が最終権限</strong>です）
-          </small>
         </div>
 
-        <label class="field field-row">
-          <input id="input-context-default" type="checkbox" />
-          <span>この内容を新しいタブの初期値にする</span>
-        </label>
+        <div class="field-group">
+          <h3 class="field-group-title">自動で拾った内容</h3>
+          <div class="field">
+            <div class="diag-log-actions">
+              <button type="button" id="btn-context-from-memo" class="pane-btn" title="メモペインに書いた見出しや箇条書きから語を拾う">
+                <span data-icon="pencil"></span><span>メモから取り込む</span>
+              </button>
+              <span id="context-memo-result" class="field-hint"></span>
+            </div>
+          </div>
+          <div class="field">
+            <div class="diag-log-head">
+              <span></span>
+              <div class="diag-log-actions">
+                <button type="button" id="btn-context-adopt-auto" class="pane-btn" title="拾った語を上の欄に移して自分で直せるようにする">
+                  <span data-icon="check"></span><span>上の欄に取り込む</span>
+                </button>
+              </div>
+            </div>
+            <div id="auto-context-box" class="auto-context-box"></div>
+            <small class="field-hint">
+              録音中に記録から自動で拾っています。誤変換をそのまま覚えないよう、
+              単純な頻度ではなく AI に「正しい表記」を判断させています。
+              おかしければ取り込んで直してください（<strong>上の欄が最終権限</strong>です）
+            </small>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label class="field field-row">
+            <input id="input-context-default" type="checkbox" />
+            <span>この内容を新しいタブの初期値にする</span>
+          </label>
+        </div>
       </div>
       <div class="modal-footer">
         <button id="btn-context-save" class="btn btn-primary">保存</button>
@@ -1123,18 +1131,18 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.95"></script>
-  <script src="motion.js?v=0.24.95"></script>
-  <script src="gemini.js?v=0.24.95"></script>
-  <script src="groq.js?v=0.24.95"></script>
-  <script src="notion.js?v=0.24.95"></script>
-  <script src="audio-store.js?v=0.24.95"></script>
-  <script src="claude-bridge.js?v=0.24.95"></script>
-  <script src="claude-installer.js?v=0.24.95"></script>
-  <script src="live-summary.js?v=0.24.95"></script>
-  <script src="image-store.js?v=0.24.95"></script>
-  <script src="gemini-files.js?v=0.24.95"></script>
-  <script src="term-dicts.js?v=0.24.95"></script>
-  <script src="app.js?v=0.24.95"></script>
+  <script src="icons.js?v=0.24.96"></script>
+  <script src="motion.js?v=0.24.96"></script>
+  <script src="gemini.js?v=0.24.96"></script>
+  <script src="groq.js?v=0.24.96"></script>
+  <script src="notion.js?v=0.24.96"></script>
+  <script src="audio-store.js?v=0.24.96"></script>
+  <script src="claude-bridge.js?v=0.24.96"></script>
+  <script src="claude-installer.js?v=0.24.96"></script>
+  <script src="live-summary.js?v=0.24.96"></script>
+  <script src="image-store.js?v=0.24.96"></script>
+  <script src="gemini-files.js?v=0.24.96"></script>
+  <script src="term-dicts.js?v=0.24.96"></script>
+  <script src="app.js?v=0.24.96"></script>
 </body>
 </html>

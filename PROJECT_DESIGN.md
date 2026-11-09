@@ -3554,3 +3554,7 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 開け閉めは高さと濃さをばねで（`Motion.reveal`）。› は回る。毎回たたんだ状態から（ふだん触らないものを置く場所なので覚えない）
   - 中の欄・保存のキーは変えていない（HTML の入れ子を変えただけ）。`openSettingsSection(id)`・`expandAllSettingsSections()` を足した（テストはたたんだ欄を触る前にひらく）
   - テスト: `tests/browser/t-settings-acc-browser.js`（新規）、`t-settings-structure.js`（まとまりの並び）。たたんだ欄を触る 4 本（`t-claude-fallback`・`t-groq`・`t-motion-dragsort`・`t-motion-settings`）は開いてから触るように。tests/browser を全部走らせた
+- 2026-11-09 (v0.24.96): **「この録音の文脈」の小窓を、設定と同じ形に並べ直した**（やっさん「このメニューのスタイルすごくいいので、この録音の文脈もこのスタイルに」）
+  - 見出しのあるまとまり: この録音について（分野・話者・よく出る語）／語彙辞書／自動で拾った内容（メモから取り込む・上の欄に取り込む）／新しいタブの初期値
+  - **説明の字は消していない。** CLAUDE.md「いまある画面の字は、一度にまとめて消さない。1 か所ずつやっさんに見てもらって減らす」のため。並べ替えだけ
+  - 欄の id・保存のしかたは変えていない。テスト: `tests/browser/t-context-modal-browser.js`（新規）
