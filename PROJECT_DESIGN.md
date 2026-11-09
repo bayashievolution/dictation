@@ -3414,3 +3414,8 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 保存・戻す記録・Notion に使う HTML から、ばねが書く形の宣言だけを取り除く（`Motion.stripMotionStyles` → `savableHtml`。`snapshotActiveToSession` / `syncBgToSession` / `paneHtml` / `getPaneHtml`）。ほかの style（メモの画像の幅や位置）は残す。取り除くものが無ければ文字列を変えない（変えると「中身が変わった」と見なされ、Notion に保存済みの印が外れる）。本文に書かれた「opacity: 0.5;」は style ではないので消さない
   - v0.24.60〜69 の間に保存されたものは、読み込むとき（`initSessions`）に取り除く
   - テスト: `tests/t-motion.js`（取り除き方6通り）、`tests/browser/t-motion-transcript-browser.js`（途中で保存しても入らない・前の版で入ってしまったものも開くと元どおり）
+- 2026-11-09 (v0.24.71): **描き直したときに、全部が一斉に出直さないようにした**（TODO「動きを SUMADO の仕様書に合わせる」の 10）
+  - 質問の吹き出し: CSS の keyframes が差し込むたびに走るので、送るたびに全部の吹き出しが出直していた。前に描いた数を覚えておき、増えた吹き出しだけふわっと（SPRINGS.fade・0.97 から。SUMADO の flipList の「新しい行」と同じ）。「考え中」が答えに変わったものは、吹き出しはそのままで中身だけふわっと。セッションを切り替えたときは動かさない
+  - 文字起こしの段落: `.paragraph` の keyframes（fadeInUp）と `.paragraph.refined` の keyframes（fadeInReplace）で、セッションを切り替えるたびに全部の段落が出直していた。新しい段落（`createParagraphEl`）だけ少し下からふわっと、整えた中身に差し替わった段落（`setParagraphContent` で refined のとき・画面にあるものだけ）だけふわっと
+  - `motion.js` に `place`（値を決めるが、ほかのばねは止めない）を足し、文字起こしの FLIP で使うようにした。set だと、差し替えたばかりの段落のふわっと（濃さ）まで止まる
+  - テスト: `tests/browser/t-motion-render-browser.js`（前からある吹き出しは濃さ 1 のまま・増えたものだけ途中の濃さ・keyframes なし・考え中→答えは中身だけ・切り替えでは動かさない・段落も同じ）。旧版では5件落ちる。ほかのブラウザのテストも全部通ることを確かめた
