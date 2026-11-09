@@ -1,0 +1,304 @@
+<title>設定の見本</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<style>
+/* 見本: サイドパネルの幅（〜420px）の設定画面。色はディクテーションの :root、記号は SUMADO の line-icons.js（24×24・線 1.8） */
+:root {
+  --bg: #1a1a1f; --bg-elevated: #23232a; --bg-subtle: #2d2d36; --border: #3a3a44;
+  --text: #e8e8eb; --muted: #9b9ba5; --faint: #6b6b73;
+  --accent: #34d399; --accent-dim: #34d39926; --heading: #7dd3fc; --danger: #f87171; --warn: #fbbf24;
+  --paid: #f9a8d4; --free: #34d399; --sub: #7dd3fc;
+  --font: 'Noto Sans JP', -apple-system, 'Segoe UI', 'Yu Gothic UI', sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg: #f4f5f7; --bg-elevated: #ffffff; --bg-subtle: #eceef2; --border: #d9dce3;
+  --text: #1d1f24; --muted: #60646e; --faint: #9095a0;
+  --accent: #059669; --accent-dim: #05966920; --heading: #0369a1; --danger: #dc2626; --warn: #b45309;
+  --paid: #be185d; --free: #059669; --sub: #0369a1; color-scheme: light; } }
+:root[data-theme="light"] {
+  --bg: #f4f5f7; --bg-elevated: #ffffff; --bg-subtle: #eceef2; --border: #d9dce3;
+  --text: #1d1f24; --muted: #60646e; --faint: #9095a0;
+  --accent: #059669; --accent-dim: #05966920; --heading: #0369a1; --danger: #dc2626; --warn: #b45309;
+  --paid: #be185d; --free: #059669; --sub: #0369a1; color-scheme: light; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 40px; }
+.wrap { max-width: 420px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.note { font-size: 12px; color: var(--muted); border: 1px dashed var(--border); border-radius: 10px; padding: 8px 12px; }
+.ico { width: 18px; height: 18px; flex: none; display: inline-flex; }
+.ico svg { width: 100%; height: 100%; }
+header { display: flex; align-items: center; justify-content: space-between; }
+header h1 { font-size: 18px; margin: 0; text-wrap: balance; }
+.btn { font: inherit; border: none; border-radius: 8px; padding: 7px 14px; cursor: pointer; background: var(--accent); color: var(--bg); font-weight: 700; }
+.btn.ghost { background: var(--bg-subtle); color: var(--text); font-weight: 500; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--heading); outline-offset: 2px; }
+
+/* いまの流れ */
+.flow { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.flow h2 { font-size: 12px; color: var(--muted); font-weight: 500; margin: 0 0 10px; letter-spacing: .04em; }
+.flow-row { display: grid; grid-template-columns: auto 14px 1fr 14px 1fr 14px 1fr; align-items: center; gap: 4px; }
+.node { appearance: none; font: inherit; color: var(--text); background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 10px;
+  padding: 7px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; min-width: 0; transition: transform .25s cubic-bezier(.34,1.56,.64,1); }
+.node:hover { transform: translateY(-2px); }
+.node .ico { width: 20px; height: 20px; color: var(--heading); }
+.node .what { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.node .who { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.node .cost { font-size: 10px; padding: 0 6px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.cost.free { color: var(--free); } .cost.paid { color: var(--paid); } .cost.sub { color: var(--sub); } .cost.off { color: var(--faint); }
+.node.mic { padding-inline: 8px; }
+.arrow { color: var(--faint); text-align: center; font-size: 12px; }
+.branch { margin-top: 8px; display: flex; align-items: center; gap: 8px; padding-left: 22%; }
+.branch .elbow { width: 14px; height: 16px; border-left: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint); border-bottom-left-radius: 6px; margin-top: -10px; }
+.branch .node { flex-direction: row; gap: 6px; padding: 5px 10px; }
+
+/* 見出しの札 */
+.chips { display: flex; gap: 6px; overflow-x: auto; position: sticky; top: env(safe-area-inset-top, 0px); background: var(--bg); padding-block: 6px; z-index: 5; scrollbar-width: none; }
+.chip { appearance: none; font: inherit; font-size: 12px; color: var(--muted); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; cursor: pointer; }
+.chip .ico { width: 15px; height: 15px; }
+.chip.on { color: var(--text); border-color: var(--accent); background: var(--accent-dim); }
+
+/* まとまり */
+section { scroll-margin-top: 52px; }
+section > h3 { display: flex; align-items: center; gap: 8px; font-size: 15px; margin: 6px 0 8px; }
+section > h3 .ico { color: var(--heading); width: 20px; height: 20px; }
+.box { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; transition: box-shadow .6s; }
+.box.flash { box-shadow: 0 0 0 2px var(--accent); }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px; min-height: 46px; }
+.row + .row, .row + .sub, .sub + .row, .more + .row { border-top: 1px solid var(--border); }
+.row .lbl { min-width: 0; }
+.row .lbl small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.row .val { color: var(--muted); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.row .val .ico { width: 14px; height: 14px; color: var(--faint); }
+.row.go { cursor: pointer; }
+.sub { padding: 0 14px 12px 14px; }
+select, input[type=text], input[type=password], input[type=number] { font: inherit; color: var(--text); background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; }
+input[type=number] { width: 72px; text-align: right; font-variant-numeric: tabular-nums; }
+input[type=password] { width: 100%; }
+
+/* 選ぶ（2〜3 個を横に並べる） */
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; padding: 12px 14px; }
+.seg button { appearance: none; font: inherit; text-align: left; color: var(--text); background: var(--bg-subtle); border: 1.5px solid var(--border); border-radius: 10px; padding: 8px 10px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; transition: border-color .2s, background .2s; }
+.seg button b { font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+.seg button small { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.seg button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-dim); }
+.seg.compact button { flex-direction: row; justify-content: center; align-items: center; text-align: center; }
+
+/* スイッチ（つまみはばね） */
+.sw { appearance: none; width: 44px; height: 26px; border-radius: 999px; background: var(--border); position: relative; cursor: pointer; flex: none; transition: background .2s; border: none; }
+.sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .35s cubic-bezier(.34,1.56,.64,1); }
+.sw:checked { background: var(--accent); }
+.sw:checked::after { transform: translateX(18px); }
+
+/* 詳しく（ばねで開く） */
+.more-toggle { appearance: none; width: 100%; font: inherit; font-size: 12.5px; color: var(--muted); background: none; border: none; border-top: 1px solid var(--border); padding: 9px 14px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+.more-toggle .ico { width: 14px; height: 14px; transition: transform .35s cubic-bezier(.34,1.56,.64,1); }
+.more-toggle[aria-expanded="true"] .ico { transform: rotate(90deg); }
+.more { overflow: hidden; height: 0; background: var(--bg-subtle); }
+.more .row + .row { border-top: 1px solid var(--border); }
+
+/* つなぐサービス */
+.svc { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; }
+.svc .name { font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.svc .role { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; }
+.state { font-size: 11.5px; display: inline-flex; align-items: center; gap: 4px; }
+.state.ok { color: var(--accent); } .state.no { color: var(--faint); }
+.state .ico { width: 14px; height: 14px; }
+.cond[hidden] { display: none !important; }
+footer { display: flex; justify-content: flex-end; gap: 8px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@media (max-width: 380px) { .node .what { display: none; } }
+</style>
+
+<div class="wrap">
+  <p class="note">見本です。押すと動きますが、本物の設定には反映されません。</p>
+  <header><h1>設定</h1><button class="btn ghost" type="button">完了</button></header>
+
+  <div class="flow" aria-label="いまの流れ">
+    <h2>いまの流れ（押すとその設定へ）</h2>
+    <div class="flow-row">
+      <button class="node mic" data-go="s-listen" type="button"><span class="ico" data-i="mic"></span><span class="what">マイク</span></button>
+      <span class="arrow">→</span>
+      <button class="node" data-go="s-listen" type="button"><span class="what">聞き取る</span><span class="who" id="f-listen">Groq</span><span class="cost free" id="f-listen-cost">無料</span></button>
+      <span class="arrow">→</span>
+      <button class="node" data-go="s-ai" type="button"><span class="what">整形</span><span class="who" id="f-refine">Claude</span><span class="cost sub" id="f-refine-cost">サブスク</span></button>
+      <span class="arrow">→</span>
+      <button class="node" data-go="s-ai" type="button"><span class="what">要約・質問</span><span class="who" id="f-sum">Claude</span><span class="cost sub" id="f-sum-cost">サブスク</span></button>
+    </div>
+    <div class="branch" id="f-branch">
+      <span class="elbow"></span>
+      <button class="node" data-go="s-listen" type="button"><span class="ico" data-i="user"></span><span class="what">話者判別</span><span class="who">Gemini</span><span class="cost paid" id="f-dia-cost">有料</span></button>
+    </div>
+  </div>
+
+  <nav class="chips" aria-label="設定の見出し">
+    <button class="chip on" data-go="s-listen" type="button"><span class="ico" data-i="mic"></span>聞き取り</button>
+    <button class="chip" data-go="s-ai" type="button"><span class="ico" data-i="sparkle"></span>AI の処理</button>
+    <button class="chip" data-go="s-svc" type="button"><span class="ico" data-i="link"></span>つなぐサービス</button>
+    <button class="chip" data-go="s-view" type="button"><span class="ico" data-i="frame"></span>表示</button>
+    <button class="chip" data-go="s-etc" type="button"><span class="ico" data-i="gear"></span>そのほか</button>
+  </nav>
+
+  <section id="s-listen">
+    <h3><span class="ico" data-i="mic"></span>聞き取り</h3>
+    <div class="box">
+      <div class="seg" id="mode">
+        <button type="button" data-v="ws" aria-pressed="false"><b><span class="ico" data-i="bolt"></span>Web Speech</b><small>文字起こしが高速・はっきりとした発声向け・システム既定マイクのみ</small></button>
+        <button type="button" data-v="ai" aria-pressed="true"><b><span class="ico" data-i="wave"></span>AI で聞き取る</b><small>文字起こしが10〜15秒遅延・小さな声に強い・任意のデバイス選択可</small></button>
+      </div>
+      <div class="cond" data-when="ai">
+        <div class="row"><div class="lbl">聞き取る AI</div></div>
+        <div class="seg compact" id="engine" style="padding-top:0">
+          <button type="button" data-v="gemini" aria-pressed="false"><b>Gemini</b></button>
+          <button type="button" data-v="groq" aria-pressed="true"><b>Groq Whisper</b></button>
+        </div>
+        <div class="row"><div class="lbl">音声入力デバイス</div><select id="dev"><option>システム既定</option><option>USB マイク</option></select></div>
+        <div class="row"><div class="lbl">リアルタイム表示<small>AI の結果が返るまで、Web Speech の文字を「未確定」で出す</small></div><input type="checkbox" class="sw" id="live" checked></div>
+        <div class="row"><div class="lbl">話者判別<small>録音をこの PC の Chrome の中に一時保存（Google ドライブには保存しません）</small></div><input type="checkbox" class="sw" id="dia" checked></div>
+        <div class="row cond" data-when="dia" id="row-ret"><div class="lbl">音声ファイル</div><select id="ret"><option>タブを閉じたら消す</option><option>話者判別が終わったら消す</option><option>1日たったら消す</option><option>7日たったら消す</option><option>手動で消すまで残す</option></select></div>
+      </div>
+      <div class="row"><div class="lbl">無音が続いたら止めるか確認</div><input type="checkbox" class="sw" checked></div>
+      <button class="more-toggle" type="button" aria-expanded="false"><span>詳しく（チャンク・音質など）</span><span class="ico" data-chev></span></button>
+      <div class="more">
+        <div class="row"><div class="lbl">チャンク長（秒）</div><input type="number" value="12" aria-label="チャンク長"></div>
+        <div class="row"><div class="lbl">無音の切れ目で送信</div><input type="checkbox" class="sw" checked></div>
+        <div class="row"><div class="lbl">最長待ち時間（秒）</div><input type="number" value="20" aria-label="最長待ち時間"></div>
+        <div class="row"><div class="lbl">音声送信しきい値（バイト）</div><input type="number" value="400" aria-label="しきい値"></div>
+        <div class="row"><div class="lbl">音質</div><select><option>64 kbps（90分で約43MB）</option><option>128 kbps</option></select></div>
+        <div class="row"><div class="lbl">止めるか確認するまで（秒）</div><input type="number" value="120" aria-label="無音時間"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="s-ai">
+    <h3><span class="ico" data-i="sparkle"></span>AI の処理</h3>
+    <div class="box">
+      <div class="row"><div class="lbl">ライブ整形<small>句読点・段落・見出しを入れる</small></div><input type="checkbox" class="sw" id="refine" checked></div>
+      <div class="row"><div class="lbl">ライブ要約<small>目次つきの要約を録音中に更新</small></div><input type="checkbox" class="sw" checked></div>
+      <div class="row"><div class="lbl">止めたら要約・タイトルを作る</div><input type="checkbox" class="sw" checked></div>
+      <div class="row"><div class="lbl">要約の詳しさ</div></div>
+      <div class="seg compact" style="padding-top:0"><button type="button" aria-pressed="false"><b>簡潔</b></button><button type="button" aria-pressed="true"><b>標準</b></button><button type="button" aria-pressed="false"><b>詳しく</b></button></div>
+      <button class="more-toggle" type="button" aria-expanded="false"><span>詳しく（タイミング・失敗したとき）</span><span class="ico" data-chev></span></button>
+      <div class="more">
+        <div class="row"><div class="lbl">ライブ整形のタイミング（秒）</div><input type="number" value="3" aria-label="ライブ整形のタイミング"></div>
+        <div class="row"><div class="lbl">見出し追加のタイミング（秒）</div><input type="number" value="300" aria-label="見出し追加"></div>
+        <div class="row"><div class="lbl">ライブ要約の間隔（分）</div><input type="number" value="10" aria-label="ライブ要約の間隔"></div>
+        <div class="row"><div class="lbl">Claude で失敗したら Gemini で処理</div><input type="checkbox" class="sw"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="s-svc">
+    <h3><span class="ico" data-i="link"></span>つなぐサービス</h3>
+    <div class="box">
+      <div class="row go" data-key="k-gemini"><div class="svc"><span class="name">Gemini</span><span class="state ok"><span class="ico" data-i="tick"></span>キーあり</span><span class="role" id="r-gemini">話者判別・失敗したときの代わり</span></div><span class="val"><span class="ico" data-chev></span></span></div>
+      <div class="sub cond" id="k-gemini" hidden><input type="password" value="AIzaSy-example" aria-label="Gemini API キー"></div>
+      <div class="row go" data-key="k-groq"><div class="svc"><span class="name">Groq</span><span class="state ok"><span class="ico" data-i="tick"></span>キーあり</span><span class="role" id="r-groq">聞き取り</span></div><span class="val"><span class="ico" data-chev></span></span></div>
+      <div class="sub cond" id="k-groq" hidden><input type="password" value="gsk_example" aria-label="Groq API キー"></div>
+      <div class="row go" data-key="k-claude"><div class="svc"><span class="name">Claude Code</span><span class="state ok"><span class="ico" data-i="tick"></span>つながっています</span><span class="role">整形・要約・質問・タイトル</span></div><span class="val"><span class="ico" data-chev></span></span></div>
+      <div class="sub cond" id="k-claude" hidden><button class="btn ghost" type="button">接続を確認</button></div>
+      <div class="row go" data-key="k-notion"><div class="svc"><span class="name">Notion</span><span class="state no">未設定</span><span class="role">記録の保存先</span></div><span class="val"><span class="ico" data-chev></span></span></div>
+      <div class="sub cond" id="k-notion" hidden><input type="password" placeholder="ntn_..." aria-label="Notion のアクセストークン"></div>
+    </div>
+  </section>
+
+  <section id="s-view">
+    <h3><span class="ico" data-i="frame"></span>表示</h3>
+    <div class="box">
+      <div class="row go"><div class="lbl">タブの順序</div><span class="val">文字起こし・メモ…<span class="ico" data-chev></span></span></div>
+      <div class="row go"><div class="lbl">フォントと文字サイズ</div><span class="val">ゴシック 17px<span class="ico" data-chev></span></span></div>
+    </div>
+  </section>
+
+  <section id="s-etc">
+    <h3><span class="ico" data-i="gear"></span>そのほか</h3>
+    <div class="box">
+      <div class="row"><div class="lbl">SUMADO のアイランドに声のメーター</div><input type="checkbox" class="sw"></div>
+      <div class="row go"><div class="lbl">字幕（開発中）</div><span class="val"><span class="ico" data-chev></span></span></div>
+      <div class="row go"><div class="lbl">診断ログ</div><span class="val">警告 0 件<span class="ico" data-chev></span></span></div>
+    </div>
+  </section>
+
+  <footer><button class="btn" type="button">保存</button></footer>
+</div>
+
+<script>
+const ICONS = {"mic":"<rect x=\"9\" y=\"3\" width=\"6\" height=\"11\" rx=\"3\"/><path d=\"M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7\"/>","wave":"<path d=\"M4 12h1.5M7.5 8v8M11 5v14M14.5 9v6M18 7v10M20.5 12H20\"/>","sparkle":"<path d=\"M12 3.5l1.8 5.2 5.2 1.8-5.2 1.8L12 17.5l-1.8-5.2L5 10.5l5.2-1.8z\"/><path d=\"M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z\"/>","link":"<path d=\"M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1\"/><path d=\"M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1\"/>","frame":"<rect x=\"8\" y=\"3\" width=\"8\" height=\"18\" rx=\"2.2\"/><path d=\"M3.5 9v6M20.5 9v6\"/>","gear":"<circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M12 2.8l1.6 2.4 2.8-.6.6 2.8 2.4 1.6-1.4 2.5 1.4 2.5-2.4 1.6-.6 2.8-2.8-.6L12 21.2l-1.6-2.4-2.8.6-.6-2.8-2.4-1.6L6 12.5 4.6 10l2.4-1.6.6-2.8 2.8.6z\"/>","user":"<circle cx=\"12\" cy=\"8.5\" r=\"3.8\"/><path d=\"M4.8 20a7.2 7.2 0 0 1 14.4 0\"/>","clock":"<circle cx=\"12\" cy=\"12\" r=\"8.5\"/><path d=\"M12 7.5V12l3 2\"/>","note":"<path d=\"M6 3.5h9l3.5 3.5V20a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z\"/><path d=\"M8.5 10h7M8.5 13.5h7M8.5 17h4\"/>","chat":"<path d=\"M20 12a7.5 7.5 0 0 1-11 6.6L4 20l1.4-4.5A7.5 7.5 0 1 1 20 12z\"/>","bolt":"<path d=\"M13 3L5.5 13.5H12L11 21l7.5-10.5H12z\"/>","tick":"<path d=\"M5.5 12.5l4 4 9-9.5\"/>","info":"<circle cx=\"12\" cy=\"12\" r=\"8.5\"/><path d=\"M12 11v5.5M12 7.5h.01\"/>","warn":"<path d=\"M12 4l9 15.5H3z\"/><path d=\"M12 10v4.5M12 17h.01\"/>","record":"<circle cx=\"12\" cy=\"12\" r=\"8.5\"/><circle cx=\"12\" cy=\"12\" r=\"3.5\" fill=\"currentColor\" stroke=\"none\"/>","search":"<circle cx=\"10.5\" cy=\"10.5\" r=\"6.2\"/><path d=\"M15.2 15.2L20 20\"/>","pen":"<path d=\"M4 20h4L19 9l-4-4L4 16z\"/><path d=\"M13.5 6.5l4 4\"/>","cloud":"<path d=\"M7.5 18.5h9.5a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6 1.4A3.3 3.3 0 0 0 7.5 18.5z\"/>","check":"<circle cx=\"12\" cy=\"12\" r=\"8.5\"/><path d=\"M8 12.3l2.8 2.8L16.3 9.5\"/>","folder":"<path d=\"M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z\"/>","apps":"<rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"4\"/><path d=\"M12 8.5v7M8.5 12h7\"/>","globe":"<circle cx=\"12\" cy=\"12\" r=\"8.5\"/><path d=\"M3.5 12h17M12 3.5c2.5 2.5 3.5 5.5 3.5 8.5s-1 6-3.5 8.5c-2.5-2.5-3.5-5.5-3.5-8.5s1-6 3.5-8.5z\"/>","code":"<path d=\"M8.5 7.5L4 12l4.5 4.5M15.5 7.5L20 12l-4.5 4.5M13.5 5l-3 14\"/>"};
+// SUMADO の GLYPHS.chevronRight（icons.js）
+const CHEV = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 L17 12 L9 20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const S = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+document.querySelectorAll('[data-i]').forEach(n => { n.innerHTML = S(ICONS[n.dataset.i] || ''); });
+document.querySelectorAll('[data-chev]').forEach(n => { n.innerHTML = CHEV; });
+
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// ばね（SUMADO の spring に近い減衰振動）で高さを動かす
+function springHeight(el, to, done) {
+  if (reduce) { el.style.height = to === 'auto' ? 'auto' : to + 'px'; done && done(); return; }
+  let x = el.getBoundingClientRect().height, v = 0;
+  const target = to === 'auto' ? el.scrollHeight : to;
+  const k = 260, c = 24;
+  let last = performance.now();
+  cancelAnimationFrame(el._raf);
+  const step = now => {
+    const dt = Math.min(0.032, (now - last) / 1000); last = now;
+    const a = -k * (x - target) - c * v; v += a * dt; x += v * dt;
+    el.style.height = Math.max(0, x) + 'px';
+    if (Math.abs(x - target) < 0.5 && Math.abs(v) < 5) { el.style.height = to === 'auto' ? 'auto' : target + 'px'; done && done(); return; }
+    el._raf = requestAnimationFrame(step);
+  };
+  el._raf = requestAnimationFrame(step);
+}
+function reveal(el, show) {
+  if (show === !el.hidden) return;
+  if (show) { el.hidden = false; el.style.overflow = 'hidden'; el.style.height = '0px'; springHeight(el, 'auto', () => el.style.overflow = ''); }
+  else { el.style.overflow = 'hidden'; el.style.height = el.scrollHeight + 'px'; springHeight(el, 0, () => { el.hidden = true; el.style.height = ''; el.style.overflow = ''; }); }
+}
+
+document.querySelectorAll('.more-toggle').forEach(b => b.addEventListener('click', () => {
+  const open = b.getAttribute('aria-expanded') !== 'true';
+  b.setAttribute('aria-expanded', open);
+  springHeight(b.nextElementSibling, open ? 'auto' : 0);
+}));
+document.querySelectorAll('.seg').forEach(seg => seg.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  update();
+}));
+document.querySelectorAll('.row.go[data-key]').forEach(r => r.addEventListener('click', () => {
+  const t = document.getElementById(r.dataset.key); reveal(t, t.hidden);
+}));
+document.querySelectorAll('input.sw').forEach(s => s.addEventListener('change', update));
+
+function pressed(id) { const b = document.querySelector(`#${id} [aria-pressed="true"]`); return b && b.dataset.v; }
+function setNode(id, who, cost, cls) {
+  document.getElementById(id).textContent = who;
+  const c = document.getElementById(id + '-cost'); c.textContent = cost; c.className = 'cost ' + cls;
+}
+function update() {
+  const ai = pressed('mode') === 'ai';
+  document.querySelectorAll('.cond[data-when="ai"]').forEach(n => reveal(n, ai));
+  reveal(document.getElementById('row-ret'), document.getElementById('dia').checked);
+  const groq = pressed('engine') === 'groq';
+  if (!ai) setNode('f-listen', 'Web Speech', '無料', 'free');
+  else if (groq) setNode('f-listen', 'Groq', '無料', 'free');
+  else setNode('f-listen', 'Gemini', '有料', 'paid');
+  const refine = document.getElementById('refine').checked;
+  if (refine) setNode('f-refine', 'Claude', 'サブスク', 'sub'); else setNode('f-refine', 'なし', 'オフ', 'off');
+  reveal(document.getElementById('f-branch'), ai && document.getElementById('dia').checked);
+  document.getElementById('r-groq').textContent = ai && groq ? '聞き取り' : '使っていません';
+  document.getElementById('r-gemini').textContent = (ai && !groq ? '聞き取り・' : '') + '話者判別・失敗したときの代わり';
+}
+
+// 流れの箱・見出しの札 → その設定へ
+document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => {
+  const sec = document.getElementById(b.dataset.go);
+  sec.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  const box = sec.querySelector('.box'); box.classList.add('flash'); setTimeout(() => box.classList.remove('flash'), 900);
+}));
+const chips = [...document.querySelectorAll('.chip')];
+const io = new IntersectionObserver(es => es.forEach(e => {
+  if (e.isIntersecting) chips.forEach(c => c.classList.toggle('on', c.dataset.go === e.target.id));
+}), { rootMargin: '-45% 0px -50% 0px' });
+document.querySelectorAll('section').forEach(s => io.observe(s));
+update();
+</script>
