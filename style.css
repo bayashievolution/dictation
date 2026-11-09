@@ -223,7 +223,21 @@ html, body {
   white-space: nowrap;
 }
 .status.island.has-detail .status-text { padding-right: 24px; }
-.status-text-ghost { z-index: 2; }
+/* v0.24.82: 字が変わるとき、古い字は札の中（::before）でさっと消える。札の形で切れるので、縮むときに枠から飛び出さない。
+   場所（--old-right）と濃さ（--old-o）は app.js の installStatusIsland が書く */
+.status.island[data-old-text]::before {
+  content: attr(data-old-text);
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: var(--old-right, 0px);
+  display: flex;
+  align-items: center;
+  padding: 3px var(--old-pad-right, 10px) 3px 10px;
+  white-space: nowrap;
+  opacity: var(--old-o, 0);
+  pointer-events: none;
+}
 
 .status.idle {
   background: var(--bg-subtle);

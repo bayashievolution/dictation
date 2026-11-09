@@ -727,6 +727,10 @@ function installStatusIsland() {
   let pending = false;
   let changed = false;
   let oldText = '';
+  let oldRect = null;   // 古い字があった場所（字を入れ替える前に測る）
+  // 古い字の濃さ（::before なのでスクリプトで直接動かせない。見えない要素をばねで動かし、CSS の変数に写す）
+  const oldDriver = document.createElement('span');
+  Motion.onFrame(oldDriver, ({ x }) => { box.style.setProperty('--old-o', String(Math.max(0, Math.min(1, x)))); });
   // 字・クラスの変化は同じ処理の中で続けて起きる（setStatus のあとに has-detail を付ける等）。まとめて 1 回動かす
   const schedule = () => {
     if (pending) return;
@@ -736,25 +740,28 @@ function installStatusIsland() {
       const { w, h } = natural();
       if (!changed) { morph.to(w, h); return; }
       changed = false;
+      captured = false;
       clearTimers();
-      // 1. いまの字は、札の外に置いた写しで先にさっと消す
+      // 1. いまの字は、先にさっと消す
+      // v0.24.82: 古い字は札の ::before（content: attr(data-old-text)）に出す。札の中なので、札が縮むと札の形で切れる
+      // （SUMADO のアイランドも中身は形の中にある）。textContent にも混ざらない。
+      // 前は札の外に写しを置いていて、(1) 字を入れ替えたあとに場所を測っていたので、新しい短い字の場所に置かれて右にずれ、
+      // (2) 右上の欄の左の端から置いていたので、札が縮むと欄と一緒に右へ流れ、枠から飛び出していた
+      // （やっさん報告「文字が枠を飛び出して右にすっ飛んでいく」）
       if (oldText) {
-        const r = text.getBoundingClientRect();
-        const host = box.parentElement;
-        const hr = host.getBoundingClientRect();
-        const g = document.createElement('span');
-        g.className = 'status-text-ghost';
-        g.setAttribute('aria-hidden', 'true');
-        g.textContent = oldText;
-        // v0.24.76: 字の形は 1 つずつ写す。Chrome は font（まとめた書き方）を空で返すので、前は 16px の大きな字で消えていた
-        const cs = getComputedStyle(text);
+        const r = oldRect || text.getBoundingClientRect();
+        const br = box.getBoundingClientRect();
         const z = Motion.zoom();
-        Object.assign(g.style, { position: 'absolute', left: `${(r.left - hr.left) / z}px`, top: `${(r.top - hr.top) / z}px`,
-          fontSize: cs.fontSize, fontFamily: cs.fontFamily, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight,
-          letterSpacing: cs.letterSpacing, fontFeatureSettings: cs.fontFeatureSettings,
-          padding: cs.padding, boxSizing: 'border-box', color: getComputedStyle(box).color, whiteSpace: 'nowrap', pointerEvents: 'none' });
-        host.appendChild(g);
-        Motion.animate(g, { opacity: 0 }, { spring: M.contentOut }).then(() => g.remove());
+        box.dataset.oldText = oldText;
+        box.style.setProperty('--old-right', `${(br.right - r.right) / z}px`);
+        Motion.set(oldDriver, { x: 1 });
+        Motion.animate(oldDriver, { x: 0 }, { spring: M.contentOut }).then((d) => {
+          if (!d) return;
+          delete box.dataset.oldText;
+          box.style.removeProperty('--old-o');
+          box.style.removeProperty('--old-right');
+          box.style.removeProperty('--old-pad-right');
+        });
       }
       // 2. 形は、字をしまってから新しい大きさへ（伸びるなら横が先・縦が遅れて、縮むなら一瞬行き過ぎて）
       later(M.shapeAfterOut, () => morph.to(w, h));
@@ -765,11 +772,26 @@ function installStatusIsland() {
       });
     });
   };
+  // 古い字と、その場所・右の余白を覚える。class を書き換える前に呼ぶ（setStatus は class を書き直してから字を入れるので、
+  // 字を入れるときに測ると、› が外れたあとの余白・場所になってしまう）
+  let captured = false;
+  const capture = () => {
+    if (captured) return;
+    captured = true;
+    oldText = shownText;
+    oldRect = text.getBoundingClientRect();
+    // 右の余白は、› が付いているとき（has-detail）は広い。古い字の余白のまま消す
+    box.style.setProperty('--old-pad-right', getComputedStyle(text).paddingRight);
+  };
   statusIsland = {
+    /** これから字を label に変えるなら、いまの字を覚えておく（setStatus が class を書き換える前に呼ぶ） */
+    prepare(label) {
+      if (String(label == null ? '' : label) !== shownText && !changed) capture();
+    },
     setText(label) {
       const t = String(label == null ? '' : label);
       if (t !== shownText) {
-        if (!changed) oldText = shownText;
+        if (!changed) capture();
         changed = true;
         shownText = t;
         text.textContent = t;
@@ -794,6 +816,7 @@ function installStatusIsland() {
 }
 
 function setStatus(mode, label, detail) {
+  if (statusIsland) statusIsland.prepare(label);   // v0.24.82: class を書き換える前に、いまの字の場所を覚える
   els.status.className = `status ${mode}` + (statusIsland ? ' island' : '');
   if (statusIsland) statusIsland.setText(label);
   else els.status.textContent = label;

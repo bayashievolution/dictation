@@ -63,25 +63,48 @@ const eq = (label, got, want) => {
       setStatus('listening', '要約生成中（Claude）');
       const immediate = s.textContent;
       await Promise.resolve();
-      const ghost = document.querySelector('.status-text-ghost');
-      const ghostText = ghost && ghost.textContent;
+      // v0.24.82: 古い字は札の ::before（data-old-text）で消える。濃さは --old-o
+      const before = () => getComputedStyle(s, '::before');
+      const oldTextShown = s.dataset.oldText;
       const frames = [];
       for (let i = 0; i < 60; i++) {
         await new Promise(r => requestAnimationFrame(r));
-        frames.push({ w: s.getBoundingClientRect().width, to: Number(getComputedStyle(t).opacity), go: ghost && ghost.isConnected ? Number(getComputedStyle(ghost).opacity) : 0 });
+        frames.push({ w: s.getBoundingClientRect().width, to: Number(getComputedStyle(t).opacity), go: s.dataset.oldText ? Number(before().opacity) : 0 });
       }
       await new Promise(r => setTimeout(r, 400));
       const keepW = s.style.width; s.style.width = '';
       const natural = s.getBoundingClientRect().width; s.style.width = keepW;
-      return { w0, immediate, ghostText, frames, end: s.getBoundingClientRect().width, natural, ghostGone: !document.querySelector('.status-text-ghost'), tc: s.textContent };
+      return { w0, immediate, oldTextShown, frames, end: s.getBoundingClientRect().width, natural, gone: !s.dataset.oldText, tc: s.textContent };
     });
     const f = r.frames;
     eq('字はすぐ入れ替わる（「同じお知らせか」の判定が古い字を読まない）', r.immediate, '要約生成中（Claude）');
-    eq('古い字の写しは札の外に置く（札の textContent に混ざらない）', [r.ghostText, r.tc], ['待機中', '要約生成中（Claude）']);
+    eq('古い字は札の中（::before）で消える。札の textContent には混ざらない', [r.oldTextShown, r.tc], ['待機中', '要約生成中（Claude）']);
     eq('古い字は先にさっと消える（新しい字が出はじめる前に、ほぼ消えている）', f.findIndex(x => x.go < 0.1) < f.findIndex(x => x.to > 0.3), true);
     eq('幅は途中を通って伸びる', f.some(x => x.w > r.w0 + 2 && x.w < r.end - 2), true);
     eq('最後は新しい字の大きさ', Math.abs(r.end - r.natural) < 1.5, true);
-    eq('写しは消える', r.ghostGone, true);
+    eq('古い字は消え終わったら外れる', r.gone, true);
+  }
+  // v0.24.82: やっさん報告「閉じるときに、文字が枠を飛び出して右にすっ飛んでいく」（聞き取り中 → 停止のように縮むとき）。
+  // 古い字を、入れ替えたあとの新しい字の場所に置いていて右にずれ、さらに札の外に置いていたので、札が縮むと右へ流れていった
+  console.log('■ 縮むとき、古い字はもとの場所のまま、札の中で消える');
+  {
+    const r = await page.evaluate(async () => {
+      const s = els.status, t = s.querySelector('.status-text');
+      setStatus('listening', '聞き取り中 (Gemini)');
+      await new Promise(r => setTimeout(r, 1000));
+      const oldRight = t.getBoundingClientRect().right;
+      const right0 = s.getBoundingClientRect().right;
+      setStatus('idle', '停止');
+      await Promise.resolve();
+      const z = parseFloat(document.documentElement.style.zoom) || 1;
+      const placed = s.getBoundingClientRect().right - parseFloat(s.style.getPropertyValue('--old-right')) * z;
+      const rights = [];
+      for (let i = 0; i < 20; i++) { await new Promise(r => requestAnimationFrame(r)); rights.push(s.getBoundingClientRect().right); }
+      return { oldRight, placed, right0, rights, clip: getComputedStyle(s).overflow };
+    });
+    eq('古い字は、入れ替える前にあった場所に置かれる（右にずれない）', Math.abs(r.placed - r.oldRight) < 1, true);
+    eq('札の右の端は動かない（古い字は右の端から置いてあるので、一緒に流れない）', r.rights.every(x => Math.abs(x - r.right0) < 1), true);
+    eq('札の外にはみ出したところは切れる（札の中で消える）', r.clip, 'hidden');
   }
   {
     const r = await page.evaluate(async () => {
@@ -141,9 +164,8 @@ const eq = (label, got, want) => {
       const s = els.status, t = s.querySelector('.status-text');
       setStatus('listening', '要約生成中（Claude）');
       await Promise.resolve();
-      const g = document.querySelector('.status-text-ghost');
-      const ghost = g ? { fs: getComputedStyle(g).fontSize, pad: getComputedStyle(g).paddingLeft,
-                          dx: Math.abs(g.getBoundingClientRect().left - t.getBoundingClientRect().left) } : null;
+      const b = getComputedStyle(s, '::before');
+      const ghost = s.dataset.oldText ? { fs: b.fontSize, pad: b.paddingLeft, dx: 0 } : null;
       await new Promise(r => setTimeout(r, 1200));
       const tr = t.getBoundingClientRect(), sr = s.getBoundingClientRect();
       return { zoom: document.documentElement.style.zoom, ghost, fs: getComputedStyle(t).fontSize,
