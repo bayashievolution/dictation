@@ -56,16 +56,66 @@ const CLAUDE_BRIDGE_FEATURES = new Set([
 ]);
 
 /**
- * Claude で失敗しても Gemini に回さない処理 (v0.24.52)
+ * Claude で失敗したら Gemini に回すか (v0.24.58・設定「Claude Codeでの処理に失敗したらGemini APIで処理する」)
  *
- * やっさん「切替はせずに行こう　これまで通りエラーは出してもらう」
- * 「とにかく料金はこれ以上高くなるのは避けたい」「最低限Geminiでの文字起こしができていればなんとかなる」。
- * 録音中は数十秒ごとに呼ぶので、連携が切れたまま Gemini に戻すと気づかないうちに課金が積み上がる。
- * 整形できなかった段落は生の文字のまま「再試行待ち」で残り、あとで「今すぐ整形」できる。
- * 要約などは従来どおり Gemini に戻す（1回きりで、無いと困るため）。
+ * v0.24.52 では「録音中の整形・見出し付けだけは回さない、要約などは回す」と決め打ちにしていた
+ * （やっさん「切替はせずに行こう」「料金はこれ以上高くなるのは避けたい」）。
+ * そのあと要約が Claude の時間切れで Gemini に回り、やっさんから
+ * 「失敗したら Gemini で処理するトグルを付けてほしい」「オフの時は3回リトライする」。
+ *
+ * オン … 失敗したらその場で Gemini（リトライしない）
+ * オフ … Gemini には回さず、Claude でもう3回試す（待っても直らない失敗は試し直さない）。それでも駄目ならエラー
+ * 既定はオフ（料金を増やさないほうに倒す）。
  */
-const CLAUDE_BRIDGE_NO_FALLBACK = new Set(['live-refine', 'live-heading']);
-function claudeBridgeNoFallback(feature) { return CLAUDE_BRIDGE_NO_FALLBACK.has(feature); }
+let _claudeBridgeFallback = false;
+function claudeBridgeSetFallback(on) { _claudeBridgeFallback = !!on; }
+function claudeBridgeFallbackEnabled() { return _claudeBridgeFallback; }
+function claudeBridgeNoFallback(feature) { return !_claudeBridgeFallback && claudeBridgeFeatureAllowed(feature); }
+
+/** オフのときに Claude で試し直す回数 (v0.24.58・やっさんの指定) */
+const CLAUDE_BRIDGE_RETRIES = 3;
+
+/**
+ * その失敗は試し直す価値があるか (v0.24.58)
+ * ログイン切れ・未インストール・長すぎるは、何度やっても同じなので試し直さない（待たせるだけ）。
+ * 時間切れ・claude の一時的な失敗は試し直す
+ */
+function claudeBridgeShouldRetry(error) {
+  const e = String(error || '');
+  if (claudeBridgeIsFatal(e)) return false;
+  if (/インストールされていません|別の場所の拡張用|長すぎます|プロンプトが空/.test(e)) return false;
+  return true;
+}
+
+/**
+ * 1回目に待つ時間を、送る量で決める (v0.24.58)
+ *
+ * やっさん「内容の量に合わせて待ち時間を決めているの？」→ それまでは決め打ちだった
+ * （要約など 180秒・ライブ整形 120秒）。実機では文字起こし 1.8万字のライブ要約に 144.8秒かかっていて、
+ * 長い講義の要約が 180秒で時間切れになり Gemini に回っていた。
+ * 1000字ごとに 10秒を足す（1.8万字なら 120 + 180 = 300秒）。録音中のものは短いので下限を 60秒にする。
+ * @param {number} chars  送る文字数
+ * @param {boolean} live  録音中に数十秒ごとに呼ぶものか
+ */
+function claudeBridgeTimeoutFor(chars, live) {
+  const n = Math.max(0, Number(chars) || 0);
+  const ms = (live ? 60000 : 120000) + Math.round(n / 1000) * 10000;
+  return Math.min(live ? 300000 : 900000, ms);
+}
+
+/**
+ * 試し直すたびに、待つ時間を少し延ばす (v0.24.58・やっさん「3回リトライの度にタイムアウトをちょっと伸ばす」)
+ * 1回目の値（claudeBridgeTimeoutFor）の 25% ずつ足す（300秒なら 300 → 375 → 450 → 525 秒）。上限はホストと同じ 900 秒
+ * @param {number} baseMs   1回目の待ち時間
+ * @param {number} attempt  0 が1回目、1 が1回目の試し直し…
+ */
+function claudeBridgeRetryTimeout(baseMs, attempt) {
+  return Math.min(900000, Math.round(baseMs * (1 + 0.25 * Math.max(0, attempt))));
+}
+
+/** 録音中に数十秒ごとに呼ぶもの。考え込ませず（effort low）、会話を切らずに呼ぶ (v0.24.52〜53) */
+const CLAUDE_BRIDGE_LIVE = new Set(['live-refine', 'live-heading']);
+function claudeBridgeIsLive(feature) { return CLAUDE_BRIDGE_LIVE.has(feature); }
 
 let _claudeBridgeEnabled = false;
 
@@ -377,11 +427,18 @@ async function claudeBridgeRunHttp(prompt, { url = CLAUDE_BRIDGE_URL, signal, tu
  * 理由の部分は claudeBridgeFallbackMessage と同じにして、言い回しがずれないようにする。
  * 「Gemini で処理」と出すと、実際には処理していないので嘘になる
  */
-function claudeBridgeNoFallbackMessage(error) {
+function claudeBridgeNoFallbackMessage(error, feature = 'live-refine') {
   const m = claudeBridgeFallbackMessage(error);
+  // v0.24.58: 要約なども Gemini に回さなくなったので、何ができなかったかを処理ごとに言う
+  const what = {
+    'live-refine': '整形せずに残しました', 'live-heading': '整形せずに残しました',
+    'whole-refine': '整形できませんでした', summary: '要約できませんでした',
+    title: 'タイトルを付けられませんでした', chat: '答えられませんでした',
+    'memo-refine': 'メモを整形できませんでした',
+  }[feature] || '処理できませんでした';
   const hit = m.match(/^(.*?)ので\s*Gemini で処理(?:しました)?(（[^）]*）)?$/);
   if (!hit) return `${m}（Gemini には回していません）`;
-  return `${hit[1]}ので整形せずに残しました${hit[2] || ''}`;
+  return `${hit[1]}ので${what}${hit[2] || ''}`;
 }
 
 function claudeBridgeFallbackMessage(error) {

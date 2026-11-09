@@ -39,7 +39,9 @@ async function open(browser, { useClaudeBridge = false, blockHealth = false, cla
   // 設定を先に置いてから読み込む（起動時に読まれるかを見たいので）
   await page.goto(URL);
   await page.evaluate(([k, v]) => localStorage.setItem(k, JSON.stringify(v)),
-                      [SETTINGS_KEY, { useClaudeBridge, ...(claudeCode !== undefined ? { claudeCode } : {}) }]);
+                      // v0.24.58: このファイルは「Gemini に戻したとき」を見るので、「失敗したら Gemini で処理する」をオンにしておく
+                      // （オフのとき＝戻さずに試し直すほうは t-claude-fallback-browser.js）
+                      [SETTINGS_KEY, { useClaudeBridge, claudeFallbackGemini: true, ...(claudeCode !== undefined ? { claudeCode } : {}) }]);
   if (blockHealth) await page.route('**/api/claude/health', r => r.abort());
   await page.reload();
   await page.waitForTimeout(900);

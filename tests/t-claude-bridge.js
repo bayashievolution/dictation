@@ -167,9 +167,10 @@ console.log('\n■ Gemini に戻したときの文言（理由を言い分ける
 
 
 /* v0.24.52: 録音中の整形は Gemini に回さない。「Gemini で処理」と出すと嘘になる */
-vm.runInContext(grab(src, 'claudeBridgeNoFallbackMessage') + '\n' + grab(src, 'claudeBridgeNoFallback')
-  + '\n' + (/const CLAUDE_BRIDGE_NO_FALLBACK = new Set\(\[[\s\S]*?\]\);/.exec(src) || ['const CLAUDE_BRIDGE_NO_FALLBACK = new Set();'])[0]
-  .replace('const ', 'var '), ctx);
+// v0.24.58: 戻すかどうかは設定「Claude Codeでの処理に失敗したらGemini APIで処理する」で決める
+vm.runInContext(['var _claudeBridgeFallback = false;', grab(src, 'claudeBridgeNoFallbackMessage'), grab(src, 'claudeBridgeNoFallback'),
+  grab(src, 'claudeBridgeSetFallback'), grab(src, 'claudeBridgeIsFatal'), grab(src, 'claudeBridgeShouldRetry'),
+  grab(src, 'claudeBridgeTimeoutFor'), grab(src, 'claudeBridgeRetryTimeout')].join('\n'), ctx);
 console.log('\n■ Gemini に回さなかったときの文言（v0.24.52）');
 {
   const m = (e) => ctx.claudeBridgeNoFallbackMessage(e);
@@ -183,9 +184,36 @@ console.log('\n■ Gemini に回さなかったときの文言（v0.24.52）');
   is('知らないエラー', m('終了コード 1'), 'Claude で処理できなかったので整形せずに残しました');
   is('時間切れ', m('60秒待っても返事がありませんでした'), 'Claude が時間内に返さないので整形せずに残しました');
   is('「Gemini で処理」とは言わない', /Gemini で処理/.test(m('x') + m('') + m('spawn claude ENOENT')), false);
-  is('ライブ整形は戻さない', ctx.claudeBridgeNoFallback('live-refine'), true);
-  is('見出し追加も戻さない', ctx.claudeBridgeNoFallback('live-heading'), true);
-  is('要約は従来どおり戻す', ctx.claudeBridgeNoFallback('summary'), false);
+  // v0.24.58: 要約なども回さなくなったので、何ができなかったかを処理ごとに言う
+  is('要約', ctx.claudeBridgeNoFallbackMessage('180秒待っても返事がありませんでした', 'summary'), 'Claude が時間内に返さないので要約できませんでした');
+  is('タイトル', ctx.claudeBridgeNoFallbackMessage('終了コード 1', 'title'), 'Claude で処理できなかったのでタイトルを付けられませんでした');
+}
+
+console.log('\n■ 失敗したら Gemini に回すか（設定・v0.24.58）');
+{
+  ctx.claudeBridgeSetFallback(false);
+  eq('オフ（既定）: ライブ整形も要約も Gemini に回さない', ['live-refine', 'live-heading', 'summary', 'title', 'chat'].map((f) => ctx.claudeBridgeNoFallback(f)), [true, true, true, true, true]);
+  eq('Claude に回さないもの（文字起こし）は関係ない', ctx.claudeBridgeNoFallback('transcribe'), false);
+  ctx.claudeBridgeSetFallback(true);
+  eq('オン: 全部 Gemini に回す', ['live-refine', 'summary'].map((f) => ctx.claudeBridgeNoFallback(f)), [false, false]);
+  ctx.claudeBridgeSetFallback(false);
+  eq('時間切れ・claude の一時的な失敗は試し直す', [ctx.claudeBridgeShouldRetry('180秒待っても返事がありませんでした'), ctx.claudeBridgeShouldRetry('終了コード 1')], [true, true]);
+  eq('ログイン切れ・未インストール・長すぎるは試し直さない（何度やっても同じ）',
+     [ctx.claudeBridgeShouldRetry('Failed to authenticate: OAuth session expired'),
+      ctx.claudeBridgeShouldRetry('Claude 連携がインストールされていません（設定の…）'),
+      ctx.claudeBridgeShouldRetry('長すぎます（250000字 / 上限200000字）')], [false, false, false]);
+}
+
+console.log('\n■ 待つ時間（量で決めて、試し直すたびに少し延ばす・v0.24.58）');
+{
+  const t = (c, live) => ctx.claudeBridgeTimeoutFor(c, live) / 1000;
+  eq('要約: 短ければ 120秒', t(400, false), 120);
+  eq('要約: 1.8万字なら 300秒（前は量によらず 180秒で、長い講義が時間切れになっていた）', t(18000, false), 300);
+  eq('要約: 上限 900秒', t(500000, false), 900);
+  eq('ライブ整形（2500字）は 90秒、上限 300秒', [t(2500, true), t(100000, true)], [90, 300]);
+  const r = (b, a) => ctx.claudeBridgeRetryTimeout(b * 1000, a) / 1000;
+  eq('試し直すたびに 25% ずつ延ばす', [0, 1, 2, 3].map((a) => r(300, a)), [300, 375, 450, 525]);
+  eq('延ばしても 900秒まで', r(800, 3), 900);
 }
 
 /* ───────── v0.24.9: ログインまで見る ─────────

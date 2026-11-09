@@ -102,7 +102,7 @@ const LIVE_MD = '## 目次\n1. 評価の観点\n\n## 1. 評価の観点\n- 観�
     await pg.route('**/api/claude', r => r.fulfill({ status: 502, contentType: 'application/json',
       body: JSON.stringify({ ok: false, error: '180秒待っても返事がありませんでした' }) }));
     await pg.goto(URL);
-    await pg.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({ apiKey: 'AIza-test', claudeCode: true })));
+    await pg.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({ apiKey: 'AIza-test', claudeCode: true, claudeFallbackGemini: true })));   // v0.24.58: Gemini に戻すのは設定がオンのとき
     await pg.reload();
     await pg.waitForTimeout(1000);
     const st = () => pg.evaluate(() => document.getElementById('status-indicator').textContent);

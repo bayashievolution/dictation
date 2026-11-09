@@ -354,9 +354,9 @@ async function _tryClaudeBridge(body, feature) {
   // v0.24.9: もう駄目だと分かっているときは呼びに行かない。
   // 録音を止めると要約とタイトルを続けて回すので、ログイン切れだと
   // **確実に失敗する呼び出しをもう一度**やっていた。ただし**黙っては戻さない**。
-  // v0.24.52: 録音中の整形・見出し付けは、失敗しても Gemini に回さない（やっさん「切替はせずに行こう」）
+  // v0.24.58: 失敗したら Gemini に回すかは設定で決める（claudeBridgeNoFallback）。オフなら回さず、3回試し直す
   const strict = typeof claudeBridgeNoFallback === 'function' && claudeBridgeNoFallback(feature);
-  const sayFail = (error) => strict ? claudeBridgeNoFallbackMessage(error) : claudeBridgeFallbackMessage(error);
+  const sayFail = (error) => strict ? claudeBridgeNoFallbackMessage(error, feature) : claudeBridgeFallbackMessage(error);
   const giveUp = (error) => {
     if (!strict) return null;
     const e = new Error(`Claude で処理できませんでした（${feature}・Gemini には回していません）: ${error}`);
@@ -380,7 +380,21 @@ async function _tryClaudeBridge(body, feature) {
   // v0.24.52: 録音中に数十秒ごとに呼ぶものは考え込ませない（effort low）。
   // 待ち時間の上限も短くし、詰まったら次の回に譲る（溜まって何本も並ばないように）
   // v0.24.53: 会話を切らずに呼ぶ（session）。毎回 claude を起動し直すより 2 秒ほど速い（claude-runner.js に実測）
-  const r = await claudeBridgeRun(prompt, strict ? { effort: 'low', timeoutMs: 120000, session: true } : {});
+  const live = typeof claudeBridgeIsLive === 'function' && claudeBridgeIsLive(feature);
+  // v0.24.58: 待つ時間は送る量で決める（以前は 120秒 / 180秒の決め打ちで、長い講義の要約が時間切れになっていた）
+  const baseMs = typeof claudeBridgeTimeoutFor === 'function' ? claudeBridgeTimeoutFor(prompt.length, live) : (live ? 120000 : 180000);
+  const tries = strict ? 1 + (typeof CLAUDE_BRIDGE_RETRIES === 'number' ? CLAUDE_BRIDGE_RETRIES : 3) : 1;
+  let r;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    // v0.24.58: 試し直すたびに少し長く待つ（時間切れで落ちたなら、同じ長さで待っても同じ結果になりやすい）
+    const timeoutMs = typeof claudeBridgeRetryTimeout === 'function' ? claudeBridgeRetryTimeout(baseMs, attempt) : baseMs;
+    r = await claudeBridgeRun(prompt, live ? { effort: 'low', timeoutMs, session: true } : { timeoutMs });
+    if (r.ok && r.text) break;
+    const more = attempt + 1 < tries && typeof claudeBridgeShouldRetry === 'function' && claudeBridgeShouldRetry(r.error);
+    if (!more) break;
+    if (window.diagLog) window.diagLog.info(`Claude Code で失敗したので試し直します（${feature} / ${attempt + 1}回目の試し直し・待つのは${Math.round(claudeBridgeRetryTimeout(baseMs, attempt + 1) / 1000)}秒）: ${r.error}`);
+    await _sleep(2000);
+  }
   if (r.ok && r.text) {
     if (window.diagLog) window.diagLog.info(`Claude Code で処理しました（${feature} / ${r.seconds}秒）`);
     return r.text;
@@ -1237,12 +1251,17 @@ async function extractContextWithGemini({ apiKey, transcript, memoOutline, known
     const broken = typeof claudeBridgeBrokenReason === 'function' ? claudeBridgeBrokenReason() : '';
     if (broken) return { terms: [], topicPath: [], flow: '' };
     const r = await claudeBridgeRun(claudeBridgePromptFromBody(body), { effort: 'low', timeoutMs: 120000, session: true });
+    // v0.24.58: 「失敗したら Gemini で処理する」がオンなら Gemini に回す。オフなら今回は諦める
+    // （2分後にまた拾い直すので、ここでは試し直さない）
+    const fallback = typeof claudeBridgeFallbackEnabled === 'function' && claudeBridgeFallbackEnabled();
     if (!r.ok) {
-      if (window.diagLog) window.diagLog.info(`文脈を Claude で拾えませんでした（Gemini には回していません）: ${r.error}`);
+      if (window.diagLog) window.diagLog.info(`文脈を Claude で拾えませんでした（${fallback && apiKey ? 'Gemini で拾います' : 'Gemini には回していません'}）: ${r.error}`);
       if (typeof claudeBridgeIsFatal === 'function' && claudeBridgeIsFatal(r.error)) claudeBridgeMarkBroken(r.error);
-      return { terms: [], topicPath: [], flow: '' };
+      if (!(fallback && apiKey)) return { terms: [], topicPath: [], flow: '' };
+      raw = await _callGemini(body, apiKey, { maxRetries: 1, skipSanitize: true, feature: 'context-extract' });
+    } else {
+      raw = r.text;
     }
-    raw = r.text;
   } else {
     raw = await _callGemini(body, apiKey, { maxRetries: 1, skipSanitize: true, feature: 'context-extract' });
   }

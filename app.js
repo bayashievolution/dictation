@@ -119,6 +119,8 @@ const DEFAULT_SETTINGS = {
   // v0.24.22: リアルタイム要約（目次付き・Claude 連携のみ）。間隔は分
   liveSummary: false,
   liveSummaryMin: 10,
+  // v0.24.58: Claude で失敗したら Gemini に回すか。既定はオフ（料金を増やさないほう。オフなら Claude で3回試し直す）
+  claudeFallbackGemini: false,
   summaryDetail: 'medium',
   appZoom: 100,
   // v0.24.26: ライブ要約は既定で要約の左（やっさんの指定）
@@ -518,6 +520,8 @@ const els = {
   btnSaveBridgeFiles: document.getElementById('btn-save-bridge-files'),      // v0.24.12
   btnClaudeInstall: document.getElementById('btn-claude-install'),           // v0.24.21
   inputLiveSummary: document.getElementById('input-live-summary'),           // v0.24.22
+  inputClaudeFallback: document.getElementById('input-claude-fallback'),     // v0.24.58
+  claudeFallbackRow: document.getElementById('claude-fallback-row'),         // v0.24.58
   inputLiveSummaryMin: document.getElementById('input-live-summary-min'),    // v0.24.22
   liveSummaryNote: document.getElementById('live-summary-note'),             // v0.24.22
   audioUsageText: document.getElementById('audio-usage-text'),
@@ -4355,6 +4359,8 @@ function applyClaudeBridgeSetting() {
     // （v0.24.39〜43 は「一部を Claude Code で処理する」という別のトグルがあった）
     claudeBridgeSetEnabled(!!state.settings.claudeCode);
   }
+  // v0.24.58: 失敗したら Gemini に回すか（オフなら Claude で3回試し直す）
+  if (typeof claudeBridgeSetFallback === 'function') claudeBridgeSetFallback(!!state.settings.claudeFallbackGemini);
 }
 
 /**
@@ -4510,6 +4516,8 @@ function applyLiveSummaryTab() {
 function applyLiveSummaryAvailability() {
   // v0.24.39: ライブ要約と「一部を Claude Code で処理する」は、どちらも「Claude Code」がオンのときだけ選べる
   const claudeOn = !!(els.inputClaudeCode && els.inputClaudeCode.checked);
+  // v0.24.58: 「失敗したら Gemini で処理する」は連携がオンのときだけ出す（オフなら意味が無い）。値は覚えたまま
+  if (els.claudeFallbackRow) els.claudeFallbackRow.hidden = !claudeOn;
   for (const [box, note, extra] of [
     [els.inputLiveSummary, els.liveSummaryNote, els.inputLiveSummaryMin],
     [els.inputClaudeBridge, els.claudeRouteNote, null],
@@ -7743,6 +7751,7 @@ function openSettings() {
   els.inputSilenceSec.value = state.settings.silenceSec;
   if (els.inputMidConsolidateSec) els.inputMidConsolidateSec.value = midConsolidateMs() / 1000;   // v0.24.51
   if (els.inputLiveSummary) els.inputLiveSummary.checked = !!state.settings.liveSummary;
+  if (els.inputClaudeFallback) els.inputClaudeFallback.checked = !!state.settings.claudeFallbackGemini;   // v0.24.58
   if (els.inputLiveSummaryMin) els.inputLiveSummaryMin.value = clampLiveSummaryMinutes(state.settings.liveSummaryMin);
   els.inputAiEnabled.checked = state.settings.aiEnabled;
   els.inputAutoStop.checked = state.settings.autoStopEnabled;
@@ -7830,6 +7839,7 @@ function saveSettingsFromForm() {
   }
   // v0.24.39: 「Claude Code」がオフで押せないときは、前の値を残す（オンに戻したら元どおり）
   if (els.inputLiveSummary && !els.inputLiveSummary.disabled) state.settings.liveSummary = els.inputLiveSummary.checked;
+  if (els.inputClaudeFallback) state.settings.claudeFallbackGemini = els.inputClaudeFallback.checked;   // v0.24.58
   if (els.inputLiveSummaryMin) state.settings.liveSummaryMin = clampLiveSummaryMinutes(els.inputLiveSummaryMin.value);
   applyLiveSummaryTab();   // v0.24.25: オン/オフでタブを出し入れする
   state.settings.aiEnabled = els.inputAiEnabled.checked;

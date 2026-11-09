@@ -83,6 +83,8 @@ async function runConsolidation(page) {
   {
     const { ctx, page, seen } = await open(browser, { apiKey: 'AIza-test', aiEnabled: true, claudeCode: true }, { claudeFails: true });
     await runConsolidation(page);
+    await page.waitForTimeout(7000);   // v0.24.58: Gemini に回さず、Claude で3回試し直してから諦める（2秒おき）
+    eq('Claude で 1 + 3 回試した', seen.claude.length, 4);
     eq('文字の処理は Gemini に送っていない（料金を増やさない）', seen.geminiText, 0);
     eq('元の文字は残り、あとで整形し直せる印が付く', await page.evaluate(() => {
       const p = document.querySelector('#confirmed .paragraph.needs-retry');

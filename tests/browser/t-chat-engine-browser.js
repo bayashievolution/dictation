@@ -24,7 +24,7 @@ const eq = (label, got, want) => {
   if (!ok) fail++;
 };
 
-async function ask(browser, { useClaudeBridge, claudeWorks }) {
+async function ask(browser, { useClaudeBridge, claudeWorks, claudeFallbackGemini = false }) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
@@ -40,7 +40,7 @@ async function ask(browser, { useClaudeBridge, claudeWorks }) {
     : { status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: '一時的な失敗' }) }));
   await page.goto(URL);
   await page.evaluate((s) => localStorage.setItem('dictation:settings', JSON.stringify(s)),
-    { apiKey: 'AIza-test', useClaudeBridge });
+    { apiKey: 'AIza-test', useClaudeBridge, claudeFallbackGemini });
   await page.reload();
   await page.waitForTimeout(900);
   await page.evaluate(() => {
@@ -50,7 +50,7 @@ async function ask(browser, { useClaudeBridge, claudeWorks }) {
   await page.waitForTimeout(200);
   await page.fill('#chat-input', 'まとめて');
   await page.click('#btn-chat-send');
-  await page.waitForFunction(() => !document.querySelector('#chat-messages .chat-msg.thinking'), null, { timeout: 5000 });
+  await page.waitForFunction(() => !document.querySelector('#chat-messages .chat-msg.thinking'), null, { timeout: 20000 });   // v0.24.58: 設定オフなら Claude で3回試し直すので待つ
   const r = await page.evaluate(() => {
     const a = Array.from(document.querySelectorAll('#chat-messages .chat-msg.assistant')).pop();
     return a ? { who: a.querySelector('.chat-msg-header').textContent, body: a.querySelector('.chat-msg-body').textContent.trim() } : null;
@@ -69,8 +69,14 @@ async function ask(browser, { useClaudeBridge, claudeWorks }) {
   eq('吹き出しは Claude', await ask(browser, { useClaudeBridge: true, claudeWorks: true }), { who: 'Claude', body: 'Claude の答え' });
 
   console.log('■ Claude 連携オンだが失敗して Gemini に戻った');
+  // v0.24.58: Gemini に戻すのは「Claude Codeでの処理に失敗したらGemini APIで処理する」がオンのときだけ
   eq('吹き出しは Gemini（設定ではなく実際に答えたほう）',
-     await ask(browser, { useClaudeBridge: true, claudeWorks: false }), { who: 'Gemini', body: 'Gemini の答え' });
+     await ask(browser, { useClaudeBridge: true, claudeWorks: false, claudeFallbackGemini: true }), { who: 'Gemini', body: 'Gemini の答え' });
+  console.log('■ Claude 連携オンで失敗・「失敗したら Gemini」がオフ（v0.24.58）');
+  {
+    const r = await ask(browser, { useClaudeBridge: true, claudeWorks: false });
+    eq('Gemini の答えは出さない', !!r && r.body.includes('Gemini の答え'), false);
+  }
 
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\n✓ すべて通過');
