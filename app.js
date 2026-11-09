@@ -4506,6 +4506,8 @@ function applyGeminiOnlyVisibility(animated = true) {
   // 「録音の保持」は区切り線のあるまとまり（下の余白 22px）。余白も一緒に縮める（中に移すと区切り線の位置が変わる）
   revealSettingRow(document.getElementById('keep-recording-group'), isGemini, animated, true);
   revealSettingRow(el, isGemini, animated);
+  // v0.24.87: デバイス・リアルタイム表示・チャンクは下の「音声入力」へ移した。出し入れは同じく AI で聞き取るときだけ
+  revealSettingRow(document.getElementById('gemini-only-input-fields'), isGemini, animated);
 }
 
 function applyWebSpeechOnlyVisibility(animated = true) {

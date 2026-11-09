@@ -115,6 +115,16 @@ async function sendOne(page) {
     await page.evaluate(() => openSettings());
     await page.waitForTimeout(300);
     eq('最初は Gemini', await page.isChecked('#engine-gemini'), true);
+    // v0.24.87: デバイスなどは下の「音声入力」へ移した。AI で聞き取るときだけ出て、Web Speech にすると隠れる
+    eq('一番上の見出しは「文字起こしのモード」', await page.evaluate(() => document.querySelector('#settings-modal .field-group-title').textContent), '文字起こしのモード');
+    eq('AI で聞き取るなら、下の「音声入力」にデバイスの欄が出ている', await page.isVisible('#voice-input-group #input-audio-device'), true);
+    await page.check('#mode-webspeech');
+    await page.waitForTimeout(800);
+    eq('Web Speech にするとデバイスの欄は隠れる', await page.evaluate(() => document.getElementById('gemini-only-input-fields').hidden), true);
+    eq('Web Speech のチャンク長が出る', await page.isVisible('#input-webspeech-commit-sec'), true);
+    await page.check('#mode-gemini');
+    await page.waitForTimeout(800);
+    eq('AI で聞き取るに戻すとデバイスの欄が戻る', await page.isVisible('#input-audio-device'), true);
     eq('Groq のキーの欄は隠れている', await page.evaluate(() => document.getElementById('groq-fields').hidden), true);
     await page.check('#engine-groq');
     await page.waitForTimeout(700);
