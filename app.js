@@ -10723,7 +10723,7 @@ function renderUsageCard() {
       <div class="usage-legend"><span><i class="seg-text"></i>文字 ${fmtNum(mon.text)}</span><span><i class="seg-audio"></i>音声 ${fmtNum(mon.audio)}</span><span><i class="seg-output"></i>出力 ${fmtNum(mon.output)}</span></div>
       ${featRows ? `<div class="usage-features">${featRows}</div>` : ''}
       ${monthRows ? `<div class="usage-months">${monthRows}</div>` : ''}
-      <small class="field-hint">料金は Gemini 2.5 Flash の単価（100万トークンあたり 文字 $${GEMINI_PRICE_PER_M.text.toFixed(2)}・音声 $${GEMINI_PRICE_PER_M.audio.toFixed(2)}・出力 $${GEMINI_PRICE_PER_M.output.toFixed(2)}）で計算した目安です。無料枠のキーなら 0 円です。</small>
+      <small class="field-hint">料金は Gemini 2.5 Flash の単価（100万トークンあたり 文字 $${GEMINI_PRICE_PER_M.text.toFixed(2)}・音声 $${GEMINI_PRICE_PER_M.audio.toFixed(2)}・出力 $${GEMINI_PRICE_PER_M.output.toFixed(2)}）で計算した目安です。</small>
     </div>
     <div class="usage-block">
       <div class="usage-head"><strong>Groq Whisper</strong><span class="usage-sub">無料枠の残り</span></div>
@@ -10731,7 +10731,7 @@ function renderUsageCard() {
       ${usageMeter('この1時間の音声', g.hourSec, GROQ_FREE.hourSec, `残り ${fmtSecLeft(GROQ_FREE.hourSec - g.hourSec)}`)}
       ${usageMeter('今日の回数', g.dayReq, GROQ_FREE.dayReq, `残り ${fmtNum(Math.max(0, GROQ_FREE.dayReq - g.dayReq))}回`)}
       ${hdrReq != null ? `<small class="field-hint">Groq の返事では、残り ${escapeHtmlSimple(String(hdrReq))} 回です。</small>` : ''}
-      <small class="field-hint">このアプリから送った分を数えています（日の区切りはこの PC の時計の 0 時）。</small>
+      <small class="field-hint">このアプリから送った分を数えています。</small>
     </div>`;
 }
 
