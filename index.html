@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.108" />
+  <link rel="stylesheet" href="style.css?v=0.24.109" />
 </head>
 <body>
   <div id="app">
@@ -562,53 +562,6 @@
             </div>
           </div>
 
-          <!-- v0.24.48: 話者判別は Gemini モードの録音を使うので、Gemini モードのときだけ出す（やっさんの指定）。
-               保存のキー（keepRecording / audioRetention）は変えていない -->
-          <div class="field-group settings-acc" id="keep-recording-group">
-            <h3 class="field-group-title settings-acc-title"><button type="button" class="settings-acc-head" aria-expanded="false"><span class="settings-acc-icon" data-icon="sm-user"></span><span class="settings-acc-label">録音の保持（話者判別）</span><span class="settings-acc-chev" data-icon="sm-chevron-right"></span></button></h3>
-            <div class="settings-acc-body" hidden>
-            <label class="field field-row">
-              <input id="input-keep-recording" type="checkbox" />
-              <span>話者判別機能を有効にする<small class="field-hint" style="display:block">話者判別機能が有効になり、それに伴い音声ファイルがこの PC の Chrome の中に一時保存されます（Google ドライブには保存しません）。</small></span>
-            </label>
-            <div class="field">
-              <small class="field-hint warn-hint">
-                <!-- v0.24.86: 「端末」「Google へアップロード」をドライブのことだと読まれた（やっさん 2026-11-09「ドライブに保存されてると思ってた」）。
-                     保存先はこの PC の Chrome の中（IndexedDB）、送り先は Gemini だとはっきり書く -->
-                <strong>この設定が決めるのは「この PC に残すかどうか」だけです。</strong>
-                「AI で聞き取る」は、この設定に関係なく文字起こしのために音声を Gemini（Groq Whisper を選んだときは Groq）へ送信しています。
-                話者判別を実行すると録音全体が Gemini にアップロードされます。
-                使い終わったファイルはこちらから削除しますが、削除できなかった場合も Gemini 側で48時間後に自動削除されます。
-                録音の保存自体が許されない場面では、この設定をオフにしたうえで、
-                「AI で聞き取る」を使うことの可否も確認してください。
-              </small>
-            </div>
-            <label class="field field-block">
-              <span class="field-label">音声ファイルの取り扱い</span>
-              <select id="input-audio-retention">
-                <option value="close">タブを閉じたら消す（推奨）</option>
-                <option value="repass">話者判別処理が終わったら消す（24時間で自動失効）</option>
-                <option value="1d">1日たったら消す</option>
-                <option value="7d">7日たったら消す</option>
-                <option value="manual">手動で消すまで残す</option>
-              </select>
-              <small class="field-hint">音声ファイルが残っていれば話者判別をやり直すことができます。どの設定でもタブを閉じた時点でその録音は削除されます（下の一覧で「残す」にした録音は消えません）。</small>
-            </label>
-            <div class="field">
-              <div class="audio-usage-row">
-                <span id="audio-usage-text" class="field-hint">保持中の音声: 確認中…</span>
-                <button type="button" id="btn-clear-audio" class="btn btn-ghost btn-sm">すべて消す</button>
-              </div>
-            </div>
-            <!-- v0.24.103: 保管している録音の一覧。トグルで「残す」（検証用など。タブを閉じても消えない）・ファイルに保存 -->
-            <div class="field recordings-field">
-              <span class="field-label">保管している録音</span>
-              <small class="field-hint" style="display:block; margin-bottom:4px">オンにした録音は、タブを閉じても消えません。</small>
-              <div id="audio-recordings" class="recordings-list"></div>
-            </div>
-            </div>
-          </div>
-
           <!-- v0.24.39: AI まわりの設定を1つにまとめ、やっさんの指定した順に並べた。
                「ライブ整形」と「要約・タイトル生成」は独立（以前はライブ整形をオフにすると要約も止まっていた）。
                Claude Code は「連携を使う（Claude Code）」と「一部を Claude Code で処理する」の2つに分けた。
@@ -708,6 +661,53 @@
                 </div>
               </div>
             </label>
+            </div>
+          </div>
+
+          <!-- v0.24.48: 話者判別は Gemini モードの録音を使うので、Gemini モードのときだけ出す（やっさんの指定）。
+               保存のキー（keepRecording / audioRetention）は変えていない -->
+          <div class="field-group settings-acc" id="keep-recording-group">
+            <h3 class="field-group-title settings-acc-title"><button type="button" class="settings-acc-head" aria-expanded="false"><span class="settings-acc-icon" data-icon="sm-user"></span><span class="settings-acc-label">録音の保持（話者判別）</span><span class="settings-acc-chev" data-icon="sm-chevron-right"></span></button></h3>
+            <div class="settings-acc-body" hidden>
+            <label class="field field-row">
+              <input id="input-keep-recording" type="checkbox" />
+              <span>話者判別機能を有効にする<small class="field-hint" style="display:block">話者判別機能が有効になり、それに伴い音声ファイルがこの PC の Chrome の中に一時保存されます（Google ドライブには保存しません）。</small></span>
+            </label>
+            <div class="field">
+              <small class="field-hint warn-hint">
+                <!-- v0.24.86: 「端末」「Google へアップロード」をドライブのことだと読まれた（やっさん 2026-11-09「ドライブに保存されてると思ってた」）。
+                     保存先はこの PC の Chrome の中（IndexedDB）、送り先は Gemini だとはっきり書く -->
+                <strong>この設定が決めるのは「この PC に残すかどうか」だけです。</strong>
+                「AI で聞き取る」は、この設定に関係なく文字起こしのために音声を Gemini（Groq Whisper を選んだときは Groq）へ送信しています。
+                話者判別を実行すると録音全体が Gemini にアップロードされます。
+                使い終わったファイルはこちらから削除しますが、削除できなかった場合も Gemini 側で48時間後に自動削除されます。
+                録音の保存自体が許されない場面では、この設定をオフにしたうえで、
+                「AI で聞き取る」を使うことの可否も確認してください。
+              </small>
+            </div>
+            <label class="field field-block">
+              <span class="field-label">音声ファイルの取り扱い</span>
+              <select id="input-audio-retention">
+                <option value="close">タブを閉じたら消す（推奨）</option>
+                <option value="repass">話者判別処理が終わったら消す（24時間で自動失効）</option>
+                <option value="1d">1日たったら消す</option>
+                <option value="7d">7日たったら消す</option>
+                <option value="manual">手動で消すまで残す</option>
+              </select>
+              <small class="field-hint">音声ファイルが残っていれば話者判別をやり直すことができます。どの設定でもタブを閉じた時点でその録音は削除されます（下の一覧で「残す」にした録音は消えません）。</small>
+            </label>
+            <div class="field">
+              <div class="audio-usage-row">
+                <span id="audio-usage-text" class="field-hint">保持中の音声: 確認中…</span>
+                <button type="button" id="btn-clear-audio" class="btn btn-ghost btn-sm">すべて消す</button>
+              </div>
+            </div>
+            <!-- v0.24.103: 保管している録音の一覧。トグルで「残す」（検証用など。タブを閉じても消えない）・ファイルに保存 -->
+            <div class="field recordings-field">
+              <span class="field-label">保管している録音</span>
+              <small class="field-hint" style="display:block; margin-bottom:4px">オンにした録音は、タブを閉じても消えません。</small>
+              <div id="audio-recordings" class="recordings-list"></div>
+            </div>
             </div>
           </div>
 
@@ -1157,19 +1157,19 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.108"></script>
-  <script src="motion.js?v=0.24.108"></script>
-  <script src="usage.js?v=0.24.108"></script>
-  <script src="gemini.js?v=0.24.108"></script>
-  <script src="groq.js?v=0.24.108"></script>
-  <script src="notion.js?v=0.24.108"></script>
-  <script src="audio-store.js?v=0.24.108"></script>
-  <script src="claude-bridge.js?v=0.24.108"></script>
-  <script src="claude-installer.js?v=0.24.108"></script>
-  <script src="live-summary.js?v=0.24.108"></script>
-  <script src="image-store.js?v=0.24.108"></script>
-  <script src="gemini-files.js?v=0.24.108"></script>
-  <script src="term-dicts.js?v=0.24.108"></script>
-  <script src="app.js?v=0.24.108"></script>
+  <script src="icons.js?v=0.24.109"></script>
+  <script src="motion.js?v=0.24.109"></script>
+  <script src="usage.js?v=0.24.109"></script>
+  <script src="gemini.js?v=0.24.109"></script>
+  <script src="groq.js?v=0.24.109"></script>
+  <script src="notion.js?v=0.24.109"></script>
+  <script src="audio-store.js?v=0.24.109"></script>
+  <script src="claude-bridge.js?v=0.24.109"></script>
+  <script src="claude-installer.js?v=0.24.109"></script>
+  <script src="live-summary.js?v=0.24.109"></script>
+  <script src="image-store.js?v=0.24.109"></script>
+  <script src="gemini-files.js?v=0.24.109"></script>
+  <script src="term-dicts.js?v=0.24.109"></script>
+  <script src="app.js?v=0.24.109"></script>
 </body>
 </html>

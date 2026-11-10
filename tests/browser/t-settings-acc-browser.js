@@ -29,10 +29,10 @@ const eq = (label, got, want) => {
   await page.waitForTimeout(400);
 
   const labels = await page.$$eval('#settings-modal .settings-acc-label', ns => ns.map(n => n.textContent));
-  eq('まとまりの並び', labels, ['音声入力', '録音の保持（話者判別）', 'AI の動き', '停止条件', '表示', 'Notion 連携', 'そのほか']);
+  eq('まとまりの並び', labels, ['音声入力', 'AI の動き', '停止条件', '録音の保持（話者判別）', '表示', 'Notion 連携', 'そのほか']);
   eq('最初は全部たたんである', await page.$$eval('#settings-modal .settings-acc-body', ns => ns.every(n => n.hidden)), true);
   eq('見出しに SUMADO の線の絵', await page.$$eval('#settings-modal .settings-acc-icon', ns => ns.map(n => n.dataset.icon)),
-     ['sm-mic', 'sm-user', 'sm-sparkle', 'sm-clock', 'sm-frame', 'sm-folder', 'sm-apps']);
+     ['sm-mic', 'sm-sparkle', 'sm-clock', 'sm-user', 'sm-frame', 'sm-folder', 'sm-apps']);
 
   // 停止条件をひらく。毎フレーム高さを測る
   const heights = await page.evaluate(async () => {
