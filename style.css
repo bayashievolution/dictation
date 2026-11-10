@@ -3581,3 +3581,50 @@ body.chat-active .dict-menu { bottom: 114px; }
 .settings-acc-box .settings-acc { border-bottom: 1px solid var(--border); margin: 0; }
 .settings-acc-box .settings-acc:last-child { border-bottom: none; }
 .settings-acc-box .settings-acc-head { padding: 12px 0; }
+
+/* ───────── 設定: 詳細設定の中も見本どおりに (v0.24.101) ─────────
+ * やっさん「トグルが左のままの項目がある。見本がすごく気に入っているので、見本のとおりに」。
+ * 見本の詳細設定: うすい地に、名前は左・操作（トグル・数字・選ぶ欄）は右、行は区切り線で分ける。
+ * HTML はそのまま（id・保存のキー・説明の字は変えない）。CSS だけで並べ替える
+ */
+/* トグルはどこでも右（設定と「この録音の文脈」）。v0.24.99 は AI 設定の 3 つだけだった */
+.modal .field-row:has(> input[type="checkbox"]) { flex-direction: row-reverse; justify-content: space-between; gap: 14px; }
+.modal .field-row:has(> input[type="checkbox"]) > input[type="checkbox"] { width: 44px; height: 26px; min-width: 44px; flex: 0 0 44px; border-radius: 999px; }
+.modal .field-row:has(> input[type="checkbox"]) > input[type="checkbox"]::before { width: 20px; height: 20px; top: 2px; left: 2px; }
+.modal .field-row:has(> input[type="checkbox"]) > input[type="checkbox"]:checked::before { transform: translateX(18px); }
+
+/* 詳細設定の中身: うすい地・行の区切り線（箱の左右いっぱいに） */
+.settings-acc-box .settings-acc-body { background: var(--bg-subtle); margin: 0 -14px; padding: 0 14px 4px; }
+.settings-acc-box .settings-acc-body > .field,
+.settings-acc-box .settings-acc-body > .field-row,
+.settings-acc-box .settings-acc-body > label.field { margin: 0; padding: 11px 0; }
+.settings-acc-box .settings-acc-body > :is(.field, label.field, .field-conditional:not([hidden])) + :is(.field, label.field, .field-conditional) { border-top: 1px solid var(--border); }
+/* 説明だけの段（トグルのすぐ下の小さな字）は、上の行の続きにする（線を引かず、詰める） */
+.settings-acc-box .settings-acc-body > .field:has(> small.field-hint:only-child),
+.settings-acc-box .settings-acc-body > .field:has(> .field-hint.warn-hint:only-child) { border-top: none !important; padding-top: 0; margin-top: -4px; }
+.settings-acc-box .settings-acc-body .field-conditional { padding-top: 0; }
+.settings-acc-box .settings-acc-body .field-conditional-inner > .field { margin: 0; padding: 11px 0; border-top: 1px solid var(--border); }
+
+/* 数字・選ぶ欄の行: 名前は左、欄は右、説明はその下に */
+.modal .settings-acc-body label.field:has(> .number-stepper),
+.modal .settings-acc-body label.field:has(> select) {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px;
+}
+.modal .settings-acc-body label.field:has(> .number-stepper) > .field-label,
+.modal .settings-acc-body label.field:has(> select) > .field-label { margin: 0; color: var(--text); font-size: 13.5px; }
+.modal .settings-acc-body label.field:has(> .number-stepper) > .number-stepper { width: 110px; }
+.modal .settings-acc-body label.field:has(> select) > select { max-width: 58vw; width: auto; min-width: 140px; }
+.modal .settings-acc-body label.field:has(> .number-stepper) > .field-hint,
+.modal .settings-acc-body label.field:has(> select) > .field-hint { grid-column: 1 / -1; margin-top: 4px; }
+/* 「音声チャンク」などのまとまりの小見出し */
+.settings-acc-box .settings-acc-body > .field-label { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text); }
+/* 状態の字が横に付くトグル（Notion 連携・Claude Code）も、トグルは右端。状態の字は下の行に */
+.modal .toggle-with-status > .field-row { flex: 1 1 100%; }
+.modal .toggle-with-status > .field-hint { flex-basis: 100%; }
+/* 選ぶ欄の行: 選択肢の字が長くても、名前を押しつぶさない（欄のほうを縮める） */
+.modal .settings-acc-body label.field:has(> select) { grid-template-columns: minmax(7em, 1fr) minmax(0, max-content); }
+.modal .settings-acc-body label.field:has(> select) > select { min-width: 0; max-width: 100%; width: 100%; text-overflow: ellipsis; }
+/* v0.24.101: トグルは、名前と説明をあわせたまとまりの上下まんなか（やっさん「入れ子に対して、トグルが右の上下中央に位置しているのがいい」）。
+   説明は名前と同じ <span> の中に入れた（前は下の別の段だったので、トグルが名前の行だけに合わさって上に寄っていた） */
+.modal .field-row:has(> input[type="checkbox"]) { align-items: center; }
+.modal .field-row:has(> input[type="checkbox"]) > span > .field-hint { margin-top: 3px; font-weight: 400; }

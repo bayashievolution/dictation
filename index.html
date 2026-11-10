@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.100" />
+  <link rel="stylesheet" href="style.css?v=0.24.101" />
 </head>
 <body>
   <div id="app">
@@ -502,11 +502,8 @@
                 </label>
                 <label class="field field-row">
                   <input id="input-gemini-live-display" type="checkbox" />
-                  <span>リアルタイム表示を使う（Web Speech を並走）</span>
+                  <span>リアルタイム表示を使う（Web Speech を並走）<small class="field-hint" style="display:block">AI の結果が返るまでの間、Web Speech が聞き取った文字を「未確定」として表示します。</small></span>
                 </label>
-                <div class="field">
-                  <small class="field-hint">AI の結果が返るまでの間、Web Speech が聞き取った文字を「未確定」として表示します。</small>
-                </div>
                 <!-- v0.24.47: Gemini に送る音声まわりを「音声チャンク」にまとめた（やっさんの指定） -->
                 <span class="field-label" style="font-weight:600">音声チャンク</span>
                 <label class="field">
@@ -522,11 +519,8 @@
                 </label>
                 <label class="field field-row">
                   <input id="input-silence-cut" type="checkbox" />
-                  <span>無音の切れ目で送信</span>
+                  <span>無音の切れ目で送信<small class="field-hint" style="display:block">話が途切れたところを狙って区切り、音声を送信します。オフにすると、設定したチャンク長で送信します。</small></span>
                 </label>
-                <div class="field">
-                  <small class="field-hint">話が途切れたところを狙って区切り、音声を送信します。オフにすると、設定したチャンク長で送信します。</small>
-                </div>
                 <label class="field">
                   <span class="field-label">最長待ち時間（秒）</span>
                   <div class="number-stepper">
@@ -574,11 +568,8 @@
             <div class="settings-acc-body" hidden>
             <label class="field field-row">
               <input id="input-keep-recording" type="checkbox" />
-              <span>話者判別機能を有効にする</span>
+              <span>話者判別機能を有効にする<small class="field-hint" style="display:block">話者判別機能が有効になり、それに伴い音声ファイルがこの PC の Chrome の中に一時保存されます（Google ドライブには保存しません）。</small></span>
             </label>
-            <div class="field">
-              <small class="field-hint">話者判別機能が有効になり、それに伴い音声ファイルがこの PC の Chrome の中に一時保存されます（Google ドライブには保存しません）。</small>
-            </div>
             <div class="field">
               <small class="field-hint warn-hint">
                 <!-- v0.24.86: 「端末」「Google へアップロード」をドライブのことだと読まれた（やっさん 2026-11-09「ドライブに保存されてると思ってた」）。
@@ -628,11 +619,8 @@
             </label>
             <label class="field field-row">
               <input id="input-ai-enabled" type="checkbox" />
-              <span>ライブ整形</span>
+              <span>ライブ整形<small class="field-hint" style="display:block">文字起こしをGeminiに送信し、段落分けや見出し、句読点を入れて体裁を整えます。</small></span>
             </label>
-            <div class="field">
-              <small class="field-hint">文字起こしをGeminiに送信し、段落分けや見出し、句読点を入れて体裁を整えます。</small>
-            </div>
             <label class="field">
               <span class="field-label">ライブ整形のタイミング（秒）</span>
               <div class="number-stepper">
@@ -658,10 +646,9 @@
             <!-- v0.24.22: ライブ要約（Claude Code 連携のみ。v0.24.27 までの名前はリアルタイム要約／RT要約） -->
             <label class="field field-row">
               <input id="input-live-summary" type="checkbox" />
-              <span>ライブ要約</span>
+              <span>ライブ要約<small class="field-hint" style="display:block">文字起こしをしつつ、話題を順に端的にまとめます。</small></span>
             </label>
             <div class="field">
-              <small class="field-hint">文字起こしをしつつ、話題を順に端的にまとめます。</small>
               <small id="live-summary-note" class="field-hint warn-hint">AI 設定で Gemini API か Claude Code をオンにすると選べます。</small>
             </div>
             <label class="field">
@@ -677,11 +664,8 @@
 
             <label class="field field-row">
               <input id="input-auto-summarize" type="checkbox" />
-              <span>要約・タイトル生成</span>
+              <span>要約・タイトル生成<small class="field-hint" style="display:block">録音停止時に要約・タイトルを生成します。</small></span>
             </label>
-            <div class="field">
-              <small class="field-hint">録音停止時に要約・タイトルを生成します。</small>
-            </div>
             <div class="field">
               <span class="field-label">要約の詳しさ</span>
               <label class="field-row" style="margin-bottom:4px">
@@ -808,11 +792,8 @@
             <span class="field-label settings-sub-title">SUMADO</span>
             <label class="field field-row">
               <input id="input-sumado-meter" type="checkbox" />
-              <span>録音中、SUMADO のアイランドに声の大きさのメーターを出す</span>
+              <span>録音中、SUMADO のアイランドに声の大きさのメーターを出す<small class="field-hint" style="display:block">SUMADO の中で使っているときだけ働きます。</small></span>
             </label>
-            <div class="field">
-              <small class="field-hint">SUMADO の中で使っているときだけ働きます。</small>
-            </div>
             <span class="field-label settings-sub-title">字幕用設定（開発中）</span>
           <!-- v0.13.31: ここから下は字幕／オーバーレイ用設定。文字起こしペインは触らない。
                完全分離（dictation:liveCaption キー経由）。 -->
@@ -1151,18 +1132,18 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.100"></script>
-  <script src="motion.js?v=0.24.100"></script>
-  <script src="gemini.js?v=0.24.100"></script>
-  <script src="groq.js?v=0.24.100"></script>
-  <script src="notion.js?v=0.24.100"></script>
-  <script src="audio-store.js?v=0.24.100"></script>
-  <script src="claude-bridge.js?v=0.24.100"></script>
-  <script src="claude-installer.js?v=0.24.100"></script>
-  <script src="live-summary.js?v=0.24.100"></script>
-  <script src="image-store.js?v=0.24.100"></script>
-  <script src="gemini-files.js?v=0.24.100"></script>
-  <script src="term-dicts.js?v=0.24.100"></script>
-  <script src="app.js?v=0.24.100"></script>
+  <script src="icons.js?v=0.24.101"></script>
+  <script src="motion.js?v=0.24.101"></script>
+  <script src="gemini.js?v=0.24.101"></script>
+  <script src="groq.js?v=0.24.101"></script>
+  <script src="notion.js?v=0.24.101"></script>
+  <script src="audio-store.js?v=0.24.101"></script>
+  <script src="claude-bridge.js?v=0.24.101"></script>
+  <script src="claude-installer.js?v=0.24.101"></script>
+  <script src="live-summary.js?v=0.24.101"></script>
+  <script src="image-store.js?v=0.24.101"></script>
+  <script src="gemini-files.js?v=0.24.101"></script>
+  <script src="term-dicts.js?v=0.24.101"></script>
+  <script src="app.js?v=0.24.101"></script>
 </body>
 </html>
