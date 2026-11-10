@@ -3721,3 +3721,26 @@ p.settings-lead { margin: -2px 0 8px; }
 .modal .settings-acc-body label.field.field-block > .field-label { margin-bottom: 6px; }
 .modal .settings-acc-body label.field.field-block > select { width: 100%; max-width: 100%; }
 .modal .settings-acc-body label.field.field-block > .field-hint { margin-top: 6px; }
+
+/* ───────── Gemini の月別のグラフ（長押し・v0.24.110） ───────── */
+.usage-box { position: relative; overflow: visible; }
+#usage-gemini-total { cursor: pointer; user-select: none; -webkit-user-select: none; border-radius: 8px; transition: transform .25s cubic-bezier(.34,1.56,.64,1); align-self: flex-start; }
+#usage-gemini-total.pressing { transform: scale(0.97); }
+#usage-gemini-total:focus-visible { outline: 2px solid var(--heading); outline-offset: 3px; }
+.usage-chart { position: absolute; left: 10px; right: 10px; z-index: 5; padding: 12px 12px 10px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 12px 32px rgba(0,0,0,.45); transform-origin: 30% 0; }
+.usage-chart[hidden] { display: none; }
+.usage-chart-title { font-size: 12.5px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.usage-chart-bars { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; align-items: end; }
+.usage-chart-col { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.usage-chart-n, .usage-chart-c { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; min-height: 1em; }
+.usage-chart-bar { width: 100%; max-width: 26px; height: 90px; display: flex; align-items: flex-end; background: var(--bg-subtle); border-radius: 6px; overflow: hidden; }
+.usage-chart-bar > span { display: block; width: 100%; background: var(--accent); border-radius: 6px 6px 0 0; min-height: 0; }
+.usage-chart-col.current .usage-chart-bar > span { background: var(--heading); }
+.usage-chart-col.current .usage-chart-m { color: var(--text); font-weight: 700; }
+.usage-chart-m { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+
+/* Gemini の記録のリセット（v0.24.110）。消すものの文字ボタンは赤（SUMADO の仕様書 4.1） */
+.usage-actions { display: flex; justify-content: flex-end; }
+.usage-reset { appearance: none; border: none; background: none; color: var(--danger); font: inherit; font-size: 12.5px; padding: 2px 4px; cursor: pointer; border-radius: 6px; }
+.usage-reset:focus-visible { outline: 2px solid var(--heading); outline-offset: 2px; }

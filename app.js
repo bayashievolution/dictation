@@ -10690,6 +10690,78 @@ function usageMeter(label, used, limit, leftText) {
   return `<div class="usage-meter ${cls}"><div class="usage-meter-head"><span>${label}</span><span class="usage-left">${leftText}</span></div>`
     + `<div class="usage-bar"><span style="width:${(r * 100).toFixed(1)}%"></span></div></div>`;
 }
+/**
+ * Gemini の月別のグラフ (v0.24.110)
+ * やっさん「Gemini のトークンは、長押しすると月別のグラフが出るように」。
+ * 今月から前へ最大 12 か月（数え始めた月より前は出さない。少ないときも 6 本ぶんの幅で並べる）。
+ * 棒はトークン、上に数・下に月。今月は見出しの色。出し方は SUMADO のポップアップと同じ（少し行き過ぎてぽんと出る）
+ */
+function usageMonthlySeries(u, now) {
+  const keys = Object.keys((u && u.gemini) || {}).sort();
+  const out = [];
+  const d = new Date(now.getFullYear(), now.getMonth(), 1);
+  for (let i = 0; i < 12; i++) {
+    const k = usageMonthKey(d);
+    if (keys.length && k < keys[0] && out.length >= 6) break;
+    const m = (u.gemini || {})[k];
+    out.unshift({ key: k, month: d.getMonth() + 1, tokens: m ? m.text + m.audio + m.output : 0, cost: m ? usageGeminiCost(m) : 0 });
+    d.setMonth(d.getMonth() - 1);
+  }
+  return out;
+}
+function fmtCompact(n) {
+  if (n >= 1e8) return (n / 1e8).toFixed(1).replace(/\.0$/, '') + '億';
+  if (n >= 1e4) return (n / 1e4).toFixed(n >= 1e5 ? 0 : 1).replace(/\.0$/, '') + '万';
+  return fmtNum(n);
+}
+function openUsageChart() {
+  const anchor = document.getElementById('usage-gemini-total');
+  const pop = document.getElementById('usage-chart');
+  if (!anchor || !pop) return;
+  const now = new Date();
+  const series = usageMonthlySeries(usageLoad(), now);
+  const max = Math.max(1, ...series.map((x) => x.tokens));
+  const cur = usageMonthKey(now);
+  pop.innerHTML = `<div class="usage-chart-title">Gemini の月別のトークン</div><div class="usage-chart-bars">`
+    + series.map((x) => `<div class="usage-chart-col${x.key === cur ? ' current' : ''}" title="">`
+      + `<span class="usage-chart-n">${x.tokens ? fmtCompact(x.tokens) : ''}</span>`
+      + `<span class="usage-chart-bar"><span style="height:${(x.tokens / max * 100).toFixed(1)}%"></span></span>`
+      + `<span class="usage-chart-m">${x.month}月</span>`
+      + `<span class="usage-chart-c">${x.tokens ? fmtUsd(x.cost) : ''}</span></div>`).join('')
+    + `</div>`;
+  const box = document.getElementById('usage-card');
+  const br = box.getBoundingClientRect(), ar = anchor.getBoundingClientRect();
+  pop.style.top = (ar.bottom - br.top + 6) + 'px';
+  if (window.Motion) Motion.popIn(pop); else pop.hidden = false;
+}
+function closeUsageChart() {
+  const pop = document.getElementById('usage-chart');
+  if (!pop || pop.hidden) return;
+  if (window.Motion) Motion.popOut(pop); else pop.hidden = true;
+}
+/** 長押しで開く（0.45 秒。動かしたら取りやめ）。キーボードなら Enter・Space */
+function installUsageLongPress() {
+  const el = document.getElementById('usage-gemini-total');
+  if (!el) return;
+  let timer = null, x0 = 0, y0 = 0;
+  const cancel = () => { clearTimeout(timer); timer = null; el.classList.remove('pressing'); };
+  el.addEventListener('pointerdown', (e) => {
+    x0 = e.clientX; y0 = e.clientY;
+    el.classList.add('pressing');
+    timer = setTimeout(() => { timer = null; el.classList.remove('pressing'); openUsageChart(); }, 450);
+  });
+  el.addEventListener('pointermove', (e) => { if (timer && Math.hypot(e.clientX - x0, e.clientY - y0) > 8) cancel(); });
+  for (const t of ['pointerup', 'pointerleave', 'pointercancel']) el.addEventListener(t, cancel);
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openUsageChart(); } });
+}
+// 外を触ったら・Esc で閉じる（カードは描き直すので、入れ物の外側で 1 回だけ登録）
+document.addEventListener('pointerdown', (e) => {
+  const pop = document.getElementById('usage-chart');
+  if (pop && !pop.hidden && !pop.contains(e.target) && !(e.target.closest && e.target.closest('#usage-gemini-total'))) closeUsageChart();
+}, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeUsageChart(); });
+
 function renderUsageCard() {
   const box = document.getElementById('usage-card');
   if (!box || typeof usageLoad !== 'function') return;
@@ -10716,13 +10788,14 @@ function renderUsageCard() {
   box.innerHTML = `
     <div class="usage-block">
       <div class="usage-head"><strong>Gemini</strong><span class="usage-sub">${now.getMonth() + 1}月</span></div>
-      <div class="usage-big">${fmtNum(total)}<small>トークン</small><span class="usage-cost">料金の目安 ${fmtUsd(usageGeminiCost(mon))}</span></div>
+      <div class="usage-big" id="usage-gemini-total" tabindex="0" role="button" aria-label="Gemini の月別のトークン（長押しでグラフ）">${fmtNum(total)}<small>トークン</small><span class="usage-cost">料金の目安 ${fmtUsd(usageGeminiCost(mon))}</span></div>
       <div class="usage-stack" aria-label="入力（文字）・入力（音声）・出力の割合">
         <span class="seg-text" style="width:${pct(mon.text)}%"></span><span class="seg-audio" style="width:${pct(mon.audio)}%"></span><span class="seg-output" style="width:${pct(mon.output)}%"></span>
       </div>
       <div class="usage-legend"><span><i class="seg-text"></i>文字 ${fmtNum(mon.text)}</span><span><i class="seg-audio"></i>音声 ${fmtNum(mon.audio)}</span><span><i class="seg-output"></i>出力 ${fmtNum(mon.output)}</span></div>
       ${featRows ? `<div class="usage-features">${featRows}</div>` : ''}
       ${monthRows ? `<div class="usage-months">${monthRows}</div>` : ''}
+      <div class="usage-actions"><button type="button" class="usage-reset" id="btn-usage-reset">リセット</button></div>
       <small class="field-hint">料金は Gemini 2.5 Flash の単価（100万トークンあたり 文字 $${GEMINI_PRICE_PER_M.text.toFixed(2)}・音声 $${GEMINI_PRICE_PER_M.audio.toFixed(2)}・出力 $${GEMINI_PRICE_PER_M.output.toFixed(2)}）で計算した目安です。</small>
     </div>
     <div class="usage-block">
@@ -10732,7 +10805,29 @@ function renderUsageCard() {
       ${usageMeter('今日の回数', g.dayReq, GROQ_FREE.dayReq, `残り ${fmtNum(Math.max(0, GROQ_FREE.dayReq - g.dayReq))}回`)}
       ${hdrReq != null ? `<small class="field-hint">Groq の返事では、残り ${escapeHtmlSimple(String(hdrReq))} 回です。</small>` : ''}
       <small class="field-hint">このアプリから送った分を数えています。</small>
-    </div>`;
+    </div>
+    <div id="usage-chart" class="usage-chart" role="dialog" aria-label="Gemini の月別のトークン" hidden></div>`;
+  installUsageLongPress();   // v0.24.110: 描き直すたびに数字が新しくなるので、そのつど付け直す
+  const reset = document.getElementById('btn-usage-reset');
+  if (reset) reset.addEventListener('click', resetGeminiUsage);
+}
+
+/**
+ * Gemini のトークンの記録をリセット (v0.24.110・やっさん「トークンのリセットボタンをつけよう。リセット時は警告」)
+ * 消すのは Gemini の記録（全部の月）だけ。Groq の数は無料枠の残りに使っているので消さない（消すと残りが多く見えて嘘になる）
+ */
+async function resetGeminiUsage() {
+  if (!(await confirmDialog({
+    title: 'Gemini のトークンの記録をリセットしますか？',
+    message: '今月と前の月の記録がすべて消えます。元に戻せません。Groq の無料枠の残りは消しません。',
+    ok: 'リセット', destructive: true,
+  }))) return;
+  const u = usageLoad();
+  delete u.gemini;
+  usageSave(u);
+  diagLog.info('Gemini のトークンの記録をリセットしました');
+  closeUsageChart();
+  renderUsageCard();
 }
 
 /* ───────── 詳細設定のまとまり (v0.24.95・設定の見本の 4 段目) ─────────

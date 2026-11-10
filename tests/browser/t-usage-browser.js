@@ -57,6 +57,49 @@ const eq = (label, got, want) => {
   eq('Groq の残り（今日・この1時間・回数）', [text.includes('今日の音声'), text.includes('この1時間の音声'), text.includes('残り 1,999回')], [true, true, true]);
   eq('Groq の返事の残りも出る', text.includes('Groq の返事では、残り 1999 回'), true);
 
+  console.log('\n■ 長押しで月別のグラフ（v0.24.110）');
+  await page.evaluate(() => {
+    const u = JSON.parse(localStorage.getItem('dictation:usage'));
+    const d = new Date(); d.setMonth(d.getMonth() - 1);
+    const pk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    u.gemini[pk] = { calls: 9, text: 50000, audio: 30000, output: 20000, byFeature: {} };
+    localStorage.setItem('dictation:usage', JSON.stringify(u));
+    renderUsageCard();
+  });
+  await page.evaluate(() => document.getElementById('usage-gemini-total').scrollIntoView({ block: 'center' }));
+  const box = await page.$('#usage-gemini-total');
+  const bb = await box.boundingBox();
+  await page.mouse.move(bb.x + 20, bb.y + bb.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(150);
+  eq('押してすぐ（0.15 秒）は出ない', await page.evaluate(() => document.getElementById('usage-chart').hidden), true);
+  await page.waitForTimeout(500);
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+  eq('長押しで出る', await page.evaluate(() => document.getElementById('usage-chart').hidden), false);
+  const cols = await page.$$eval('.usage-chart-col', ns => ns.map(n => ({ m: n.querySelector('.usage-chart-m').textContent, cur: n.classList.contains('current'), h: parseFloat(n.querySelector('.usage-chart-bar > span').style.height) })));
+  eq('今月が右端で強調', cols[cols.length - 1].cur, true);
+  eq('6 本以上（数え始めた月より前は 0 で埋める）', cols.length >= 6, true);
+  eq('先月の棒が一番高い（100,000 > 1,020）', cols[cols.length - 2].h, 100);
+  await page.click('#settings-modal .modal-header h2');   // 設定の中の、グラフの外（暗い背景を押すと設定ごと閉じる）
+  await page.waitForTimeout(600);
+  eq('外を触ると閉じる', await page.evaluate(() => document.getElementById('usage-chart').hidden), true);
+
+  console.log('\n■ リセット（v0.24.110）');
+  await page.click('#btn-usage-reset');
+  await page.waitForTimeout(400);
+  eq('警告の小窓（赤いボタン）', [await page.textContent('#confirm-title'), await page.evaluate(() => document.getElementById('confirm-ok').classList.contains('btn-danger'))], ['Gemini のトークンの記録をリセットしますか？', true]);
+  await page.click('#confirm-cancel');
+  await page.waitForTimeout(400);
+  eq('キャンセルなら消えない', await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('dictation:usage')).gemini).length), 2);
+  await page.click('#btn-usage-reset');
+  await page.waitForTimeout(400);
+  await page.click('#confirm-ok');
+  await page.waitForTimeout(400);
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('dictation:usage')));
+  eq('Gemini の記録は消え、Groq の数は残る', [after.gemini, after.groq.daySec], [undefined, 15]);
+  eq('カードは 0 に', (await page.textContent('#usage-gemini-total')).startsWith('0'), true);
+
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');
   process.exit(fail ? 1 : 0);
