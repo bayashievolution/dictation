@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.106" />
+  <link rel="stylesheet" href="style.css?v=0.24.107" />
 </head>
 <body>
   <div id="app">
@@ -800,6 +800,12 @@
               <input id="input-sumado-meter" type="checkbox" />
               <span>録音中、SUMADO のアイランドに声の大きさのメーターを出す<small class="field-hint" style="display:block">SUMADO の中で使っているときだけ働きます。</small></span>
             </label>
+            <!-- v0.24.107: 文字起こし比較ページ（stt-compare.html）を開くボタン。やっさんの検証用。**一般公開のときに消す**（TODO に書いた）。
+                 拡張の ID を知らなくても開けるよう、同じ場所のページを新しいタブで開く（拡張でもブラウザ版でも同じ書き方で開ける） -->
+            <span class="field-label settings-sub-title">検証用（開発中）</span>
+            <div class="field">
+              <a id="btn-open-stt-compare" class="btn btn-ghost btn-sm" href="stt-compare.html" target="_blank" rel="noopener">文字起こし比較ページを開く</a>
+            </div>
             <span class="field-label settings-sub-title">字幕用設定（開発中）</span>
           <!-- v0.13.31: ここから下は字幕／オーバーレイ用設定。文字起こしペインは触らない。
                完全分離（dictation:liveCaption キー経由）。 -->
@@ -1150,19 +1156,19 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.106"></script>
-  <script src="motion.js?v=0.24.106"></script>
-  <script src="usage.js?v=0.24.106"></script>
-  <script src="gemini.js?v=0.24.106"></script>
-  <script src="groq.js?v=0.24.106"></script>
-  <script src="notion.js?v=0.24.106"></script>
-  <script src="audio-store.js?v=0.24.106"></script>
-  <script src="claude-bridge.js?v=0.24.106"></script>
-  <script src="claude-installer.js?v=0.24.106"></script>
-  <script src="live-summary.js?v=0.24.106"></script>
-  <script src="image-store.js?v=0.24.106"></script>
-  <script src="gemini-files.js?v=0.24.106"></script>
-  <script src="term-dicts.js?v=0.24.106"></script>
-  <script src="app.js?v=0.24.106"></script>
+  <script src="icons.js?v=0.24.107"></script>
+  <script src="motion.js?v=0.24.107"></script>
+  <script src="usage.js?v=0.24.107"></script>
+  <script src="gemini.js?v=0.24.107"></script>
+  <script src="groq.js?v=0.24.107"></script>
+  <script src="notion.js?v=0.24.107"></script>
+  <script src="audio-store.js?v=0.24.107"></script>
+  <script src="claude-bridge.js?v=0.24.107"></script>
+  <script src="claude-installer.js?v=0.24.107"></script>
+  <script src="live-summary.js?v=0.24.107"></script>
+  <script src="image-store.js?v=0.24.107"></script>
+  <script src="gemini-files.js?v=0.24.107"></script>
+  <script src="term-dicts.js?v=0.24.107"></script>
+  <script src="app.js?v=0.24.107"></script>
 </body>
 </html>

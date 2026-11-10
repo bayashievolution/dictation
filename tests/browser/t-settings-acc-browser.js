@@ -60,7 +60,14 @@ const eq = (label, got, want) => {
   await page.waitForTimeout(900);
   eq('もう一度押すと閉じる', await page.evaluate(() => [...document.querySelectorAll('.settings-acc')].find(x => x.textContent.includes('停止条件')).querySelector('.settings-acc-body').hidden), true);
 
-  eq('そのほかに SUMADO・字幕・診断ログ', await page.$$eval('#settings-other-group .settings-sub-title', ns => ns.map(n => n.textContent)), ['SUMADO', '字幕用設定（開発中）', '診断ログ']);
+  eq('そのほかに SUMADO・検証用・字幕・診断ログ', await page.$$eval('#settings-other-group .settings-sub-title', ns => ns.map(n => n.textContent)), ['SUMADO', '検証用（開発中）', '字幕用設定（開発中）', '診断ログ']);
+  // v0.24.107: 比較ページを新しいタブで開く（やっさんの検証用・一般公開のときに消す）
+  await page.evaluate(() => [...document.querySelectorAll('.settings-acc')].find(x => x.id === 'settings-other-group').querySelector('.settings-acc-head').click());
+  await page.waitForTimeout(800);
+  const [popup] = await Promise.all([page.context().waitForEvent('page'), page.click('#btn-open-stt-compare')]);
+  await popup.waitForLoadState();
+  eq('「文字起こし比較ページを開く」で比較ページが新しいタブで開く', [popup.url().endsWith('/stt-compare.html'), await popup.title()], [true, '文字起こし比較 — dictation']);
+  await popup.close();
   await page.check('#mode-webspeech');
   await page.waitForTimeout(800);
   eq('Web Speech にすると「録音の保持」のまとまりは隠れる（今までどおり）', await page.evaluate(() => document.getElementById('keep-recording-group').hidden), true);

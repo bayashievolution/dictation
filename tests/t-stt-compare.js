@@ -118,7 +118,8 @@ console.log('\n■ 拡張から Groq に届くか');
   const html = fs.readFileSync(path.join(SRC, 'stt-compare.html'), 'utf8');
   eq('比較ページに inline script が無い（拡張の CSP で止まる）', /<script>(?!\s*<\/script>)/.test(html), false);
   const idx = fs.readFileSync(path.join(SRC, 'index.html'), 'utf8');
-  eq('本体は比較ページのファイルを読み込まない', /stt-compare/.test(idx), false);
+  // v0.24.107: 設定に「比較ページを開く」リンク（新しいタブで開くだけ）を足した。見るのは、本体が比較ページの JS を読み込んでいないこと
+  eq('本体は比較ページの JS を読み込まない', /<script[^>]+stt-compare/.test(idx), false);
 }
 
 console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');
