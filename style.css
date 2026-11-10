@@ -3701,3 +3701,23 @@ p.settings-lead { margin: -2px 0 8px; }
 .usage-meter.over .usage-left { color: var(--danger); }
 .usage-months { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-muted); border-top: 1px dashed var(--border); padding-top: 6px; }
 .usage-months > div { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+
+/* v0.24.108: 数字・選ぶ欄も、トグルと同じく「名前と説明は左、欄は右の列で上下まんなか」（やっさん「数値入力も入れ子内の右カラムで」）。
+   v0.24.101 は説明が欄の下まで行いっぱいに伸びていた */
+.modal .settings-acc-body label.field:has(> .number-stepper),
+.modal .settings-acc-body label.field:has(> select) {
+  grid-template-areas: "name ctrl" "hint ctrl";
+  row-gap: 2px;
+}
+.modal .settings-acc-body label.field:has(> .number-stepper) > .field-label,
+.modal .settings-acc-body label.field:has(> select) > .field-label { grid-area: name; align-self: end; }
+.modal .settings-acc-body label.field:has(> .number-stepper) > .number-stepper,
+.modal .settings-acc-body label.field:has(> select) > select { grid-area: ctrl; align-self: center; }
+.modal .settings-acc-body label.field:has(> .number-stepper) > .field-hint,
+.modal .settings-acc-body label.field:has(> select) > .field-hint { grid-area: hint; grid-column: auto; align-self: start; margin-top: 0; }
+
+/* v0.24.108: 例外（やっさんの指定）。「音声ファイルの取り扱い」は選択肢の字が長いので、名前の下に欄を行いっぱい・説明はその下 */
+.modal .settings-acc-body label.field.field-block { display: block; }
+.modal .settings-acc-body label.field.field-block > .field-label { margin-bottom: 6px; }
+.modal .settings-acc-body label.field.field-block > select { width: 100%; max-width: 100%; }
+.modal .settings-acc-body label.field.field-block > .field-hint { margin-top: 6px; }

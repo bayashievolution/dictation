@@ -46,10 +46,25 @@ const eq = (label, got, want) => {
     .map(id => !!document.getElementById(id).parentElement.querySelector('span > .field-hint'))), [true, true, true, true]);
 
   const numLeft = await page.evaluate(() => [...document.querySelectorAll('#settings-modal .settings-acc-body label.field > .number-stepper')]
-    .filter(x => x.offsetParent !== null)
-    .filter(x => { const lab = x.parentElement.querySelector('.field-label').getBoundingClientRect(), r = x.getBoundingClientRect(); return !(r.left >= lab.right - 1 && Math.abs(r.top - lab.top) < 30); })
+    .filter(x => x.offsetParent !== null && !x.parentElement.classList.contains('field-block'))
+    .filter(x => { const lab = x.parentElement.querySelector('.field-label').getBoundingClientRect(), r = x.getBoundingClientRect(); return !(r.left >= lab.right - 1); })   // 上下の位置は下の「上下まんなか」で見る（v0.24.108）
     .map(x => x.parentElement.querySelector('.field-label').textContent));
   eq('数字の欄は名前の右', numLeft, []);
+  // v0.24.108: 数字・選ぶ欄は右の列で、名前と説明をあわせたまとまりの上下まんなか。説明は欄の下にはみ出さない
+  const offCtl = await page.evaluate(() => [...document.querySelectorAll('#settings-modal .settings-acc-body label.field > .number-stepper, #settings-modal .settings-acc-body label.field > select')]
+    .filter(x => x.offsetParent !== null && !x.parentElement.classList.contains('field-block'))   // 例外（音声ファイルの取り扱い）は除く
+    .filter(x => {
+      const row = x.parentElement.getBoundingClientRect(), r = x.getBoundingClientRect(), hint = x.parentElement.querySelector('.field-hint');
+      const centered = Math.abs((row.top + row.bottom) / 2 - (r.top + r.bottom) / 2) <= 3;
+      const hintLeft = !hint || hint.offsetParent === null || hint.getBoundingClientRect().right <= r.left + 1;
+      return !(centered && hintLeft);
+    }).map(x => x.parentElement.querySelector('.field-label').textContent));
+  eq('数字・選ぶ欄は右の列で上下まんなか（説明は左の列）', offCtl, []);
+  eq('例外: 音声ファイルの取り扱いは、欄が名前の下で行いっぱい', await page.evaluate(() => {
+    const sel = document.getElementById('input-audio-retention'), lab = sel.parentElement.querySelector('.field-label').getBoundingClientRect(), r = sel.getBoundingClientRect(), row = sel.parentElement.getBoundingClientRect();
+    return [r.top >= lab.bottom - 1, Math.abs(r.width - row.width) <= 2];
+  }), [true, true]);
+  eq('音声入力デバイスの説明', await page.evaluate(() => document.getElementById('input-audio-device').parentElement.querySelector('.field-hint').textContent), 'AIでの聞き取りに使用する音声入力デバイスを指定します。');
   eq('見出しに線の絵', await page.$$eval('#settings-modal .settings-section > .field-group-title .section-icon', ns => ns.map(n => n.dataset.icon)), ['sm-mic', 'sm-sparkle', 'sm-tick', 'sm-gear', 'sm-battery']);   // v0.24.104: いちばん下に使用量
   eq('中身は角の丸い箱', await page.$$eval('#settings-modal .settings-box', ns => ns.length >= 4 && ns.every(n => getComputedStyle(n).borderRadius === '12px')), true);
 
