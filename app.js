@@ -10693,16 +10693,17 @@ function usageMeter(label, used, limit, leftText) {
 /**
  * Gemini の月別のグラフ (v0.24.110)
  * やっさん「Gemini のトークンは、長押しすると月別のグラフが出るように」。
- * 今月から前へ最大 12 か月（数え始めた月より前は出さない。少ないときも 6 本ぶんの幅で並べる）。
+ * 今月から前へ 6 か月（v0.24.116 で 12 か月から減らした）。
  * 棒はトークン、上に数・下に月。今月は見出しの色。出し方は SUMADO のポップアップと同じ（少し行き過ぎてぽんと出る）
  */
 function usageMonthlySeries(u, now) {
   const keys = Object.keys((u && u.gemini) || {}).sort();
   const out = [];
   const d = new Date(now.getFullYear(), now.getMonth(), 1);
-  for (let i = 0; i < 12; i++) {
+  // v0.24.116: 最近 6 か月だけ（やっさん「ぎゅうぎゅう詰め」。12 本はサイドパネルの幅に入らない）。
+  // 前は記録が 1 つも無いと 12 本並んでいた（「数え始めた月より前は出さない」の条件が、記録が無いときに効いていなかった）
+  for (let i = 0; i < 6; i++) {
     const k = usageMonthKey(d);
-    if (keys.length && k < keys[0] && out.length >= 6) break;
     const m = (u.gemini || {})[k];
     out.unshift({ key: k, month: d.getMonth() + 1, tokens: m ? m.text + m.audio + m.output : 0, cost: m ? usageGeminiCost(m) : 0 });
     d.setMonth(d.getMonth() - 1);

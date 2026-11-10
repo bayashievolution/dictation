@@ -79,7 +79,7 @@ const eq = (label, got, want) => {
   eq('押すと出る', await page.evaluate(() => document.getElementById('usage-chart').hidden), false);
   const cols = await page.$$eval('.usage-chart-col', ns => ns.map(n => ({ m: n.querySelector('.usage-chart-m').textContent, cur: n.classList.contains('current'), h: parseFloat(n.querySelector('.usage-chart-bar > span').style.height) })));
   eq('今月が右端で強調', cols[cols.length - 1].cur, true);
-  eq('6 本以上（数え始めた月より前は 0 で埋める）', cols.length >= 6, true);
+  eq('最近 6 か月だけ（v0.24.116・12 本は詰まりすぎ）', cols.length, 6);
   eq('先月の棒が一番高い（100,000 > 1,020）', cols[cols.length - 2].h, 100);
   await page.click('#usage-gemini-total');
   await page.waitForTimeout(600);
@@ -89,6 +89,14 @@ const eq = (label, got, want) => {
   await page.click('#settings-modal .modal-header h2');   // 設定の中の、グラフの外（暗い背景を押すと設定ごと閉じる）
   await page.waitForTimeout(600);
   eq('外を触ると閉じる', await page.evaluate(() => document.getElementById('usage-chart').hidden), true);
+
+  console.log('\n■ 記録が 1 つも無くても 6 本（v0.24.116。前は 12 本並んでいた）');
+  const saved = await page.evaluate(() => localStorage.getItem('dictation:usage'));
+  await page.evaluate(() => { localStorage.setItem('dictation:usage', '{}'); renderUsageCard(); openUsageChart(); });
+  await page.waitForTimeout(400);
+  eq('記録なしでも 6 本', await page.$$eval('.usage-chart-col', ns => ns.length), 6);
+  await page.evaluate((v) => { closeUsageChart(); localStorage.setItem('dictation:usage', v); renderUsageCard(); }, saved);
+  await page.waitForTimeout(500);
 
   console.log('\n■ リセット（v0.24.110）');
   await page.click('#btn-usage-reset');
