@@ -106,6 +106,17 @@ const eq = (label, got, want) => {
   eq('Gemini の記録は消え、Groq の数は残る', [after.gemini, after.groq.daySec], [undefined, 15]);
   eq('カードは 0 に', (await page.textContent('#usage-gemini-total')).startsWith('0'), true);
 
+  console.log('\n■ Groq のリセット（v0.24.112・Gemini とは別）');
+  await page.evaluate(() => { const u = JSON.parse(localStorage.getItem('dictation:usage')); u.gemini = { '2026-01': { calls: 1, text: 5, audio: 0, output: 0, byFeature: {} } }; localStorage.setItem('dictation:usage', JSON.stringify(u)); renderUsageCard(); });
+  await page.click('#btn-usage-reset-groq');
+  await page.waitForTimeout(400);
+  eq('警告に「残りが実際より多く見える」と書く', [await page.textContent('#confirm-title'), (await page.textContent('#confirm-message')).includes('実際より多く見えます')], ['Groq の使用量をリセットしますか？', true]);
+  await page.click('#confirm-ok');
+  await page.waitForTimeout(400);
+  const g2 = await page.evaluate(() => JSON.parse(localStorage.getItem('dictation:usage')));
+  eq('Groq の数だけ消え、Gemini は残る', [g2.groq, !!g2.gemini], [undefined, true]);
+  eq('輪は満タンに', await page.$eval('#usage-card .usage-ring.big', n => n.dataset.rem), '1.0000');
+
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');
   process.exit(fail ? 1 : 0);

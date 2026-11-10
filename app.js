@@ -10839,6 +10839,7 @@ function renderUsageCard() {
         </div>
       </div>
       ${hdrReq != null ? `<small class="field-hint">Groq の返事では、残り ${escapeHtmlSimple(String(hdrReq))} 回です。</small>` : ''}
+      <div class="usage-actions"><button type="button" class="usage-reset" id="btn-usage-reset-groq">リセット</button></div>
       <small class="field-hint">このアプリから送った分を数えています。</small>
     </div>
     <div id="usage-chart" class="usage-chart" role="dialog" aria-label="Gemini の月別のトークン" hidden></div>`;
@@ -10846,12 +10847,31 @@ function renderUsageCard() {
   animateUsageRings(box);   // v0.24.111
   const reset = document.getElementById('btn-usage-reset');
   if (reset) reset.addEventListener('click', resetGeminiUsage);
+  const resetGroq = document.getElementById('btn-usage-reset-groq');   // v0.24.112
+  if (resetGroq) resetGroq.addEventListener('click', resetGroqUsage);
 }
 
 /**
  * Gemini のトークンの記録をリセット (v0.24.110・やっさん「トークンのリセットボタンをつけよう。リセット時は警告」)
  * 消すのは Gemini の記録（全部の月）だけ。Groq の数は無料枠の残りに使っているので消さない（消すと残りが多く見えて嘘になる）
  */
+/**
+ * Groq の数をリセット (v0.24.112・やっさん「リセットは Gemini、Groq 個別でできるように」)
+ * 消すと、Groq 側ではもう使った分があっても、ここでは残りが満タンに見える。それを警告で伝える（できないことをできると言わない）
+ */
+async function resetGroqUsage() {
+  if (!(await confirmDialog({
+    title: 'Groq の使用量をリセットしますか？',
+    message: '今日とこの1時間の数が 0 に戻ります。Groq 側で使った分は減らないので、ここでの残りは実際より多く見えます。元に戻せません。',
+    ok: 'リセット', destructive: true,
+  }))) return;
+  const u = usageLoad();
+  delete u.groq;
+  usageSave(u);
+  diagLog.info('Groq の使用量をリセットしました');
+  renderUsageCard();
+}
+
 async function resetGeminiUsage() {
   if (!(await confirmDialog({
     title: 'Gemini のトークンの記録をリセットしますか？',
