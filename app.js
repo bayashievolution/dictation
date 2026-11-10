@@ -12220,6 +12220,36 @@ if (els.inputClaudeCode) {
     if (els.inputAudioBitrate) els.inputAudioBitrate.value = String(d.audioBitrate);
   });
 }
+// v0.24.113: AI の動き・停止条件・表示にも「既定値に戻す」（やっさんの指定）。音声入力と同じく、欄の値を戻すだけ（保存で決まる）。
+// トグル・欄の出し入れ（ライブ要約の間隔など）が値に合わせて変わるよう、change を送る
+{
+  const setVal = (el, v) => { if (el) { el.value = String(v); el.dispatchEvent(new Event('input', { bubbles: true })); } };
+  const setChk = (el, v) => { if (el && !el.disabled) { el.checked = !!v; el.dispatchEvent(new Event('change', { bubbles: true })); } };
+  const d = DEFAULT_SETTINGS;
+  const on = (id, fn) => { const b = document.getElementById(id); if (b) b.addEventListener('click', fn); };
+  on('btn-ai-defaults', () => {
+    setChk(els.inputClaudeFallback, d.claudeFallbackGemini);
+    setChk(els.inputAiEnabled, d.aiEnabled);
+    setVal(els.inputSilenceSec, d.silenceSec);
+    setVal(els.inputMidConsolidateSec, d.midConsolidateSec);
+    setChk(els.inputLiveSummary, d.liveSummary);
+    setVal(els.inputLiveSummaryMin, d.liveSummaryMin);
+    setChk(els.inputAutoSummarize, d.autoSummarize);
+    const det = { low: els.summaryDetailLow, medium: els.summaryDetailMedium, high: els.summaryDetailHigh }[d.summaryDetail || 'medium'];
+    if (det) det.checked = true;
+  });
+  on('btn-autostop-defaults', () => {
+    setChk(els.inputAutoStop, d.autoStopEnabled);
+    setVal(els.inputAutoStopSec, d.autoStopSec);
+  });
+  on('btn-display-defaults', () => {
+    settingsWorkingOrder = d.paneOrder.slice();
+    renderPaneOrderList();
+    setVal(els.fontTranscript, d.transcriptFont); setVal(els.sizeTranscript, d.transcriptSize);
+    setVal(els.fontMemo, d.memoFont); setVal(els.sizeMemo, d.memoSize);
+    setVal(els.fontSummary, d.summaryFont); setVal(els.sizeSummary, d.summarySize);
+  });
+}
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });
 }
