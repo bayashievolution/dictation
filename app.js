@@ -1829,12 +1829,12 @@ async function refineWholeTranscript({ showFeedback = true } = {}) {
   const chunkNote = willChunk
     ? `\n\n⚠️ 長文のため、段落境界で分割して順次整形します（約${Math.ceil(allText.length / 3000)}チャンク、各 3000字 目安）。`
     : '';
-  if (!confirm(
-    `現在の文字起こし ${lengthStr} 文字を、見出し付きで再整形します。\n` +
-    `既存のパラグラフ構造は置き換わります。${chunkNote}\n\n` +
-    `もし結果がおかしければ「戻す」（Ctrl+Z）で元に戻せます。\n\n` +
-    `続けますか？`
-  )) return;
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  if (!(await confirmDialog({
+    title: `文字起こし ${lengthStr} 文字を、見出し付きで整形し直しますか？`,
+    message: `いまの段落の分け方は置き換わります。${chunkNote.replace(/^\n+/, '\n')}\n結果がおかしければ Ctrl+Z で戻せます。`,
+    ok: '整形し直す',
+  }))) return;
 
   // 破壊的操作なので Undo スナップショット
   pushUndo('全体整形', 'pane-transcript');
@@ -3598,7 +3598,8 @@ function updateDiarizeButton() {
 async function runDiarization() {
   const r = diarizationState();
   if (r.running) {
-    if (confirm('話者判別を中止しますか？\n\nここまでに書き出した分はそのまま残ります。')) {
+    // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+    if (await confirmDialog({ title: '話者判別を中止しますか？', message: 'ここまでに書き出した分はそのまま残ります。', ok: '中止する', destructive: true })) {
       r.cancel.aborted = true;
       setStatus('idle', '話者判別を中止しています…');
     }
@@ -3647,30 +3648,27 @@ async function runDiarization() {
   const saved = session.repass;
   if (saved && saved.turns && saved.turns.length) {
     const when = new Date(saved.doneAt).toLocaleString('ja-JP');
-    if (confirm(
-      `${when} に作った話者付きの結果が、このタブに保存されています。\n\n`
-      + `　発言: ${saved.turns.length}件\n`
-      + `　話者: ${(saved.speakers || []).length}人\n\n`
-      + `この結果を画面に貼り直しますか？（トークンはかかりません）\n\n`
-      + `［OK］保存された結果を貼り直す\n`
-      + `［キャンセル］録音からもう一度作り直す（前の結果は上書きされます）`
-    )) {
-      restoreDiarizationResult(session, { ask: false });
+    // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+    // 「作り直す」を選ぶと、次の確認（話者判別をかけるか）へ進む（前の confirm の［キャンセル］と同じ）
+    if (await confirmDialog({
+      title: '保存してある話者付きの結果を貼り直しますか？',
+      message: `${when} に作った結果（発言 ${saved.turns.length}件・話者 ${(saved.speakers || []).length}人）が、このタブに保存されています。貼り直すならトークンはかかりません。\n「作り直す」を選ぶと、録音からもう一度作ります（前の結果は上書きされます）。`,
+      ok: '貼り直す', cancel: '作り直す',
+    })) {
+      await restoreDiarizationResult(session, { ask: false });
       return;
     }
   }
 
-  if (!confirm(
-    `この録音に話者判別をかけます。\n\n`
-    + `保管した録音をまとめて Gemini に通し、話者付きで書き起こし直します。\n\n`
-    + `　音声: 約${mins}分 / ${formatBytes(totalBytes)} / ${segments.length}区間\n`
-    + `　入力トークン: 約${approxTokens.toLocaleString()}（音声は1秒=32トークン）\n\n`
-    + `⚠️ 録音全体をもう一度 Gemini にアップロードします（Google ドライブではありません）。\n`
-    + `　 使い終わったファイルはこちらから削除しますが、\n`
-    + `　 削除できなかった場合も Gemini 側で48時間後に自動削除されます。\n\n`
-    + `いまの文字起こしは置き換わります（Ctrl+Z で戻せます）。\n\n`
-    + `続けますか？`
-  )) return;
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  if (!(await confirmDialog({
+    title: 'この録音に話者判別をかけますか？',
+    message: `保管した録音をまとめて Gemini に通し、話者付きで書き起こし直します。\n`
+      + `音声: 約${mins}分・${formatBytes(totalBytes)}・${segments.length}区間／入力トークン: 約${approxTokens.toLocaleString()}（音声は1秒=32トークン）\n`
+      + `録音全体をもう一度 Gemini にアップロードします（Google ドライブではありません）。使い終わったファイルはこちらから削除しますが、削除できなかった場合も Gemini 側で48時間後に自動削除されます。\n`
+      + `いまの文字起こしは置き換わります（Ctrl+Z で戻せます）。`,
+    ok: '話者判別をかける',
+  }))) return;
 
   r.running = true;
   r.cancel = { aborted: false };
@@ -3857,20 +3855,19 @@ function saveDiarizationResult(session, { speakers, turns }) {
  * 話者判別本体と同じ形（1発言＝1段落）で組み直す。
  * **先に pushUndo する**ので、貼り直しも取り消せる。
  */
-function restoreDiarizationResult(session, { ask = true } = {}) {
+async function restoreDiarizationResult(session, { ask = true } = {}) {
   const saved = session && session.repass;
   if (!saved || !saved.turns || !saved.turns.length) return false;
 
   const when = new Date(saved.doneAt).toLocaleString('ja-JP');
   const names = (saved.speakers || []).map(x => x.label).join('、');
   // 呼び出し側ですでに聞いている場合は二重に聞かない
-  if (ask && !confirm(
-    `${when} に作った話者付きの結果が、このタブに保存されています。\n\n`
-    + `　発言: ${saved.turns.length}件\n`
-    + `　話者: ${(saved.speakers || []).length}人${names ? `（${names}）` : ''}\n\n`
-    + `いまの文字起こしを、この結果で置き換えますか？\n`
-    + `（いまの内容は Ctrl+Z で戻せます）`
-  )) return false;
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  if (ask && !(await confirmDialog({
+    title: 'いまの文字起こしを、保存してある話者付きの結果で置き換えますか？',
+    message: `${when} に作った結果（発言 ${saved.turns.length}件・話者 ${(saved.speakers || []).length}人${names ? `（${names}）` : ''}）。いまの内容は Ctrl+Z で戻せます。`,
+    ok: '置き換える',
+  }))) return false;
 
   pushUndo('話者付きの結果を貼り直し', 'pane-transcript');
   const container = getWriteContainer();
@@ -5537,21 +5534,21 @@ async function ensureTranscriptSettled(sessions) {
   const list = Array.isArray(sessions) ? sessions : null;
   if (list && recId && !list.some((x) => x && x.id === recId)) return true;
   if (state.isRecording) {
-    return confirm(
-      '録音中です。\n'
-      + 'いま保存すると、これから確定する分は含まれません。\n\n'
-      + '録音を止めてから保存することをおすすめします。このまま続けますか？'
-    );
+    // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+    return confirmDialog({
+      title: '録音中です。このまま保存しますか？',
+      message: 'いま保存すると、これから確定する分は含まれません。録音を止めてから保存することをおすすめします。',
+      ok: 'このまま保存',
+    });
   }
 
   if (state.audioInFlightCount > 0) {
     const n = state.audioInFlightCount;
-    const wait = confirm(
-      `まだ確定していない文字起こしが ${n} 件あります。\n`
-      + 'いま保存すると、その分は含まれません。\n\n'
-      + '「OK」= 確定を待ってから保存します（最大30秒）\n'
-      + '「キャンセル」= 保存をやめます'
-    );
+    const wait = await confirmDialog({
+      title: `まだ確定していない文字起こしが ${n} 件あります`,
+      message: 'いま保存すると、その分は含まれません。確定を待ってから保存します（最大30秒）。',
+      ok: '待ってから保存', cancel: '保存をやめる',
+    });
     if (!wait) return false;
 
     const deadline = Date.now() + 30000;
@@ -5559,10 +5556,11 @@ async function ensureTranscriptSettled(sessions) {
       await new Promise(r => setTimeout(r, 500));
     }
     if (state.audioInFlightCount > 0) {
-      return confirm(
-        `30秒待ちましたが、まだ ${state.audioInFlightCount} 件が確定していません。\n`
-        + 'このまま保存しますか？（その分は含まれません）'
-      );
+      return confirmDialog({
+        title: `30秒待ちましたが、まだ ${state.audioInFlightCount} 件が確定していません`,
+        message: 'このまま保存すると、その分は含まれません。',
+        ok: 'このまま保存',
+      });
     }
     // 待っている間に確定した分を取り込む
     snapshotActiveToSession();
@@ -6354,12 +6352,13 @@ function importSessionData(s) {
 }
 
 /** 全セッション一括HTMLから読み取ったセッション配列を現状に追加インポート */
-function importMultipleSessions(sessions) {
+async function importMultipleSessions(sessions) {
   if (!Array.isArray(sessions) || sessions.length === 0) {
     alert('インポートするセッションがありません');
     return;
   }
-  if (!confirm(`${sessions.length}個のセッションをインポートします。現在のタブに追加されます。よろしいですか？`)) {
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  if (!(await confirmDialog({ title: `${sessions.length}個のセッションを読み込みますか？`, message: 'いまのタブに追加されます。', ok: '読み込む' }))) {
     return;
   }
   if (state.isRecording) stopRecording();
@@ -6505,7 +6504,7 @@ async function loadFromFile(file) {
   }
 }
 
-function clearPane(paneId, { confirmFirst = true, skipUndo = false } = {}) {
+async function clearPane(paneId, { confirmFirst = true, skipUndo = false } = {}) {
   const label = PANE_META[paneId]?.label || paneId;
   const hasContent = paneId === 'pane-transcript' ? !!getConfirmedText()
     : paneId === 'pane-memo' ? !!getMemoText()
@@ -6514,7 +6513,9 @@ function clearPane(paneId, { confirmFirst = true, skipUndo = false } = {}) {
     : paneId === 'pane-chat' ? !!getChatText()
     : false;
   if (!hasContent) return;
-  if (confirmFirst && !confirm(`「${label}」をクリアしますか？\n\nCtrl+Z で戻せます。`)) return;
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  // 確認が要らないとき（全部クリアから呼ぶとき）は待たずにその場で消す（呼び出し側は await しない）
+  if (confirmFirst && !(await confirmDialog({ title: `「${label}」をクリアしますか？`, message: 'Ctrl+Z で戻せます。', ok: 'クリア', destructive: true }))) return;
   if (!skipUndo && PANE_FIELD[paneId]) pushUndo(`クリア: ${label}`, paneId);
   if (paneId === 'pane-transcript') {
     els.confirmed.innerHTML = '';
@@ -6540,9 +6541,10 @@ function clearPane(paneId, { confirmFirst = true, skipUndo = false } = {}) {
   persistSessions();
 }
 
-function clearAllPanes() {
+async function clearAllPanes() {
   if (!hasAnyContent()) return;
-  if (!confirm('このセッションの4タブ（文字起こし・メモ・要約・質問）をすべてクリアしますか？\n\nCtrl+Z（Undo）で元に戻せます。')) return;
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  if (!(await confirmDialog({ title: 'このタブの中身をすべてクリアしますか？', message: '文字起こし・メモ・要約・ライブ要約・質問が消えます。Ctrl+Z で戻せます。', ok: 'すべてクリア', destructive: true }))) return;
   // 各ペインにスナップショット（chatは対象外）
   for (const pid of Object.keys(PANE_FIELD)) pushUndo('全タブクリア', pid);
   clearPane('pane-transcript', { confirmFirst: false, skipUndo: true });
@@ -8070,7 +8072,7 @@ function dictMenuOpen() {
  * 自動で育った語をその場限りで捨てず、次の録音でも使えるようにする。
  * 手入力の語も一緒に入れる（どちらも「この分野で出る語」なので）。
  */
-function saveAutoAsDict() {
+async function saveAutoAsDict() {
   const s = getActiveSession();
   if (!s) return;
   const terms = mergeTermSources({
@@ -8090,7 +8092,8 @@ function saveAutoAsDict() {
   const dicts = state.settings.termDicts || (state.settings.termDicts = []);
   const existing = dicts.find(d => d.name === trimmed);
   if (existing) {
-    if (!confirm(`「${trimmed}」は既にあります。語を足しますか？\n（既存の語は消えません）`)) return;
+    // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+    if (!(await confirmDialog({ title: `「${trimmed}」は既にあります。語を足しますか？`, message: '今ある語は消えません。', ok: '語を足す' }))) return;
     // 既存に足す。重複は mergeTermSources が落とす
     existing.terms = mergeTermSources({ manual: existing.terms, dict: terms }).terms;
   } else {
@@ -12670,11 +12673,12 @@ function searchReplaceOne() {
     updateSearchCounter();
   }
 }
-function searchReplaceAll() {
+async function searchReplaceAll() {
   const n = searchState.matches.length;
   if (n === 0) return;
   const repl = document.getElementById('search-replace').value;
-  if (!confirm(`${n}件を「${repl || '（空文字）'}」に置換しますか？\n\nCtrl+Z で戻せます。`)) return;
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  if (!(await confirmDialog({ title: `${n}件を「${repl || '（空文字）'}」に置換しますか？`, message: 'Ctrl+Z で戻せます。', ok: '置換', destructive: true }))) return;
   // 検索の対象ペインで Undo スタックを積む
   pushUndo(`全置換 (${n}件)`, state.activePane);
   for (const m of searchState.matches) {

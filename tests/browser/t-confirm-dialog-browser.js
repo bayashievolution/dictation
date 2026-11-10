@@ -67,7 +67,7 @@ const eq = (label, got, want) => {
   eq('2 枚閉じる', await count(), n1 - 2);
 
   console.log('\n■ Notion の前回の保存先を忘れる');
-  await page.evaluate(() => openSettings());
+  await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });   // v0.24.95 から Notion 連携はたたんである
   await page.waitForTimeout(400);
   await page.evaluate(() => document.getElementById('btn-notion-forget').scrollIntoView({ block: 'center' }));
   eq('赤い丸の × が保存先の名前の左にある', await page.evaluate(() => {
@@ -85,6 +85,20 @@ const eq = (label, got, want) => {
   await page.click('#confirm-ok');
   await page.waitForTimeout(400);
   eq('「忘れる」で忘れる・× は隠れる', [await page.evaluate(() => state.settings.notionLastDataSourceTitle), await page.isVisible('#btn-notion-forget')], ['', false]);
+
+  console.log('\n■ タブのクリア・全部置換（v0.24.117）');
+  await page.evaluate(() => { closeSettings(); els.confirmed.innerHTML = '<div class="paragraph">消す文</div>'; snapshotActiveToSession(); });
+  await page.evaluate(() => { clearPane('pane-transcript'); });
+  await page.waitForTimeout(400);
+  eq('クリアの確認は自前の小窓（赤いボタン）', [await shown(), await page.textContent('#confirm-title'), await page.evaluate(() => document.getElementById('confirm-ok').classList.contains('btn-danger'))], [true, '「文字起こし」をクリアしますか？', true]);
+  await page.click('#confirm-cancel');
+  await page.waitForTimeout(400);
+  eq('キャンセルなら消えない', await page.evaluate(() => els.confirmed.textContent.includes('消す文')), true);
+  await page.evaluate(() => { clearPane('pane-transcript'); });
+  await page.waitForTimeout(400);
+  await page.click('#confirm-ok');
+  await page.waitForTimeout(400);
+  eq('「クリア」で消える', await page.evaluate(() => els.confirmed.textContent.trim()), '');
 
   eq('ブラウザの小窓は一度も出ていない', native, []);
   await browser.close();

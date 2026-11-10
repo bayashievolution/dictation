@@ -31,7 +31,7 @@ const eq = (label, got, want) => {
   });
   await page.goto(URL);
   await page.waitForTimeout(800);
-  await page.evaluate(() => document.getElementById('btn-settings').click());
+  await page.evaluate(() => { document.getElementById('btn-settings').click(); expandAllSettingsSections(); });   // v0.24.95 から詳細設定はたたんである
   await page.waitForTimeout(300);
 
   const form = () => page.evaluate(() => [

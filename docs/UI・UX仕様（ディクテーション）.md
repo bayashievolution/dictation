@@ -72,7 +72,7 @@
 
 | 部品 | 形 |
 |---|---|
-| 確認の小窓 | `confirmDialog({ title, message, ok, destructive })`。見出しは太字、その下に小さな字。消すものは赤いボタンで、うっかり Enter で消さないよう「キャンセル」に指を置く。**ブラウザの `confirm()` は使わない**（残りは TODO の 8） |
+| 確認の小窓 | `confirmDialog({ title, message, ok, destructive })`。見出しは太字、その下に小さな字。消すものは赤いボタンで、うっかり Enter で消さないよう「キャンセル」に指を置く。**ブラウザの `confirm()` は使わない**（v0.24.117 で本体からは無くした。`tests/t-no-native-confirm.js` が見張る） |
 | 無音の確認 | 確認の小窓と同じ形（`.confirm-card`・`.confirm-title`・`.confirm-message`） |
 | 出入り | 少し大きいところから縮んで、少し行き過ぎて収まる（`installModalMotion`。SUMADO の仕様書 2.2） |
 
@@ -109,6 +109,6 @@
 
 ## 9. まだ統一していないところ
 
-- ブラウザの `confirm()` が残っているところ（TODO の 8）
+- ブラウザの `confirm()` が残っているところ（字幕設定の captions.js の 2 か所だけ）
 - 字幕設定（`captions.html`。小窓の中に別のページとして開く。中の形は前のまま）
 - 検索と置換のバー・辞書のメニュー・クイック質問の窓（設定の形とは違う部品。今回はさわっていない）

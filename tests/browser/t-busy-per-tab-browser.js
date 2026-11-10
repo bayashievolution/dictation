@@ -27,7 +27,7 @@ async function open(browser, reply) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
-  page.on('dialog', d => d.accept());   // 全体整形の確認
+  // v0.24.117: 全体整形の確認は自前の小窓になった（ブラウザの confirm ではない）。押す側で「整形し直す」を押す
   await page.route('**/generativelanguage.googleapis.com/**', async r => {
     await new Promise(res => setTimeout(res, 1500));
     r.fulfill({ contentType: 'application/json',
@@ -95,6 +95,8 @@ const marks = (page) => page.evaluate(() => ({
     const { ctx, page } = await open(browser, '## 評価論\n今日は評価論の話です。観点は三つ。');
     await page.evaluate(() => { els.btnRefineTranscript.click(); });
     await page.waitForTimeout(300);
+    await page.click('#confirm-ok');   // 全体整形の確認（自前の小窓）
+    await page.waitForTimeout(300);
     eq('A: 全体整形のボタンが動いている', await page.evaluate(() => els.btnRefineTranscript.classList.contains('firing')), true);
     await page.evaluate(() => switchSession('B'));
     await page.waitForTimeout(300);
@@ -113,6 +115,8 @@ const marks = (page) => page.evaluate(() => ({
     const { ctx, page } = await open(browser, '## 評価論\n今日は評価論の話です。観点は三つ。');
     await page.evaluate(() => { els.btnRefineTranscript.click(); });
     await page.waitForTimeout(300);
+    await page.click('#confirm-ok');   // 全体整形の確認（自前の小窓）
+    await page.waitForTimeout(300);
     await page.evaluate(() => switchSession('B'));
     await page.waitForTimeout(300);
     await page.evaluate(() => switchSession('A'));
@@ -130,14 +134,16 @@ const marks = (page) => page.evaluate(() => ({
   {
     // やっさん「これ他のタブを録音中は関係ないよね？ 全てクラウドに保存するときだけでいいよね？」
     const { ctx, page } = await open(browser, 'x');
-    const dialogs = [];
-    page.removeAllListeners('dialog');
-    page.on('dialog', d => { dialogs.push(d.message().split('\n')[0]); d.dismiss(); });
+    // v0.24.117: 確認は自前の小窓（confirmDialog）。出たかどうかは小窓の見出しで見る
+    const shownTitle = () => page.evaluate(() => document.getElementById('confirm-dialog').classList.contains('hidden') ? null : document.getElementById('confirm-title').textContent);
     await page.evaluate(() => { state.isRecording = true; state.recordingSessionId = 'A'; });
     const onlyB = await page.evaluate(() => ensureTranscriptSettled(state.sessions.filter(x => x.id === 'B')));
-    eq('B だけ保存 → 聞かずに進む', [onlyB, dialogs.length], [true, 0]);
-    const all = await page.evaluate(() => ensureTranscriptSettled(state.sessions));
-    eq('録音中の A を含む（全部まとめて）→ 聞く', [all, dialogs], [false, ['録音中です。']]);
+    eq('B だけ保存 → 聞かずに進む', [onlyB, await shownTitle()], [true, null]);
+    const allP = page.evaluate(() => ensureTranscriptSettled(state.sessions));
+    await page.waitForTimeout(400);
+    const title = await shownTitle();
+    await page.click('#confirm-cancel');
+    eq('録音中の A を含む（全部まとめて）→ 聞く', [await allP, title], [false, '録音中です。このまま保存しますか？']);
     await page.evaluate(() => { state.isRecording = false; state.recordingSessionId = null; });
     await ctx.close();
   }

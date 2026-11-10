@@ -108,7 +108,7 @@ const status = (page) => page.evaluate(() => document.getElementById('notion-tes
     eq('上の Notion 保存ボタンは押せない', await page.evaluate(() => els.btnNotionUpload.disabled), true);
 
     console.log('■ 設定でオンにすると、その場で確かめる');
-    await page.evaluate(() => document.getElementById('btn-settings').click());
+    await page.evaluate(() => { document.getElementById('btn-settings').click(); expandAllSettingsSections(); });   // v0.24.95 から詳細設定はたたんである
     await page.waitForTimeout(300);
     await page.click('#input-notion-enabled');
     await page.waitForTimeout(800);
@@ -118,7 +118,7 @@ const status = (page) => page.evaluate(() => document.getElementById('notion-tes
     eq('保存すると保存ボタンが押せる', await page.evaluate(() => els.btnNotionUpload.disabled), false);
 
     console.log('■ アクセストークンを入れ直したら、確かめ直す');
-    await page.evaluate(() => document.getElementById('btn-settings').click());
+    await page.evaluate(() => { document.getElementById('btn-settings').click(); expandAllSettingsSections(); });   // v0.24.95 から詳細設定はたたんである
     await page.waitForTimeout(300);
     await page.fill('#input-notion-token', 'ntn_bad');
     await page.evaluate(() => document.getElementById('input-notion-token').dispatchEvent(new Event('change')));
