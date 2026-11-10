@@ -3659,3 +3659,12 @@ p.settings-lead { margin: -2px 0 8px; }
 .context-dict-name input[type="checkbox"] { width: 44px; height: 26px; min-width: 44px; flex: 0 0 44px; border-radius: 999px; }
 .context-dict-name input[type="checkbox"]::before { width: 20px; height: 20px; top: 2px; left: 2px; }
 .context-dict-name input[type="checkbox"]:checked::before { transform: translateX(18px); }
+
+/* ───────── 保管している録音の一覧 (v0.24.103) ───────── */
+.recordings-list { display: flex; flex-direction: column; }
+.recordings-list:empty::before { content: 'ありません'; color: var(--text-faint); font-size: 12px; }
+.recording-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.recording-row + .recording-row { border-top: 1px solid var(--border); }
+.recording-row .recording-pin { flex: 1; min-width: 0; margin: 0; }
+.recording-row .recording-title { color: var(--text); font-weight: 600; word-break: auto-phrase; }
+.recording-row .recording-save { flex: none; }

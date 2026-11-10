@@ -88,7 +88,10 @@ const AUDIO_REPASS_BACKSTOP_MS = 24 * 60 * 60 * 1000;
  *      読めなくしないため。画面の表記は「話者判別」に統一してある
  * @returns {boolean} true = 消す
  */
-function audioRetentionExpired({ retention, savedAt, now, sessionExists, repassDoneAt }) {
+function audioRetentionExpired({ retention, savedAt, now, sessionExists, repassDoneAt, pinned = false }) {
+  // v0.24.103: 「残す」にした録音は、どの設定でも、タブを閉じても消さない（やっさん「検証用の録音としてキープ」）。
+  // 消すのは、やっさんが「残す」を外したときだけ。ほかの条件より先に見る
+  if (pinned) return false;
   // タブが無くなった音声は、どの設定でも必ず消す。
   // 到達する手段が無いのに残しているのは、ただの置き忘れ
   if (!sessionExists) return true;
@@ -266,7 +269,18 @@ async function audioStoreDeleteSession(sessionId) {
 }
 
 /** 全部消す */
-async function audioStoreClearAll() {
+async function audioStoreClearAll({ keep } = {}) {
+  // v0.24.103: 「残す」にした録音は残す（保持をオフにしたとき・「すべて消す」でも）
+  const keepSet = keep instanceof Set ? keep : new Set(keep || []);
+  if (keepSet.size) {
+    const { sessions } = await audioStoreSummary();
+    let n = 0;
+    for (const s of sessions) {
+      if (keepSet.has(s.sessionId)) continue;
+      n += await audioStoreDeleteSession(s.sessionId);
+    }
+    return n;
+  }
   const db = await audioStoreOpen();
   const os = _tx(db, 'readwrite');
   const n = await _wrap(os.count());
@@ -286,8 +300,9 @@ async function audioStoreClearAll() {
  * @param {Map<string, number>} [args.repassDoneAt]        セッションID → 話者判別の完了時刻
  * @returns {Promise<{deletedSessions: number, deletedBytes: number}>}
  */
-async function audioStoreSweep({ retention, liveSessionIds, repassDoneAt }) {
+async function audioStoreSweep({ retention, liveSessionIds, repassDoneAt, pinnedIds }) {
   const live = liveSessionIds instanceof Set ? liveSessionIds : new Set(liveSessionIds || []);
+  const pinned = pinnedIds instanceof Set ? pinnedIds : new Set(pinnedIds || []);   // v0.24.103
   const done = repassDoneAt instanceof Map ? repassDoneAt : new Map();
   const now = Date.now();
   const { sessions } = await audioStoreSummary();
@@ -300,6 +315,7 @@ async function audioStoreSweep({ retention, liveSessionIds, repassDoneAt }) {
       now,
       sessionExists: live.has(s.sessionId),
       repassDoneAt: done.get(s.sessionId),
+      pinned: pinned.has(s.sessionId),
     });
     if (!expired) continue;
     await audioStoreDeleteSession(s.sessionId);

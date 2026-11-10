@@ -167,6 +167,9 @@ const DEFAULT_SETTINGS = {
   // 「できるだけ早く消す」という方針は close でも満たせる。
   // 値 'repass' はすでに保存されている設定を読めなくしないため据え置き
   audioRetention: 'close',   // close / repass / 1d / 7d / manual
+  // v0.24.103: 「残す」にした録音（検証用など）。{ sessionId: { title, savedAt } }。どの設定でも、タブを閉じても消さない。
+  // 名前を覚えておくのは、タブを閉じたあとも一覧で何の録音か分かるようにするため
+  audioPinned: {},
   // v0.24.0: 後処理を利用者自身の Claude Code に回す。既定はオフ
   //（Gemini は置き換えない。持っている人だけが使う足し算の機能）
   useClaudeBridge: false,   // v0.24.39 から画面の名前は「一部を Claude Code で処理する」（キーは据え置き）
@@ -3436,10 +3439,79 @@ function confirmedTailText(excludeEl, maxChars = 400) {
  * 走らないので、消し忘れを防ぐ本体はこちら。
  */
 /** 設定画面の「保持中の音声: …」表示を更新する (v0.19.0) */
+/* ───────── 録音を「残す」・ファイルに保存 (v0.24.103) ─────────
+ * やっさん「今日は会議を一つ録音できて残してるから、検証用の録音としてキープできないかな。間違って消したらもったいない」。
+ * 「残す」にした録音は、どの設定でも・タブを閉じても・保持をオフにしても・「すべて消す」でも消さない（消すのは「残す」を外したときの次の掃除）。
+ * それでもブラウザのデータを消せば消えるので、ファイルとして PC に保存もできるようにした（ファイルなら拡張の外に残る）
+ */
+function pinnedAudioIds() { return new Set(Object.keys(state.settings.audioPinned || {})); }
+function isAudioPinned(id) { return !!(state.settings.audioPinned && state.settings.audioPinned[id]); }
+function rememberPinnedTitle(session) {
+  if (!session || !isAudioPinned(session.id)) return;
+  state.settings.audioPinned[session.id].title = session.title || state.settings.audioPinned[session.id].title;
+  saveSettings();
+}
+function setAudioPinned(id, on, meta = {}) {
+  const m = { ...(state.settings.audioPinned || {}) };
+  if (on) m[id] = { title: meta.title || '', savedAt: meta.savedAt || Date.now() };
+  else delete m[id];
+  state.settings.audioPinned = m;
+  saveSettings();
+  diagLog.info(`録音を${on ? '残す' : '残さない'}にしました（${(meta.title || id).slice(0, 30)}）`);
+}
+/** その録音の名前（タブがあればタブの名前、閉じていれば覚えておいた名前） */
+function recordingTitle(sessionId) {
+  const s = state.sessions.find((x) => x.id === sessionId);
+  if (s) return s.title || '（名前なし）';
+  const p = state.settings.audioPinned && state.settings.audioPinned[sessionId];
+  return (p && p.title) || '（タブは閉じられています）';
+}
+function safeFileName(t) { return String(t || '録音').replace(/[\\/:*?"<>|\n\r\t]+/g, '_').slice(0, 60).trim() || '録音'; }
+async function downloadRecording(sessionId) {
+  const segs = await audioStoreGetSegments(sessionId);
+  if (!segs.length) { statusNotice('error', 'この録音はもう残っていません', { ms: 4000 }); return; }
+  const base = safeFileName(recordingTitle(sessionId));
+  segs.forEach((g, i) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(g.blob);
+    a.download = segs.length > 1 ? `${base}_区間${i + 1}.webm` : `${base}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+  });
+  diagLog.info(`録音をファイルに保存しました（${base}・${segs.length}個）`);
+  statusNotice('listening', `録音をファイルに保存しました（${segs.length}個）`, { ms: 3000 });
+}
+async function renderStoredRecordings(sessions) {
+  const box = document.getElementById('audio-recordings');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const s of sessions.slice().sort((a, b) => b.savedAt - a.savedAt)) {
+    const row = document.createElement('div');
+    row.className = 'recording-row';
+    const when = new Date(s.savedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    row.innerHTML = '<label class="field-row recording-pin"><input type="checkbox"><span><span class="recording-title"></span>'
+      + '<small class="field-hint" style="display:block"></small></span></label>'
+      + '<button type="button" class="btn btn-ghost btn-sm recording-save">ファイルに保存</button>';
+    row.querySelector('.recording-title').textContent = recordingTitle(s.sessionId);
+    row.querySelector('small').textContent = `${when}・${formatBytes(s.bytes)}${isAudioPinned(s.sessionId) ? '・残す' : ''}`;
+    const cb = row.querySelector('input');
+    cb.checked = isAudioPinned(s.sessionId);
+    cb.setAttribute('aria-label', `「${recordingTitle(s.sessionId)}」を残す`);
+    cb.addEventListener('change', () => {
+      setAudioPinned(s.sessionId, cb.checked, { title: recordingTitle(s.sessionId), savedAt: s.savedAt });
+      row.querySelector('small').textContent = `${when}・${formatBytes(s.bytes)}${cb.checked ? '・残す' : ''}`;
+    });
+    row.querySelector('.recording-save').addEventListener('click', () => downloadRecording(s.sessionId).catch((e) => statusNotice('error', '保存できませんでした: ' + (e.message || e), { ms: 5000 })));
+    box.appendChild(row);
+  }
+}
+
 async function refreshAudioUsage() {
   if (!els.audioUsageText) return;
   try {
     const { sessions, totalBytes } = await audioStoreSummary();
+    renderStoredRecordings(sessions);   // v0.24.103
     els.audioUsageText.textContent = sessions.length === 0
       ? '保持中の音声: なし'
       : `保持中の音声: ${sessions.length}件 / ${formatBytes(totalBytes)}`;
@@ -3462,6 +3534,7 @@ async function sweepStoredAudio() {
       retention: state.settings.audioKeepRecording ? state.settings.audioRetention : 'off',
       liveSessionIds: live,
       repassDoneAt: done,
+      pinnedIds: pinnedAudioIds(),   // v0.24.103
     });
     if (r.deletedSessions > 0) {
       diagLog.info(`保管していた音声を掃除: ${r.deletedSessions}件 / ${formatBytes(r.deletedBytes)}`);
@@ -8491,7 +8564,7 @@ function saveSettingsFromForm() {
     state.settings.audioKeepRecording = els.inputKeepRecording.checked;
     // オフに切り替えたら、残っている分をその場で消す（次の起動を待たない）
     if (wasOn && !state.settings.audioKeepRecording) {
-      audioStoreClearAll()
+      audioStoreClearAll({ keep: pinnedAudioIds() })   // v0.24.103: 「残す」にした録音は残す
         .then(n => { if (n > 0) diagLog.info(`保持をオフにしたので音声 ${n} 件を消しました`); })
         .catch(() => {})
         .finally(refreshAudioUsage);
@@ -9697,7 +9770,9 @@ async function closeSession(id) {
   // 録音対象セッションが閉じられるなら（BGでも）録音を止める
   if (state.isRecording && state.recordingSessionId === id) stopRecording();
   // v0.19.0: タブが消えるなら、その音声も消す（設定に関係なく）
-  audioStoreDeleteSession(id).catch(() => {});
+  // v0.24.103: ただし「残す」にした録音は消さない（名前だけ今のものに更新しておく）
+  if (isAudioPinned(id)) rememberPinnedTitle(session);
+  else audioStoreDeleteSession(id).catch(() => {});
   state.sessions.splice(idx, 1);
   if (state.sessions.length === 0) {
     createSession({ activate: true, skipSave: true });
@@ -9733,8 +9808,11 @@ async function closeMultipleSessions(ids, { skipConfirm = false } = {}) {
   }
   const activeIsTarget = targets.some(s => s.id === state.activeId);
   const idSet = new Set(targets.map(s => s.id));
-  // v0.19.0: 消えるタブの音声も消す
-  for (const id of idSet) audioStoreDeleteSession(id).catch(() => {});
+  // v0.19.0: 消えるタブの音声も消す（v0.24.103: 「残す」にした録音は除く）
+  for (const t of targets) {
+    if (isAudioPinned(t.id)) rememberPinnedTitle(t);
+    else audioStoreDeleteSession(t.id).catch(() => {});
+  }
   state.sessions = state.sessions.filter(s => !idSet.has(s.id));
   if (state.sessions.length === 0) {
     createSession({ activate: true, skipSave: true });
@@ -11864,9 +11942,15 @@ els.zoomRange.value = state.settings.appZoom;
 els.zoomPercent.textContent = state.settings.appZoom + '%';
 if (els.btnClearAudio) {
   els.btnClearAudio.addEventListener('click', async () => {
-    if (!confirm('保持している録音音声をすべて消します。よろしいですか？\n（文字起こしの結果は消えません）')) return;
+    // v0.24.103: 自前の確認の小窓に。「残す」にした録音は消さない
+    const pinnedN = pinnedAudioIds().size;
+    if (!(await confirmDialog({
+      title: '保持している録音をすべて消しますか？',
+      message: '文字起こしの結果は消えません。' + (pinnedN ? `「残す」にした録音（${pinnedN}件）は消しません。` : ''),
+      ok: 'すべて消す', destructive: true,
+    }))) return;
     try {
-      const n = await audioStoreClearAll();
+      const n = await audioStoreClearAll({ keep: pinnedAudioIds() });
       diagLog.info(`保持していた音声 ${n} 件を手動で消しました`);
     } catch (e) {
       alert('消せませんでした: ' + (e.message || e));

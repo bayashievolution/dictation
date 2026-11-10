@@ -155,7 +155,10 @@
     const sessions = sessionsFromStorage();
     for (const s of sum.sessions.slice().reverse()) {
       const sess = sessions.find(x => x.id === s.sessionId);
-      const title = (sess && sess.title) || '（タブは閉じられています）';
+      // v0.24.103: タブを閉じても「残す」にした録音は、覚えておいた名前で出す
+      let pinned = {};
+      try { pinned = (JSON.parse(localStorage.getItem('dictation:settings') || '{}') || {}).audioPinned || {}; } catch (_) {}
+      const title = (sess && sess.title) || (pinned[s.sessionId] && pinned[s.sessionId].title) || '（タブは閉じられています）';
       const when = new Date(s.savedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
       const b = document.createElement('button');
       b.className = 'ghost';
