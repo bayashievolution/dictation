@@ -25,9 +25,10 @@ const eq = (label, got, want) => {
   await page.evaluate(() => openContextModal());
   await page.waitForTimeout(500);
   eq('見出しの並び', await page.$$eval('#context-modal .field-group-title', ns => ns.map(n => n.textContent)), ['この録音について', '語彙辞書', '自動で拾った内容']);
-  eq('説明の字は消していない', await page.evaluate(() => {
+  // v0.24.106: やっさんの指定で「台本としては使われません（…）」を消し、欄の説明を言い直した
+  eq('説明の字（やっさんが残したもの）', await page.evaluate(() => {
     const t = document.getElementById('context-modal').textContent;
-    return ['語彙のヒント', '台本としては使われません', '合計50語まで', '上の欄が最終権限'].every(w => t.includes(w));
+    return ['語彙のヒント', '合計50語まで', '上の欄が最終権限', '誤変換されやすいものを改行かカンマ区切りで入力。'].every(w => t.includes(w)) && !t.includes('台本としては使われません');
   }), true);
   await page.fill('#input-context-field', '教育学の講義');
   await page.fill('#input-context-terms', 'ルーブリック、形成的評価');
