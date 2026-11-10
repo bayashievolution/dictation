@@ -54,7 +54,13 @@ const eq = (label, got, want) => {
   }), ['詳細設定', '使用量']);
   const text = await page.textContent('#usage-card');
   eq('Gemini のトークン数と料金の目安が出る', [text.includes('1,020'), text.includes('料金の目安')], [true, true]);
-  eq('Groq の残り（今日・この1時間・回数）', [text.includes('今日の音声'), text.includes('この1時間の音声'), text.includes('残り 1,999回')], [true, true, true]);
+  // v0.24.111: 3 つの輪（上に 1 つ・下に 2 つ）。輪は残りで、使うほど減る
+  const rings = await page.$$eval('#usage-card .usage-ring', ns => ns.map(n => ({ label: n.querySelector('.ring-label').textContent, val: n.querySelector('.ring-val').textContent, rem: Number(n.dataset.rem), big: n.classList.contains('big'), top: Math.round(n.getBoundingClientRect().top) })));
+  eq('輪は 3 つ（今日の音声が大きく上・下に 2 つ）', rings.map(r => [r.label, r.big]), [['今日の音声', true], ['この1時間の音声', false], ['今日の回数', false]]);
+  eq('上に 1 つ、下に 2 つ（下の 2 つは同じ高さ）', [rings[0].top < rings[1].top, rings[1].top === rings[2].top], [true, true]);
+  eq('残り（1,999 回・15 秒使った分だけ減る）', [rings[2].val, rings[0].rem], ['1,999回', Number((1 - 15 / 28800).toFixed(4))]);
+  await page.waitForTimeout(1500);
+  eq('輪は残りの長さまで減る', await page.evaluate(() => { const a = document.querySelector('#usage-card .usage-ring:nth-of-type(1) .ring-rem'); return Number(a.style.strokeDashoffset) > 0; }), true);
   eq('Groq の返事の残りも出る', text.includes('Groq の返事では、残り 1999 回'), true);
 
   console.log('\n■ 長押しで月別のグラフ（v0.24.110）');

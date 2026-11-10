@@ -10762,6 +10762,37 @@ document.addEventListener('pointerdown', (e) => {
 }, true);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeUsageChart(); });
 
+/**
+ * Groq の残りの輪 (v0.24.111・やっさん「3 つの円グラフ（上に 1 つ、下に 2 つ）にしてかっこよく」「減っていくやつで」)
+ * 輪は**残り**を表し、使うほど減っていく（12 時の位置から時計回りに残りが伸びている形）。
+ * 残りが 2 割を切ったらオレンジ、使い切ったら赤。描くときは満タンから今の残りへ、ばね風に減っていく
+ */
+function usageRing(label, used, limit, centerHtml, big) {
+  const rem = limit ? Math.max(0, Math.min(1, 1 - used / limit)) : 1;
+  const cls = rem <= 0 ? 'over' : rem < 0.2 ? 'low' : '';
+  const C = 2 * Math.PI * 42;
+  return `<div class="usage-ring ${big ? 'big' : ''} ${cls}" data-rem="${rem.toFixed(4)}">`
+    + `<svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-track" cx="50" cy="50" r="42"/>`
+    + `<circle class="ring-rem" cx="50" cy="50" r="42" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="0"/></svg>`
+    + `<div class="ring-center"><span class="ring-left">残り</span><span class="ring-val">${centerHtml}</span></div>`
+    + `<div class="ring-label">${label}</div></div>`;
+}
+function animateUsageRings(root) {
+  const C = 2 * Math.PI * 42;
+  const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  root.querySelectorAll('.usage-ring').forEach((r) => {
+    const arc = r.querySelector('.ring-rem');
+    const target = (C * (1 - Number(r.dataset.rem))).toFixed(2);
+    if (reduce) { arc.style.strokeDashoffset = target; return; }
+    requestAnimationFrame(() => requestAnimationFrame(() => { arc.style.strokeDashoffset = target; }));
+  });
+}
+function fmtRingSec(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h ? `<b>${h}</b><small>時間</small><b>${m}</b><small>分</small>` : `<b>${m}</b><small>分</small>`;
+}
+
 function renderUsageCard() {
   const box = document.getElementById('usage-card');
   if (!box || typeof usageLoad !== 'function') return;
@@ -10800,14 +10831,19 @@ function renderUsageCard() {
     </div>
     <div class="usage-block">
       <div class="usage-head"><strong>Groq Whisper</strong><span class="usage-sub">無料枠の残り</span></div>
-      ${usageMeter('今日の音声', g.daySec, GROQ_FREE.daySec, `残り ${fmtSecLeft(GROQ_FREE.daySec - g.daySec)}`)}
-      ${usageMeter('この1時間の音声', g.hourSec, GROQ_FREE.hourSec, `残り ${fmtSecLeft(GROQ_FREE.hourSec - g.hourSec)}`)}
-      ${usageMeter('今日の回数', g.dayReq, GROQ_FREE.dayReq, `残り ${fmtNum(Math.max(0, GROQ_FREE.dayReq - g.dayReq))}回`)}
+      <div class="usage-rings">
+        ${usageRing('今日の音声', g.daySec, GROQ_FREE.daySec, fmtRingSec(GROQ_FREE.daySec - g.daySec), true)}
+        <div class="usage-rings-row">
+          ${usageRing('この1時間の音声', g.hourSec, GROQ_FREE.hourSec, fmtRingSec(GROQ_FREE.hourSec - g.hourSec))}
+          ${usageRing('今日の回数', g.dayReq, GROQ_FREE.dayReq, `<b>${fmtNum(Math.max(0, GROQ_FREE.dayReq - g.dayReq))}</b><small>回</small>`)}
+        </div>
+      </div>
       ${hdrReq != null ? `<small class="field-hint">Groq の返事では、残り ${escapeHtmlSimple(String(hdrReq))} 回です。</small>` : ''}
       <small class="field-hint">このアプリから送った分を数えています。</small>
     </div>
     <div id="usage-chart" class="usage-chart" role="dialog" aria-label="Gemini の月別のトークン" hidden></div>`;
   installUsageLongPress();   // v0.24.110: 描き直すたびに数字が新しくなるので、そのつど付け直す
+  animateUsageRings(box);   // v0.24.111
   const reset = document.getElementById('btn-usage-reset');
   if (reset) reset.addEventListener('click', resetGeminiUsage);
 }
