@@ -58,7 +58,7 @@ function groqPickText(data) {
  * @param {string} [args.contextHint]     直前の文字起こし
  * @returns {Promise<string>}
  */
-async function transcribeAudioWithGroq({ apiKey, audioBlob, sessionContext, contextHint, model }) {
+async function transcribeAudioWithGroq({ apiKey, audioBlob, sessionContext, contextHint, model, durationSec }) {
   if (!apiKey) throw new Error('Groq の API キーが設定されていません');
   if (!audioBlob || audioBlob.size === 0) return '';
   const prompt = groqWhisperPrompt(sessionContext && sessionContext.terms, contextHint);
@@ -89,6 +89,12 @@ async function transcribeAudioWithGroq({ apiKey, audioBlob, sessionContext, cont
       const err = new Error(`Groq エラー (${res.status}): ${body.slice(0, 200)}`);
       err.status = res.status;
       throw err;
+    }
+    // v0.24.104: 無料枠の残りを数える（usage.js）。長さが分からなければ大きさから見積もる（本体の録音は 64kbps）
+    if (typeof usageRecordGroq === 'function') {
+      const headers = {};
+      res.headers.forEach((v, k) => { if (/^x-ratelimit-/i.test(k)) headers[k.toLowerCase()] = v; });
+      usageRecordGroq(durationSec || (audioBlob.size * 8 / 64000), headers);
     }
     const picked = groqPickText(await res.json());
     if (picked.dropped.length && window.diagLog) {

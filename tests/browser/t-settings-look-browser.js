@@ -50,7 +50,7 @@ const eq = (label, got, want) => {
     .filter(x => { const lab = x.parentElement.querySelector('.field-label').getBoundingClientRect(), r = x.getBoundingClientRect(); return !(r.left >= lab.right - 1 && Math.abs(r.top - lab.top) < 30); })
     .map(x => x.parentElement.querySelector('.field-label').textContent));
   eq('数字の欄は名前の右', numLeft, []);
-  eq('見出しに線の絵', await page.$$eval('#settings-modal .settings-section > .field-group-title .section-icon', ns => ns.map(n => n.dataset.icon)), ['sm-mic', 'sm-sparkle', 'sm-tick', 'sm-gear']);
+  eq('見出しに線の絵', await page.$$eval('#settings-modal .settings-section > .field-group-title .section-icon', ns => ns.map(n => n.dataset.icon)), ['sm-mic', 'sm-sparkle', 'sm-tick', 'sm-gear', 'sm-battery']);   // v0.24.104: いちばん下に使用量
   eq('中身は角の丸い箱', await page.$$eval('#settings-modal .settings-box', ns => ns.length >= 4 && ns.every(n => getComputedStyle(n).borderRadius === '12px')), true);
 
   // v0.24.102: 要約の詳しさは「白い太字の名前＋その下の小さい字」、ラジオは上下まんなか

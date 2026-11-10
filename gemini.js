@@ -72,6 +72,8 @@ function geminiUsageAdd(feature, meta) {
   for (const d of meta.promptTokensDetails || []) {
     if (d && d.modality === 'AUDIO') u.audio += Number(d.tokenCount) || 0;
   }
+  // v0.24.104: 月ごとにも覚えておく（設定のいちばん下の「使用量」のカード。usage.js）
+  if (typeof usageRecordGemini === 'function') usageRecordGemini(k, meta);
 }
 function geminiUsageReset() { for (const k of Object.keys(_geminiUsage)) delete _geminiUsage[k]; }
 function geminiUsageSnapshot() { return JSON.parse(JSON.stringify(_geminiUsage)); }

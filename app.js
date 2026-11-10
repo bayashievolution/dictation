@@ -4562,6 +4562,7 @@ async function transcribeChunkWithGroq(blob, targetEl, edges) {
       audioBlob: blob,
       sessionContext,
       contextHint: getContextForGemini(300),
+      durationSec: edges && edges.durationMs ? edges.durationMs / 1000 : undefined,   // v0.24.104: 無料枠の残りを数える
     });
   } catch (e) {
     if (!geminiKey()) throw e;
@@ -8504,6 +8505,7 @@ function openSettings() {
   applyWebSpeechOnlyVisibility(/* animated */ false);
   applyAiSettingsVisibility(/* animated */ false);
   renderAiTable();   // v0.24.92
+  renderUsageCard();   // v0.24.104
   els.fontTranscript.value = state.settings.transcriptFont;
   els.sizeTranscript.value = state.settings.transcriptSize;
   els.fontMemo.value = state.settings.memoFont;
@@ -10669,6 +10671,68 @@ if (els.modeGemini) {
     applyGeminiOnlyVisibility(true);
     applyWebSpeechOnlyVisibility(true);
   });
+}
+
+/* ───────── 使用量のカード (v0.24.104) ─────────
+ * 設定のいちばん下。数えるのは usage.js（何を数えて、何が入らないかはそちらの冒頭）。
+ * 棒は「どれだけ使ったか」が一目で分かるように。Groq は残りが 2 割を切ったらオレンジ、使い切ったら赤
+ */
+function fmtNum(n) { return Math.round(n || 0).toLocaleString('ja-JP'); }
+function fmtUsd(n) { return n < 0.01 ? (n > 0 ? '$0.01 未満' : '$0') : '$' + n.toFixed(2); }
+function fmtSecLeft(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h ? `${h}時間${m}分` : `${m}分`;
+}
+function usageMeter(label, used, limit, leftText) {
+  const r = limit ? Math.min(1, used / limit) : 0;
+  const cls = r >= 1 ? 'over' : r >= 0.8 ? 'low' : '';
+  return `<div class="usage-meter ${cls}"><div class="usage-meter-head"><span>${label}</span><span class="usage-left">${leftText}</span></div>`
+    + `<div class="usage-bar"><span style="width:${(r * 100).toFixed(1)}%"></span></div></div>`;
+}
+function renderUsageCard() {
+  const box = document.getElementById('usage-card');
+  if (!box || typeof usageLoad !== 'function') return;
+  const u = usageLoad();
+  const now = new Date();
+  const mk = usageMonthKey(now);
+  const mon = (u.gemini || {})[mk] || { calls: 0, text: 0, audio: 0, output: 0, byFeature: {} };
+  const total = mon.text + mon.audio + mon.output;
+  const pct = (x) => (total ? (x / total * 100).toFixed(1) : 0);
+  const labels = typeof GEMINI_USAGE_LABELS === 'object' ? GEMINI_USAGE_LABELS : {};
+  const feats = Object.entries(mon.byFeature || {}).sort((a, b) => b[1].tokens - a[1].tokens).slice(0, 6);
+  const maxF = feats.length ? feats[0][1].tokens || 1 : 1;
+  const prev = Object.keys(u.gemini || {}).filter((k) => k < mk).sort().reverse().slice(0, 3);
+  const g = usageGroqNow(u, now);
+  const hdr = g.headers || {};
+  const hdrReq = hdr['x-ratelimit-remaining-requests'];
+  const featRows = feats.map(([k, f]) => `<div class="usage-feature"><span class="usage-feature-name">${escapeHtmlSimple(labels[k] || k)}</span>`
+    + `<span class="usage-bar thin"><span style="width:${(f.tokens / maxF * 100).toFixed(1)}%"></span></span>`
+    + `<span class="usage-feature-n">${fmtNum(f.tokens)}</span></div>`).join('');
+  const monthRows = prev.map((k) => {
+    const m = u.gemini[k];
+    return `<div><span>${Number(k.slice(5))}月</span><span>${fmtNum(m.text + m.audio + m.output)} トークン・${fmtUsd(usageGeminiCost(m))}</span></div>`;
+  }).join('');
+  box.innerHTML = `
+    <div class="usage-block">
+      <div class="usage-head"><strong>Gemini</strong><span class="usage-sub">${now.getMonth() + 1}月</span></div>
+      <div class="usage-big">${fmtNum(total)}<small>トークン</small><span class="usage-cost">料金の目安 ${fmtUsd(usageGeminiCost(mon))}</span></div>
+      <div class="usage-stack" aria-label="入力（文字）・入力（音声）・出力の割合">
+        <span class="seg-text" style="width:${pct(mon.text)}%"></span><span class="seg-audio" style="width:${pct(mon.audio)}%"></span><span class="seg-output" style="width:${pct(mon.output)}%"></span>
+      </div>
+      <div class="usage-legend"><span><i class="seg-text"></i>文字 ${fmtNum(mon.text)}</span><span><i class="seg-audio"></i>音声 ${fmtNum(mon.audio)}</span><span><i class="seg-output"></i>出力 ${fmtNum(mon.output)}</span></div>
+      ${featRows ? `<div class="usage-features">${featRows}</div>` : ''}
+      ${monthRows ? `<div class="usage-months">${monthRows}</div>` : ''}
+      <small class="field-hint">料金は Gemini 2.5 Flash の単価（100万トークンあたり 文字 $${GEMINI_PRICE_PER_M.text.toFixed(2)}・音声 $${GEMINI_PRICE_PER_M.audio.toFixed(2)}・出力 $${GEMINI_PRICE_PER_M.output.toFixed(2)}）で計算した目安です。無料枠のキーなら 0 円です。</small>
+    </div>
+    <div class="usage-block">
+      <div class="usage-head"><strong>Groq Whisper</strong><span class="usage-sub">無料枠の残り</span></div>
+      ${usageMeter('今日の音声', g.daySec, GROQ_FREE.daySec, `残り ${fmtSecLeft(GROQ_FREE.daySec - g.daySec)}`)}
+      ${usageMeter('この1時間の音声', g.hourSec, GROQ_FREE.hourSec, `残り ${fmtSecLeft(GROQ_FREE.hourSec - g.hourSec)}`)}
+      ${usageMeter('今日の回数', g.dayReq, GROQ_FREE.dayReq, `残り ${fmtNum(Math.max(0, GROQ_FREE.dayReq - g.dayReq))}回`)}
+      ${hdrReq != null ? `<small class="field-hint">Groq の返事では、残り ${escapeHtmlSimple(String(hdrReq))} 回です。</small>` : ''}
+      <small class="field-hint">このアプリから送った分を数えています（日の区切りはこの PC の時計の 0 時）。</small>
+    </div>`;
 }
 
 /* ───────── 詳細設定のまとまり (v0.24.95・設定の見本の 4 段目) ─────────
