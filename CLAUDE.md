@@ -138,9 +138,10 @@ v0.24.2 の「コピペ以降 ・ が箇条書きにならない」は、Chrome 
 
 この環境には Chromium と playwright が入っている（`NODE_PATH=/opt/node22/lib/node_modules`）。
 
+`node serve.js` で配って本物のキーを送れるので、DOM の話は実機で確かめる。
+
 **tests/browser をまとめて走らせるときは、終わりのコード（exit code）も見る。** 落ちた（例外・待ちきれずに止まった）テストは ✕ を出さずに終わる。
 2026-11-10 に、✕ の数だけ数えていたせいで、v0.24.95 で設定をたたんでから止まっていた 3 本（`t-confirm-dialog`・`t-chunk-settings`・`t-notion-settings`）を通ったと思い込んでいた。
-`node serve.js` で配って本物のキーを送れるので、DOM の話は実機で確かめる。
 
 ### 「誰がいつ呼ぶか」は純関数のテストでは見つからない
 
