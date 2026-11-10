@@ -56,14 +56,15 @@ const eq = (label, got, want) => {
   eq('Gemini のトークン数と料金の目安が出る', [text.includes('1,020'), text.includes('料金の目安')], [true, true]);
   // v0.24.111: 3 つの輪（上に 1 つ・下に 2 つ）。輪は残りで、使うほど減る
   const rings = await page.$$eval('#usage-card .usage-ring', ns => ns.map(n => ({ label: n.querySelector('.ring-label').textContent, val: n.querySelector('.ring-val').textContent, rem: Number(n.dataset.rem), big: n.classList.contains('big'), top: Math.round(n.getBoundingClientRect().top) })));
-  eq('輪は 3 つ（今日の音声が大きく上・下に 2 つ）', rings.map(r => [r.label, r.big]), [['今日の音声', true], ['この1時間の音声', false], ['今日の回数', false]]);
+  eq('輪は 3 つ（今日の音声が上・下に 2 つ）', rings.map(r => r.label), ['今日の音声', 'この1時間の音声', '今日の回数']);
+  eq('3 つとも同じ大きさ（v0.24.114）', await page.$$eval('#usage-card .usage-ring svg', ns => new Set(ns.map(n => Math.round(n.getBoundingClientRect().width))).size), 1);
   eq('上に 1 つ、下に 2 つ（下の 2 つは同じ高さ）', [rings[0].top < rings[1].top, rings[1].top === rings[2].top], [true, true]);
   eq('残り（1,999 回・15 秒使った分だけ減る）', [rings[2].val, rings[0].rem], ['1,999回', Number((1 - 15 / 28800).toFixed(4))]);
   await page.waitForTimeout(1500);
   eq('輪は残りの長さまで減る', await page.evaluate(() => { const a = document.querySelector('#usage-card .usage-ring:nth-of-type(1) .ring-rem'); return Number(a.style.strokeDashoffset) > 0; }), true);
   eq('Groq の返事の残りも出る', text.includes('Groq の返事では、残り 1999 回'), true);
 
-  console.log('\n■ 長押しで月別のグラフ（v0.24.110）');
+  console.log('\n■ 押すと月別のグラフ（v0.24.114 で長押しから押すだけに）');
   await page.evaluate(() => {
     const u = JSON.parse(localStorage.getItem('dictation:usage'));
     const d = new Date(); d.setMonth(d.getMonth() - 1);
@@ -73,20 +74,18 @@ const eq = (label, got, want) => {
     renderUsageCard();
   });
   await page.evaluate(() => document.getElementById('usage-gemini-total').scrollIntoView({ block: 'center' }));
-  const box = await page.$('#usage-gemini-total');
-  const bb = await box.boundingBox();
-  await page.mouse.move(bb.x + 20, bb.y + bb.height / 2);
-  await page.mouse.down();
-  await page.waitForTimeout(150);
-  eq('押してすぐ（0.15 秒）は出ない', await page.evaluate(() => document.getElementById('usage-chart').hidden), true);
+  await page.click('#usage-gemini-total');
   await page.waitForTimeout(500);
-  await page.mouse.up();
-  await page.waitForTimeout(500);
-  eq('長押しで出る', await page.evaluate(() => document.getElementById('usage-chart').hidden), false);
+  eq('押すと出る', await page.evaluate(() => document.getElementById('usage-chart').hidden), false);
   const cols = await page.$$eval('.usage-chart-col', ns => ns.map(n => ({ m: n.querySelector('.usage-chart-m').textContent, cur: n.classList.contains('current'), h: parseFloat(n.querySelector('.usage-chart-bar > span').style.height) })));
   eq('今月が右端で強調', cols[cols.length - 1].cur, true);
   eq('6 本以上（数え始めた月より前は 0 で埋める）', cols.length >= 6, true);
   eq('先月の棒が一番高い（100,000 > 1,020）', cols[cols.length - 2].h, 100);
+  await page.click('#usage-gemini-total');
+  await page.waitForTimeout(600);
+  eq('もう一度押すと閉じる', await page.evaluate(() => document.getElementById('usage-chart').hidden), true);
+  await page.click('#usage-gemini-total');
+  await page.waitForTimeout(500);
   await page.click('#settings-modal .modal-header h2');   // 設定の中の、グラフの外（暗い背景を押すと設定ごと閉じる）
   await page.waitForTimeout(600);
   eq('外を触ると閉じる', await page.evaluate(() => document.getElementById('usage-chart').hidden), true);
@@ -115,7 +114,7 @@ const eq = (label, got, want) => {
   await page.waitForTimeout(400);
   const g2 = await page.evaluate(() => JSON.parse(localStorage.getItem('dictation:usage')));
   eq('Groq の数だけ消え、Gemini は残る', [g2.groq, !!g2.gemini], [undefined, true]);
-  eq('輪は満タンに', await page.$eval('#usage-card .usage-ring.big', n => n.dataset.rem), '1.0000');
+  eq('輪は満タンに', await page.$eval('#usage-card .usage-ring', n => n.dataset.rem), '1.0000');
 
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');

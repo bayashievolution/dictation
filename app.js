@@ -10739,21 +10739,21 @@ function closeUsageChart() {
   if (!pop || pop.hidden) return;
   if (window.Motion) Motion.popOut(pop); else pop.hidden = true;
 }
-/** 長押しで開く（0.45 秒。動かしたら取りやめ）。キーボードなら Enter・Space */
+/**
+ * 押すと開く・もう一度押すと閉じる (v0.24.114・やっさん「長押しではなくタップ（クリック）にしよう」)。キーボードなら Enter・Space。
+ * 押しているあいだだけ少し縮む（押したことが分かるように）
+ */
+function toggleUsageChart() {
+  const pop = document.getElementById('usage-chart');
+  if (pop && !pop.hidden) closeUsageChart(); else openUsageChart();
+}
 function installUsageLongPress() {
   const el = document.getElementById('usage-gemini-total');
   if (!el) return;
-  let timer = null, x0 = 0, y0 = 0;
-  const cancel = () => { clearTimeout(timer); timer = null; el.classList.remove('pressing'); };
-  el.addEventListener('pointerdown', (e) => {
-    x0 = e.clientX; y0 = e.clientY;
-    el.classList.add('pressing');
-    timer = setTimeout(() => { timer = null; el.classList.remove('pressing'); openUsageChart(); }, 450);
-  });
-  el.addEventListener('pointermove', (e) => { if (timer && Math.hypot(e.clientX - x0, e.clientY - y0) > 8) cancel(); });
-  for (const t of ['pointerup', 'pointerleave', 'pointercancel']) el.addEventListener(t, cancel);
-  el.addEventListener('contextmenu', (e) => e.preventDefault());
-  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openUsageChart(); } });
+  el.addEventListener('pointerdown', () => el.classList.add('pressing'));
+  for (const t of ['pointerup', 'pointerleave', 'pointercancel']) el.addEventListener(t, () => el.classList.remove('pressing'));
+  el.addEventListener('click', toggleUsageChart);
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleUsageChart(); } });
 }
 // 外を触ったら・Esc で閉じる（カードは描き直すので、入れ物の外側で 1 回だけ登録）
 document.addEventListener('pointerdown', (e) => {
@@ -10819,7 +10819,7 @@ function renderUsageCard() {
   box.innerHTML = `
     <div class="usage-block">
       <div class="usage-head"><strong>Gemini</strong><span class="usage-sub">${now.getMonth() + 1}月</span></div>
-      <div class="usage-big" id="usage-gemini-total" tabindex="0" role="button" aria-label="Gemini の月別のトークン（長押しでグラフ）">${fmtNum(total)}<small>トークン</small><span class="usage-cost">料金の目安 ${fmtUsd(usageGeminiCost(mon))}</span></div>
+      <div class="usage-big" id="usage-gemini-total" tabindex="0" role="button" aria-label="Gemini の月別のトークン（押すとグラフ）">${fmtNum(total)}<small>トークン</small><span class="usage-cost">料金の目安 ${fmtUsd(usageGeminiCost(mon))}</span></div>
       <div class="usage-stack" aria-label="入力（文字）・入力（音声）・出力の割合">
         <span class="seg-text" style="width:${pct(mon.text)}%"></span><span class="seg-audio" style="width:${pct(mon.audio)}%"></span><span class="seg-output" style="width:${pct(mon.output)}%"></span>
       </div>
@@ -10832,7 +10832,7 @@ function renderUsageCard() {
     <div class="usage-block">
       <div class="usage-head"><strong>Groq Whisper</strong><span class="usage-sub">無料枠の残り</span></div>
       <div class="usage-rings">
-        ${usageRing('今日の音声', g.daySec, GROQ_FREE.daySec, fmtRingSec(GROQ_FREE.daySec - g.daySec), true)}
+        ${usageRing('今日の音声', g.daySec, GROQ_FREE.daySec, fmtRingSec(GROQ_FREE.daySec - g.daySec))}
         <div class="usage-rings-row">
           ${usageRing('この1時間の音声', g.hourSec, GROQ_FREE.hourSec, fmtRingSec(GROQ_FREE.hourSec - g.hourSec))}
           ${usageRing('今日の回数', g.dayReq, GROQ_FREE.dayReq, `<b>${fmtNum(Math.max(0, GROQ_FREE.dayReq - g.dayReq))}</b><small>回</small>`)}

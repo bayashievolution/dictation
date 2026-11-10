@@ -3770,3 +3770,10 @@ p.settings-lead { margin: -2px 0 8px; }
 @media (prefers-reduced-motion: reduce) { .usage-ring .ring-rem { transition: none; } }
 .usage-ring .ring-val { display: flex; align-items: baseline; justify-content: center; white-space: nowrap; }
 .usage-ring.big .ring-center b { font-size: 22px; }
+
+/* v0.24.114: 3 つの輪は同じ大きさ（下の段に合わせる・やっさんの指定）。
+   真ん中の字は、測ると中央なのに左に寄って見えた（大きな数字が左、小さな単位が右に付くので、重さが左に寄る）。
+   見た目で中央になるよう、値だけ少し右へ */
+.usage-ring.big { width: 104px; }
+.usage-ring.big .ring-center b { font-size: 18px; }
+.usage-ring .ring-val { transform: translateX(2px); }
