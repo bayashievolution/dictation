@@ -3521,3 +3521,60 @@ body.chat-active .dict-menu { bottom: 114px; }
   padding: 3px 10px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
 .paste-options button[aria-pressed="true"] { background: var(--accent-dim); color: var(--text); font-weight: 700; }
 .paste-options button:focus-visible { outline: 2px solid var(--heading); outline-offset: 1px; }
+
+/* ───────── 設定: 見本の見た目 (v0.24.99) ─────────
+ * やっさん「こうなるんじゃなかったの？」。v0.24.87〜95 は並びと中身だけ入れて、見た目は前のままだった。
+ * 見本（docs/設定の見本.html）と同じ: 見出しに SUMADO の線の絵・角の丸い箱に入れて行を区切り線で分ける・
+ * 文字起こしのモードは絵の付いたカード・トグルは右。色はディクテーションの :root のまま
+ */
+.settings-section { border-bottom: none; padding-bottom: 0; margin-bottom: 20px; }
+.settings-section > .field-group-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 15px; font-weight: 700; letter-spacing: normal; text-transform: none; color: var(--text); margin-bottom: 8px;
+}
+.settings-section > .field-group-title .section-icon { color: var(--heading); }
+.settings-lead { margin: -2px 0 8px; }
+.settings-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0 14px;
+  overflow: hidden;
+}
+.settings-box > .settings-item + .settings-item,
+.settings-box > .field-conditional:not([hidden]) { border-top: 1px solid var(--border); }
+.settings-item { padding: 12px 0; }
+.settings-item > .field, .settings-item .field-conditional-inner > .field:last-child { margin-bottom: 0; }
+.settings-item .field-conditional-inner { padding-top: 10px; }
+.settings-item .field-row strong, .settings-item .field-row > span { font-size: 14px; }
+
+/* トグルは右（見本と同じ） */
+.field-row.toggle-right { flex-direction: row-reverse; justify-content: space-between; gap: 14px; }
+.field-row.toggle-right > span { font-weight: 600; }
+.field-row.toggle-right input[type="checkbox"] { width: 44px; height: 26px; min-width: 44px; flex: 0 0 44px; border-radius: 999px; }
+.field-row.toggle-right input[type="checkbox"]::before { width: 20px; height: 20px; top: 2px; left: 2px; }
+.field-row.toggle-right input[type="checkbox"]:checked::before { transform: translateX(18px); }
+.toggle-with-status > #claude-bridge-status:not(:empty) { display: block; margin-top: 6px; }
+
+/* 文字起こしのモード: 絵の付いたカード（ラジオは見えないところに置いて、カードで選ぶ） */
+.mode-cards { display: grid; gap: 8px; padding: 12px 0; }
+.mode-card {
+  display: grid; grid-template-columns: auto 1fr; gap: 0 10px; align-items: start;
+  border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer;
+  background: var(--bg-subtle); transition: border-color .2s, background .2s;
+}
+.mode-card { position: relative; }
+.mode-card input[type="radio"] { position: absolute; opacity: 0; width: 1px; height: 1px; left: 12px; top: 12px; margin: 0; }
+.mode-card .mode-icon { color: var(--heading); margin-top: 2px; }
+.mode-card strong { font-size: 14px; color: var(--text); }
+.mode-card:has(input:checked) { border-color: var(--accent); background: var(--accent-dim); }
+.mode-card:has(input:focus-visible) { outline: 2px solid var(--heading); outline-offset: 2px; }
+/* 注意書きの入れ物は、注意書きが出ているときだけ線と余白を持つ（出ていないのに空の段ができていた） */
+.settings-box > #gemini-only-fields { border-top: none !important; padding-top: 0; }
+.settings-section #stt-ai-caution { margin: 0; padding: 10px 0 12px; border-top: 1px solid var(--border); }
+
+/* 使用するAI・詳細設定も同じ箱 */
+.settings-box.ai-table-wrap { padding: 0 10px; }
+.settings-acc-box .settings-acc { border-bottom: 1px solid var(--border); margin: 0; }
+.settings-acc-box .settings-acc:last-child { border-bottom: none; }
+.settings-acc-box .settings-acc-head { padding: 12px 0; }

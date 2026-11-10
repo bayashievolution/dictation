@@ -21,7 +21,8 @@ const seg = s.slice(start);
 let depth = 0;
 const groups = [];
 let closedAt = -1;
-for (const m of seg.matchAll(/<(\/?)div\b[^>]*>(\s*<h3 class="field-group-title">([^<]*))?/g)) {
+// v0.24.99: 見出しの前に SUMADO の線の絵（<span ...></span>）が入るようになったので、それは飛ばして字を取る
+for (const m of seg.matchAll(/<(\/?)div\b[^>]*>(\s*<h3 class="field-group-title">(?:<span[^>]*><\/span>)?([^<]*))?/g)) {
   if (!m[1] && m[3] !== undefined) groups.push({ title: m[3].trim(), depth });
   depth += m[1] ? -1 : 1;
   if (depth === 0) { closedAt = m.index; break; }
@@ -41,7 +42,8 @@ eq('欄はすべて設定の入れ物の直下に並ぶ（途中で入れ物が�
    ['文字起こしのモード', 'AI 設定', '使用するAI', '詳細設定']);
 eq('詳細設定のまとまりの並び（設定の見本の 4 段目）', accs.map((a) => a.label),
    ['音声入力', '録音の保持（話者判別）', 'AI の動き', '停止条件', '表示', 'Notion 連携', 'そのほか']);
-eq('まとまりも入れ物の直下（見出しはまとまりの div の中＝深さ 2）', accs.every((a) => a.depth === 2), true);
+// v0.24.99: まとまりは「詳細設定」の箱の中（modal-body > 詳細設定 > 箱 > まとまり＝見出しの字は深さ 4）
+eq('まとまりは詳細設定の箱の中にそろって並ぶ', accs.every((a) => a.depth === 4), true);
 // v0.24.87: 一番上は「文字起こしのモード」。見出しの「音声入力」は消し、こまかい設定は下の「音声入力」へ（やっさんの指定）
 eq('文字起こしのモードが一番上（やっさんの指定）', top[0], '文字起こしのモード');
 eq('入れ物は最後の欄（診断ログ）より後ろで閉じる', closedAt > seg.indexOf('診断ログ'), true);
