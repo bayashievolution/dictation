@@ -50,6 +50,9 @@ const disabled = (page, k, a) => page.$eval(`.ai-pick[data-k="${k}"][data-a="${a
        [await page.textContent('#ai-table-group .field-group-title'), await page.$$eval('#ai-table-group .field-hint', n => n.map(x => x.textContent)), await page.$$eval('#ai-table-group .ai-table-tag', n => n.length)],
        ['使用するAI', ['用途に合わせて使用するAIを選択することができます。'], 0]);
     eq('ライブ要約も Gemini を選べる（v0.24.93）', await disabled(page, 'post', 'gemini'), false);
+    // v0.24.100: 線は 文字起こし｜ライブ整形〜質問｜話者判別 の境目だけ（まとまりの中には引かない。一緒に変わることが分かるように）
+    eq('区切り線はまとまりの境目だけ', await page.$$eval('#ai-table-body tr', trs => trs.map(tr => getComputedStyle(tr).borderTopColor === 'rgba(0, 0, 0, 0)' ? '' : '線')),
+       ['線', '線', '', '', '', '', '', '', '線']);
     eq('話者判別は押せない（1 つしか無い）', await disabled(page, 'dia', 'gemini'), true);
     await page.click('.ai-pick[data-k="post"][data-a="gemini"] >> nth=5');   // 「要約」の行の Gemini
     eq('ライブ整形〜質問は一緒に Gemini へ（ライブ要約も）', (await checked(page)).filter(x => x.startsWith('post')), Array(7).fill('post:gemini'));

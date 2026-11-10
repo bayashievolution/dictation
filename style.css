@@ -3468,6 +3468,9 @@ body.chat-active .dict-menu { bottom: 114px; }
 .ai-table tbody th { text-align: left; font-weight: 500; padding-right: 8px; white-space: nowrap; color: var(--text); }
 .ai-table tbody tr { border-top: 1px solid var(--border); }
 .ai-table td { height: 34px; }
+/* v0.24.100: 一緒に変わる 7 つ（ライブ整形〜質問）のあいだには線を引かない。線は 文字起こし｜7 つ｜話者判別 の境目だけ。
+   やっさん「区切り線で十分」は「まとまりの境目を区切り線で示す」の意味だった（v0.24.93 で全部の行に線を入れてしまい、まとまりが分からなくなった） */
+.ai-table tbody tr.ai-grp-mid, .ai-table tbody tr.ai-grp-end { border-top-color: transparent; }
 .ai-table-tag { display: inline-block; font-size: 10px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; margin-left: 6px; vertical-align: 1px; font-weight: 400; }
 .ai-pick { appearance: none; border: none; background: none; width: 100%; height: 34px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
 .ai-pick:disabled { cursor: default; }
