@@ -53,8 +53,23 @@ const eq = (label, got, want) => {
   eq('見出しに線の絵', await page.$$eval('#settings-modal .settings-section > .field-group-title .section-icon', ns => ns.map(n => n.dataset.icon)), ['sm-mic', 'sm-sparkle', 'sm-tick', 'sm-gear']);
   eq('中身は角の丸い箱', await page.$$eval('#settings-modal .settings-box', ns => ns.length >= 4 && ns.every(n => getComputedStyle(n).borderRadius === '12px')), true);
 
+  // v0.24.102: 要約の詳しさは「白い太字の名前＋その下の小さい字」、ラジオは上下まんなか
+  eq('要約の詳しさの名前と説明', await page.$$eval('input[name="summary-detail"]', rs => rs.map(r => {
+    const sp = r.parentElement.querySelector('span');
+    return [sp.querySelector('strong').textContent, !!sp.querySelector('.field-hint'), !sp.textContent.includes(' — ')];
+  })), [['詳細', true, true], ['バランス', true, true], ['概要', true, true]]);
+  eq('ラジオは名前と説明のまとまりの上下まんなか', await page.$$eval('input[name="summary-detail"]', rs => rs.every(r => {
+    const row = r.parentElement.getBoundingClientRect(), b = r.getBoundingClientRect();
+    return Math.abs((row.top + row.bottom) / 2 - (b.top + b.bottom) / 2) <= 2;
+  })), true);
   await page.evaluate(() => { closeSettings(); openContextModal(); });
   await page.waitForTimeout(600);
+  eq('文脈の小窓も見出しに線の絵・角の丸い箱（v0.24.102）', await page.evaluate(() => [
+    [...document.querySelectorAll('#context-modal .settings-section > .field-group-title .section-icon')].map(n => n.dataset.icon),
+    document.querySelectorAll('#context-modal .settings-box').length]), [['sm-note', 'sm-book', 'sm-sparkle'], 4]);
+  eq('辞書の一覧のトグルも右', await page.evaluate(() => [...document.querySelectorAll('#context-dict-list input[type="checkbox"]')].every(cb => {
+    const row = cb.closest('.context-dict-row').getBoundingClientRect(), r = cb.getBoundingClientRect(); return row.right - r.right < 14;
+  })), true);
   eq('文脈の小窓のトグルも右端', await page.evaluate(() => {
     const cb = document.getElementById('input-context-default'); const row = cb.parentElement.getBoundingClientRect(), r = cb.getBoundingClientRect();
     return row.right - r.right <= 4;

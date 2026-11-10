@@ -8047,10 +8047,10 @@ function renderContextDicts() {
     const row = document.createElement('div');
     row.className = 'context-dict-row';
     const on = ids.includes(d.id);
-    row.innerHTML = `<label class="context-dict-name"><input type="checkbox" ${on ? 'checked' : ''}> `
-      + `<span></span></label>`
-      + `<span class="field-hint context-dict-count"></span>`;
-    row.querySelector('span:not(.field-hint)').textContent = d.name + (isUser ? '（自作）' : '');
+    // v0.24.102: 名前・語の数・トグル（右）の順に（設定と同じ形。前はトグルが左で小さかった）
+    row.innerHTML = `<label class="context-dict-name"><span class="context-dict-label"></span>`
+      + `<span class="field-hint context-dict-count"></span><input type="checkbox" ${on ? 'checked' : ''}></label>`;
+    row.querySelector('.context-dict-label').textContent = d.name + (isUser ? '（自作）' : '');
     row.querySelector('.context-dict-count').textContent = `${(d.terms || []).length}語`;
     row.querySelector('input').addEventListener('change', () => {
       toggleDict(d.id);
@@ -8061,8 +8061,9 @@ function renderContextDicts() {
       del.type = 'button';
       del.className = 'pane-btn';
       del.textContent = '削除';
-      del.addEventListener('click', () => {
-        if (!confirm(`自作辞書「${d.name}」を削除します。よろしいですか？`)) return;
+      del.addEventListener('click', async () => {
+        // v0.24.102: ブラウザの confirm をやめ、自前の確認の小窓に
+        if (!(await confirmDialog({ title: `自作辞書「${d.name}」を削除しますか？`, message: 'この辞書の語の一覧が消えます。', ok: '削除', destructive: true }))) return;
         state.settings.termDicts = user.filter(x => x.id !== d.id);
         saveSettings();
         renderContextDicts();

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.101" />
+  <link rel="stylesheet" href="style.css?v=0.24.102" />
 </head>
 <body>
   <div id="app">
@@ -670,15 +670,15 @@
               <span class="field-label">要約の詳しさ</span>
               <label class="field-row" style="margin-bottom:4px">
                 <input type="radio" name="summary-detail" id="summary-detail-low" value="low" />
-                <span><strong>詳細</strong> — ほぼ全ての内容を含んで要約（詳細な議事録・復習等）</span>
+                <span><strong>詳細</strong><small class="field-hint" style="display:block">ほぼ全ての内容を含んで要約（詳細な議事録・復習等）</small></span>
               </label>
               <label class="field-row" style="margin-bottom:4px">
                 <input type="radio" name="summary-detail" id="summary-detail-medium" value="medium" />
-                <span><strong>バランス</strong> — 重要なキーワードを中心に、その前後の言葉も用いつつ要約</span>
+                <span><strong>バランス</strong><small class="field-hint" style="display:block">重要なキーワードを中心に、その前後の言葉も用いつつ要約</small></span>
               </label>
               <label class="field-row" style="margin-bottom:0">
                 <input type="radio" name="summary-detail" id="summary-detail-high" value="high" />
-                <span><strong>概要</strong> — 重要なキーワードのみを用いて要約（最もシンプル）</span>
+                <span><strong>概要</strong><small class="field-hint" style="display:block">重要なキーワードのみを用いて要約（最もシンプル）</small></span>
               </label>
             </div>
             </div>
@@ -949,13 +949,14 @@
       <div class="modal-body">
         <!-- v0.24.96: 設定と同じ形（見出しのあるまとまり）に並べ直した（やっさん「このメニューのスタイルすごくいいので、この録音の文脈もこのスタイルに」）。
              欄の id・保存のしかた・説明の字は変えていない（字を減らすのは 1 か所ずつやっさんに見てもらう・CLAUDE.md） -->
-        <div class="field-group">
-          <h3 class="field-group-title">この録音について</h3>
-          <p class="field-hint" style="margin:0 0 12px">
+        <div class="field-group settings-section">
+          <h3 class="field-group-title"><span class="section-icon" data-icon="sm-note" data-icon-size="18"></span>この録音について</h3>
+          <p class="field-hint settings-lead">
             ここに書いた内容は<strong>語彙のヒント</strong>として文字起こしに渡されます。
             同音異義語（家庭／課程／過程）や固有名詞は音だけでは決められないので、
             先に教えておくと精度が上がります。<strong>台本としては使われません</strong>（書いた内容が勝手に本文に入ることはありません）。
           </p>
+          <div class="settings-box form-box">
           <label class="field">
             <span class="field-label">分野・場面</span>
             <input id="input-context-field" type="text" placeholder="例: 講義 / 会議 / 打ち合わせ / インタビュー" />
@@ -971,10 +972,12 @@
             <textarea id="input-context-terms" rows="5" placeholder="製品名・サービス名&#10;社名・団体名&#10;略語&#10;人名"></textarea>
             <small class="field-hint">改行かカンマ区切り。人名・専門用語・製品名など、誤変換されやすいものを</small>
           </label>
+          </div>
         </div>
 
-        <div class="field-group">
-          <h3 class="field-group-title">語彙辞書</h3>
+        <div class="field-group settings-section">
+          <h3 class="field-group-title"><span class="section-icon" data-icon="sm-book" data-icon-size="18"></span>語彙辞書</h3>
+          <div class="settings-box form-box">
           <div class="field">
             <small class="field-hint" style="display:block; margin-bottom:8px">
               選んだ辞書の語が、上の「よく出る語」と自動で拾った語に<strong>足されます</strong>。
@@ -987,10 +990,12 @@
               </button>
             </div>
           </div>
+          </div>
         </div>
 
-        <div class="field-group">
-          <h3 class="field-group-title">自動で拾った内容</h3>
+        <div class="field-group settings-section">
+          <h3 class="field-group-title"><span class="section-icon" data-icon="sm-sparkle" data-icon-size="18"></span>自動で拾った内容</h3>
+          <div class="settings-box form-box">
           <div class="field">
             <div class="diag-log-actions">
               <button type="button" id="btn-context-from-memo" class="pane-btn" title="メモペインに書いた見出しや箇条書きから語を拾う">
@@ -1015,13 +1020,16 @@
               おかしければ取り込んで直してください（<strong>上の欄が最終権限</strong>です）
             </small>
           </div>
+          </div>
         </div>
 
-        <div class="field-group">
+        <div class="field-group settings-section">
+          <div class="settings-box form-box">
           <label class="field field-row">
             <input id="input-context-default" type="checkbox" />
             <span>この内容を新しいタブの初期値にする</span>
           </label>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
@@ -1041,7 +1049,8 @@
         <button class="modal-close" data-dismiss><span data-icon="x"></span></button>
       </div>
       <div class="modal-body">
-        <p id="notion-picker-summary" class="field-hint" style="margin-bottom:10px;"></p>
+        <p id="notion-picker-summary" class="field-hint settings-lead"></p>
+        <div class="settings-box form-box">
         <label class="field">
           <span class="field-label">保存先データベース</span>
           <select id="notion-picker-select"></select>
@@ -1058,6 +1067,7 @@
           <select id="notion-picker-date"></select>
           <small class="field-hint">日付プロパティを選ぶと、タイトルから日時を外してその列に入れます</small>
         </label>
+        </div>
         <p id="notion-picker-error" class="field-hint notion-test-result"></p>
       </div>
       <div class="modal-footer">
@@ -1091,15 +1101,11 @@
 
   <div id="silence-dialog" class="modal hidden">
     <div class="modal-backdrop"></div>
-    <div class="modal-card modal-small">
+    <div class="modal-card modal-small confirm-card">
       <div class="modal-body">
-        <p style="font-size:15px; line-height:1.7;">
-          しばらく音声が入っていません。<br />
-          録音を停止しますか？
-        </p>
-        <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">
-          <span id="silence-countdown"></span>
-        </p>
+        <!-- v0.24.102: 確認の小窓（confirmDialog）と同じ形に（見出しは太字・その下に小さな字） -->
+        <p class="confirm-title">しばらく音声が入っていません。<br />録音を停止しますか？</p>
+        <p class="confirm-message"><span id="silence-countdown"></span></p>
       </div>
       <div class="modal-footer">
         <button id="btn-silence-stop" class="btn btn-primary">停止する</button>
@@ -1132,18 +1138,18 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.101"></script>
-  <script src="motion.js?v=0.24.101"></script>
-  <script src="gemini.js?v=0.24.101"></script>
-  <script src="groq.js?v=0.24.101"></script>
-  <script src="notion.js?v=0.24.101"></script>
-  <script src="audio-store.js?v=0.24.101"></script>
-  <script src="claude-bridge.js?v=0.24.101"></script>
-  <script src="claude-installer.js?v=0.24.101"></script>
-  <script src="live-summary.js?v=0.24.101"></script>
-  <script src="image-store.js?v=0.24.101"></script>
-  <script src="gemini-files.js?v=0.24.101"></script>
-  <script src="term-dicts.js?v=0.24.101"></script>
-  <script src="app.js?v=0.24.101"></script>
+  <script src="icons.js?v=0.24.102"></script>
+  <script src="motion.js?v=0.24.102"></script>
+  <script src="gemini.js?v=0.24.102"></script>
+  <script src="groq.js?v=0.24.102"></script>
+  <script src="notion.js?v=0.24.102"></script>
+  <script src="audio-store.js?v=0.24.102"></script>
+  <script src="claude-bridge.js?v=0.24.102"></script>
+  <script src="claude-installer.js?v=0.24.102"></script>
+  <script src="live-summary.js?v=0.24.102"></script>
+  <script src="image-store.js?v=0.24.102"></script>
+  <script src="gemini-files.js?v=0.24.102"></script>
+  <script src="term-dicts.js?v=0.24.102"></script>
+  <script src="app.js?v=0.24.102"></script>
 </body>
 </html>

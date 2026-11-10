@@ -3628,3 +3628,34 @@ body.chat-active .dict-menu { bottom: 114px; }
    説明は名前と同じ <span> の中に入れた（前は下の別の段だったので、トグルが名前の行だけに合わさって上に寄っていた） */
 .modal .field-row:has(> input[type="checkbox"]) { align-items: center; }
 .modal .field-row:has(> input[type="checkbox"]) > span > .field-hint { margin-top: 3px; font-weight: 400; }
+
+/* ───────── 見た目の統一 (v0.24.102) ─────────
+ * やっさん「要約の詳しさを他と同じように」「この録音の文脈のデザインも統一」「他にも統一していない部分を調べて統一」。
+ * 決まりは docs/UI・UX仕様（ディクテーション）.md に書いた
+ */
+/* 選ぶ（ラジオ）の行: 名前は白い太字、説明は小さい字。ラジオは名前と説明をあわせたまとまりの上下まんなか */
+.modal .field-row:has(> input[type="radio"]) { align-items: center; gap: 12px; padding: 6px 0; }
+.modal .field-row:has(> input[type="radio"]) > span > strong { color: var(--text); font-size: 14px; }
+.modal .field-row:has(> input[type="radio"]) > span > .field-hint { margin-top: 2px; }
+
+/* 文字を入れる箱（文脈・Notion の保存先）: 設定と同じ角の丸い箱に、項目ごとに区切り線 */
+.settings-box.form-box { padding: 0 14px; }
+.settings-box.form-box > .field,
+.settings-box.form-box > label.field,
+.settings-box.form-box > .field-row { margin: 0; padding: 12px 0; }
+.settings-box.form-box > :is(.field, label.field, .field-row):not([hidden]) ~ :is(.field, label.field, .field-row) { border-top: 1px solid var(--border); }
+.settings-box.form-box .field-label { color: var(--text); font-size: 13.5px; }
+p.settings-lead { margin: -2px 0 8px; }
+
+/* 右下の小さな窓（Notion の保存）のトグルも右 */
+.notion-float .field-row:has(> input[type="checkbox"]) { flex-direction: row-reverse; justify-content: space-between; gap: 14px; }
+
+/* 文脈の小窓の辞書の一覧: 名前・語の数・トグル（右・設定と同じ大きさ） (v0.24.102) */
+.context-dict-list { background: var(--bg-subtle); }
+.context-dict-row { padding: 6px 8px; }
+.context-dict-name { gap: 10px; }
+.context-dict-name .context-dict-label { flex: 1; min-width: 0; color: var(--text); }
+.context-dict-name .context-dict-count { flex: none; margin: 0; }
+.context-dict-name input[type="checkbox"] { width: 44px; height: 26px; min-width: 44px; flex: 0 0 44px; border-radius: 999px; }
+.context-dict-name input[type="checkbox"]::before { width: 20px; height: 20px; top: 2px; left: 2px; }
+.context-dict-name input[type="checkbox"]:checked::before { transform: translateX(18px); }

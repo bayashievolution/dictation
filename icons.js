@@ -66,6 +66,7 @@ const ICON_DEFS = {
   'sm-chevron-right': '<path d="M9 4 L17 12 L9 20"/>',   // SUMADO の GLYPHS.chevronRight
   'sm-gear': '<circle cx="12" cy="12" r="3"/><path d="M12 2.8l1.6 2.4 2.8-.6.6 2.8 2.4 1.6-1.4 2.5 1.4 2.5-2.4 1.6-.6 2.8-2.8-.6L12 21.2l-1.6-2.4-2.8.6-.6-2.8-2.4-1.6L6 12.5 4.6 10l2.4-1.6.6-2.8 2.8.6z"/>',
   'sm-bolt': '<path d="M13 3L5.5 13.5H12L11 21l7.5-10.5H12z"/>',
+  'sm-book': '<path d="M4 5.5A2 2 0 0 1 6 3.5h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20.5V5.5M19 18.5v2H6"/>',
   'sm-xmark': '<path d="M7 7l10 10M17 7L7 17"/>',
 };
 
