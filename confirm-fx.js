@@ -182,5 +182,108 @@
     });
   }
 
-  global.ConfirmFx = { CONFIRM_FX, fxDiffMarks, fxStyle, stripFxSpans, playConfirmFx };
+  /* ───────── Web Speech の下書き (v0.24.120) ─────────
+   *
+   * やっさんの指定で「文字起こしエフェクト」を 2 段にした: Web Speech の下書き（エフェクト・スタイル）と AI 整形（上の playConfirmFx）。
+   * 下書きは Web Speech が数百ミリ秒ごとに「ここまでの全文」を送ってくる。前の全文と頭から比べて、
+   * 同じところは触らず、増えたところだけを <span> で足してアニメーションをかける（前の字はちらつかない）。
+   * Web Speech が前の字を言い直したら（頭からの一致が短くなったら）、そこから後ろを切って足し直す。
+   *
+   * ここは毎回の更新で span が増えるので、1 本ずつ JS のばねで動かさず、CSS のアニメーションにした。
+   * そのかわり動きの曲線はばねで作る（springLinear: ばねを計算して CSS の linear() に写す。SUMADO の仕様書 2.1「ease は使わない」）。
+   */
+  const DRAFT_FX = [
+    { value: 'none', label: 'なし' },
+    { value: 'fade', label: 'フェードイン' },
+    { value: 'blur', label: 'ぼかしから' },
+    { value: 'glow', label: '光ってから落ち着く' },
+  ];
+  const DRAFT_STYLE = [
+    { value: 'none', label: 'なし' },
+    { value: 'italic', label: 'イタリック' },
+    { value: 'underline', label: '下線' },
+  ];
+
+  /** 頭から何文字同じか */
+  function commonPrefixLen(a, b) {
+    const n = Math.min(a.length, b.length);
+    let i = 0;
+    while (i < n && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+    // サロゲートペアの片割れで切らない
+    if (i > 0 && i < a.length && /[\uDC00-\uDFFF]/.test(a[i])) i--;
+    return i;
+  }
+
+  /** ばねの動き（0→1）を CSS の linear() にする。返すのは { easing, ms } */
+  function springLinear({ response, dampingFraction }, points = 40) {
+    const sp = new Spring1D0(0);
+    sp.configure({ response, dampingFraction });
+    sp.target = 1;
+    const dt = 1 / 240, vals = [0];
+    let t = 0;
+    while (t < 3) {
+      sp.step(dt); t += dt; vals.push(sp.value);
+      if (Math.abs(sp.velocity) < 0.01 && Math.abs(sp.value - 1) < 0.002) break;
+    }
+    const ms = Math.round(t * 1000);
+    const stepN = Math.max(1, Math.floor(vals.length / points));
+    const out = [];
+    for (let i = 0; i < vals.length; i += stepN) out.push(Number(vals[i].toFixed(4)));
+    out[out.length - 1] = 1;
+    return { easing: `linear(${out.join(', ')})`, ms };
+  }
+  // Motion が無くても計算できるように、同じばねの式をここにも持つ（motion.js の Spring1D と同じ）
+  class Spring1D0 {
+    constructor(v) { this.value = v; this.target = v; this.velocity = 0; }
+    configure({ response, dampingFraction }) { const w = (2 * Math.PI) / response; this.k = w * w; this.c = 2 * dampingFraction * w; }
+    step(dt) { const a = -this.k * (this.value - this.target) - this.c * this.velocity; this.velocity += a * dt; this.value += this.velocity * dt; }
+  }
+
+  /** 下書きの曲線を CSS の変数にしておく（起動時に 1 回） */
+  function installDraftEasing(root) {
+    if (!root || !root.style) return;
+    const f = springLinear({ response: 0.45, dampingFraction: 1 });
+    const g = springLinear({ response: 1.0, dampingFraction: 1 });   // 光は少し残す
+    root.style.setProperty('--draft-ease', f.easing);
+    root.style.setProperty('--draft-ms', f.ms + 'ms');
+    root.style.setProperty('--draft-glow-ease', g.easing);
+    root.style.setProperty('--draft-glow-ms', g.ms + 'ms');
+  }
+
+  /** el の中の字を、頭から len 文字だけ残す */
+  function trimTo(el, len) {
+    let left = len;
+    for (const node of Array.from(el.childNodes)) {
+      const t = node.textContent;
+      if (left <= 0) { node.remove(); continue; }
+      if (t.length <= left) { left -= t.length; continue; }
+      node.textContent = t.slice(0, left);
+      left = 0;
+    }
+  }
+
+  /**
+   * 下書きの欄（#interim）に字を書く
+   * @param {HTMLElement} el
+   * @param {string} text Web Speech が送ってきた、ここまでの全文
+   * @param {string} mode DRAFT_FX の value
+   */
+  function renderDraft(el, text, mode) {
+    if (!el) return;
+    text = text || '';
+    if (!text || !mode || mode === 'none' || reduced()) { if (el.textContent !== text || el.children.length) el.textContent = text; return; }
+    const prev = el.textContent;
+    if (prev === text) return;
+    const keep = commonPrefixLen(prev, text);
+    trimTo(el, keep);
+    const add = text.slice(keep);
+    if (!add) return;
+    const s = document.createElement('span');
+    s.className = 'draft-in draft-in-' + mode;
+    s.textContent = add;
+    el.appendChild(s);
+  }
+
+  global.ConfirmFx = { CONFIRM_FX, fxDiffMarks, fxStyle, stripFxSpans, playConfirmFx,
+    DRAFT_FX, DRAFT_STYLE, commonPrefixLen, springLinear, installDraftEasing, renderDraft };
 })(typeof window !== 'undefined' ? window : globalThis);

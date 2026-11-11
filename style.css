@@ -3778,8 +3778,35 @@ p.settings-lead { margin: -2px 0 8px; }
 .usage-ring.big .ring-center b { font-size: 18px; }
 .usage-ring .ring-val { transform: translateX(2px); }
 
-/* v0.24.119: 確定の演出の見本。録音の段落と同じ字の大きさで、仮の字 → AI の字を見せる */
-.confirm-fx-try { display: flex; align-items: center; gap: 10px; }
-.confirm-fx-preview { flex: 1; min-height: 3.4em; padding: 8px 10px; border-radius: 10px; background: var(--bg-subtle); font-size: 13.5px; line-height: 1.7; }
-.confirm-fx-preview .paragraph { margin: 0; padding: 0; }
-.confirm-fx-try > .btn { flex: none; }
+/* v0.24.119〜120: 文字起こしエフェクト */
+.settings-acc-box .settings-acc-body > .fx-sub { display: block; padding: 4px 0 0; font-size: 13.5px; color: var(--text); }
+/* 3 つの選ぶ欄は同じ幅にそろえる（字の長さで幅が変わると、ばらばらに見える） */
+.modal .settings-acc-body label.field:has(> #input-draft-fx, > #input-draft-style, > #input-confirm-fx) > select { width: 11.5em; min-width: 0; max-width: 52vw; }
+.settings-acc-box .settings-acc-body > .fx-sub + label.field { border-top: none; }
+.modal .settings-acc-body label.field.fx-indent { padding-left: 14px; }
+.modal .settings-acc-body label.field.fx-indent + label.field.fx-indent { border-top: none; padding-top: 4px; }
+.fx-preview-row > .field-label { color: var(--text); font-size: 13.5px; }
+.fx-preview { margin-top: 8px; min-height: 5.6em; padding: 10px 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); font-size: 15px; line-height: 1.8; }
+.fx-preview .paragraph { margin: 0; padding: 0; }
+.fx-preview .draft-text { color: var(--text-faint); opacity: 0.85; }
+
+/* 下書きのスタイル（v0.24.120）。CSS の変数にして、いちばん近い指定が勝つようにする（プレビューは欄の値、本番は保存した値） */
+[data-draft-style="italic"] { --draft-font-style: italic; --draft-deco: none; }
+[data-draft-style="none"] { --draft-font-style: normal; --draft-deco: none; }
+[data-draft-style="underline"] { --draft-font-style: normal; --draft-deco: underline; }
+#interim, .draft-text, .paragraph.provisional .p-body {
+  font-style: var(--draft-font-style, italic);
+  text-decoration-line: var(--draft-deco, none);
+  text-decoration-color: var(--text-faint);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+/* 下書きの字の出かた（v0.24.120）。曲線はばねから作った linear()（confirm-fx.js の springLinear） */
+.draft-in-fade { animation: draftFade var(--draft-ms, 450ms) var(--draft-ease, linear) both; }
+.draft-in-blur { animation: draftBlur var(--draft-ms, 450ms) var(--draft-ease, linear) both; }
+.draft-in-glow { animation: draftGlow var(--draft-glow-ms, 1000ms) var(--draft-glow-ease, linear) both; }
+@keyframes draftFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes draftBlur { from { opacity: 0.2; filter: blur(4px); } to { opacity: 1; filter: blur(0); } }
+@keyframes draftGlow { from { color: var(--accent); } }
+@media (prefers-reduced-motion: reduce) { .draft-in { animation: none !important; } }

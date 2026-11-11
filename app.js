@@ -110,6 +110,9 @@ const DEFAULT_SETTINGS = {
   apiKey: '',
   // v0.24.119: AI の字に入れ替わるときの見せ方（confirm-fx.js）。試しの段階なので 4 つから選ぶ。既定はいちばん控えめな「ふわっと」
   confirmEffect: 'fade',
+  // v0.24.120: Web Speech の下書きの出かた・スタイル（やっさんの指定「文字起こしエフェクト」）。スタイルの既定は前と同じイタリック
+  draftEffect: 'fade',
+  draftStyle: 'italic',
   silenceSec: 3,
   // v0.24.51: 見出し追加（ミドル整形＝溜まった文字起こしをまとめ直して見出しを付ける）のタイミング（秒）。
   // 以前は「3段落たまったら、または60秒」で、段落の数の条件はやっさんの指定でなくした
@@ -580,6 +583,8 @@ const els = {
   // HTML から削除済み（v0.13.23）+ 機能本体撤去（v0.13.24）に伴い不要。
   inputWsCommitSec: document.getElementById('input-webspeech-commit-sec'),
   inputConfirmFx: document.getElementById('input-confirm-fx'),
+  inputDraftFx: document.getElementById('input-draft-fx'),
+  inputDraftStyle: document.getElementById('input-draft-style'),
   inputWsSliceChars: document.getElementById('input-webspeech-slice-chars'),
   inputWsSilenceStopSec: document.getElementById('input-webspeech-silence-stop-sec'),
   zoomBar: document.getElementById('zoom-bar'),
@@ -2279,7 +2284,7 @@ function buildRecognition() {
     if (isBgRecording()) {
       els.interim.textContent = '';
     } else {
-      els.interim.textContent = interimForDisplay;
+      ConfirmFx.renderDraft(els.interim, interimForDisplay, state.settings.draftEffect);   // v0.24.120: 下書きのエフェクト
       if (interim || gotFinal) hideEmptyHint();
       if (gotFinal || interim) autoScroll();
     }
@@ -4273,7 +4278,7 @@ function buildLiveDisplayRecognition() {
     }
     // BG録音中は共有の #interim に書かない（表示中の別タブに漏れるため）
     if (isBgRecording()) els.interim.textContent = '';
-    else els.interim.textContent = (state.liveFinals || '') + interim;
+    else ConfirmFx.renderDraft(els.interim, (state.liveFinals || '') + interim, state.settings.draftEffect);   // v0.24.120
   };
 
   rec.onerror = (e) => {
@@ -8499,9 +8504,12 @@ function openSettings() {
   refreshAudioUsage();
   if (els.inputGeminiLiveDisplay) els.inputGeminiLiveDisplay.checked = state.settings.geminiLiveDisplay !== false;
   if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
-  if (els.inputConfirmFx) {
-    const v = state.settings.confirmEffect;
-    els.inputConfirmFx.value = (window.ConfirmFx && ConfirmFx.CONFIRM_FX.some((o) => o.value === v)) ? v : DEFAULT_SETTINGS.confirmEffect;
+  {
+    // 選択肢に無い値（古い版で消した選択肢など）なら既定にする
+    const pick = (sel, list, v, d) => { if (sel) sel.value = (window.ConfirmFx && ConfirmFx[list].some((o) => o.value === v)) ? v : d; };
+    pick(els.inputConfirmFx, 'CONFIRM_FX', state.settings.confirmEffect, DEFAULT_SETTINGS.confirmEffect);
+    pick(els.inputDraftFx, 'DRAFT_FX', state.settings.draftEffect, DEFAULT_SETTINGS.draftEffect);
+    pick(els.inputDraftStyle, 'DRAFT_STYLE', state.settings.draftStyle, DEFAULT_SETTINGS.draftStyle);
   }
   if (els.inputWsCommitSec) {
     // v0.13.29: localStorage に古い値（3/4/5 等、v0.13.26 で削除した選択肢）が
@@ -8619,6 +8627,8 @@ function saveSettingsFromForm() {
   if (els.inputGeminiLiveDisplay) state.settings.geminiLiveDisplay = els.inputGeminiLiveDisplay.checked;
   if (els.inputMinChunkBytes) state.settings.audioMinChunkBytes = Math.max(100, Math.min(5000, Number(els.inputMinChunkBytes.value) || 400));
   if (els.inputConfirmFx) state.settings.confirmEffect = els.inputConfirmFx.value || 'none';
+  if (els.inputDraftFx) state.settings.draftEffect = els.inputDraftFx.value || 'none';
+  if (els.inputDraftStyle) { state.settings.draftStyle = els.inputDraftStyle.value || 'italic'; applyDraftStyle(); }
   if (els.inputWsCommitSec) {
     const newSec = Math.max(0, Math.min(20, Number(els.inputWsCommitSec.value) || 0));
     if (newSec !== state.settings.webspeechCommitSec) {
@@ -12278,45 +12288,77 @@ if (els.inputClaudeCode) {
     setVal(els.fontMemo, d.memoFont); setVal(els.sizeMemo, d.memoSize);
     setVal(els.fontSummary, d.summaryFont); setVal(els.sizeSummary, d.summarySize);
     setVal(els.inputConfirmFx, d.confirmEffect);
+    setVal(els.inputDraftFx, d.draftEffect);
+    setVal(els.inputDraftStyle, d.draftStyle);
+    restartFxPreview();
   });
 }
 /**
- * 確定の演出の見本 (v0.24.119)
- * 録音しなくても見比べられるように、設定の中で仮の字 → AI の字の入れ替わりを見せる。
- * 選んだときと［試す］で動く。見本は録音の段落と同じ見た目（.paragraph.provisional → .paragraph）
+ * 文字起こしエフェクトのプレビュー (v0.24.119・v0.24.120 で下書きも)
+ * 録音しなくても見比べられるように、設定の中で「下書きが出てくる → 仮の段落になる → AI 整形の字に入れ替わる」を繰り返し見せる。
+ * 設定の欄の値（保存前）で見せる。プレビューが画面に見えているあいだだけ動く（設定を閉じる・表示をたたむと止まる）。
+ * v0.24.119 の［試す］ボタンは、やっさんの並びの指定（区切り線〜プレビュー〜区切り線〜既定値に戻す）で外し、繰り返しにした
  */
-const CONFIRM_FX_SAMPLE = {
+const FX_SAMPLE = {
   before: 'えーと今日は家庭科室で火事が起きたらどうなるか考えてみます熱感知器が',
   after: '今日は、家庭科室で火事が起きたらどうなるかを考えてみます。熱感知器が',
 };
-let confirmFxPreviewTimer = 0;
-function playConfirmFxPreview() {
-  const box = document.getElementById('confirm-fx-preview');
-  if (!box || !els.inputConfirmFx) return;
-  clearTimeout(confirmFxPreviewTimer);
-  const p = document.createElement('div');
-  p.className = 'paragraph provisional';
-  setParagraphContent(p, CONFIRM_FX_SAMPLE.before);
-  box.replaceChildren(p);
-  // 仮の字を少し見せてから入れ替える（本番では Web Speech の字が数秒見えている）
-  confirmFxPreviewTimer = setTimeout(() => {
-    if (!p.isConnected) return;
+let fxPreviewRun = 0;
+const fxWait = (ms) => new Promise((r) => setTimeout(r, ms));
+function fxPreviewBox() { return document.getElementById('fx-preview'); }
+// 設定を閉じる・表示をたたむと offsetParent が無くなる
+function fxPreviewVisible() { const b = fxPreviewBox(); return !!(b && b.offsetParent); }
+async function playFxPreview() {
+  const box = fxPreviewBox();
+  if (!box || !window.ConfirmFx) return;
+  const run = ++fxPreviewRun;
+  const alive = () => run === fxPreviewRun && fxPreviewVisible();
+  while (alive()) {
+    box.dataset.draftStyle = (els.inputDraftStyle && els.inputDraftStyle.value) || 'italic';
+    // 1. 下書き: Web Speech のように、数文字ずつ全文が送られてくる
+    const draft = document.createElement('div');
+    draft.className = 'draft-text';
+    box.replaceChildren(draft);
+    const text = FX_SAMPLE.before;
+    for (let n = 0; n < text.length && alive();) {
+      n = Math.min(text.length, n + 2 + Math.floor(Math.random() * 3));
+      ConfirmFx.renderDraft(draft, text.slice(0, n), (els.inputDraftFx && els.inputDraftFx.value) || 'none');
+      await fxWait(140);
+    }
+    await fxWait(600);
+    if (!alive()) break;
+    // 2. 区切りで仮の段落になる（本番でも、ここで AI に送る）
+    const p = document.createElement('div');
+    p.className = 'paragraph provisional';
+    setParagraphContent(p, text);
+    box.replaceChildren(p);
+    await fxWait(900);
+    if (!alive()) break;
+    // 3. AI 整形の字に入れ替わる
     const old = p.textContent;
     p.className = 'paragraph';
-    setParagraphContent(p, CONFIRM_FX_SAMPLE.after);
-    if (window.ConfirmFx) ConfirmFx.playConfirmFx(p, old, els.inputConfirmFx.value);
-  }, 700);
-}
-if (els.inputConfirmFx) {
-  if (window.ConfirmFx && !els.inputConfirmFx.options.length) {
-    els.inputConfirmFx.innerHTML = ConfirmFx.CONFIRM_FX.map((o) => `<option value="${o.value}">${o.label}</option>`).join('');
+    setParagraphContent(p, FX_SAMPLE.after);
+    ConfirmFx.playConfirmFx(p, old, (els.inputConfirmFx && els.inputConfirmFx.value) || 'none');
+    await fxWait(2600);
   }
-  els.inputConfirmFx.addEventListener('change', playConfirmFxPreview);
 }
-{
-  const btn = document.getElementById('btn-confirm-fx-try');
-  if (btn) btn.addEventListener('click', playConfirmFxPreview);
+// プレビューが見えたら始める（表示のまとまりを開いたとき）。見張りは軽い（見えているかを確かめるだけ）
+setInterval(() => { if (fxPreviewVisible() && !fxPreviewBox().childElementCount) playFxPreview(); }, 500);
+function restartFxPreview() { if (fxPreviewVisible()) playFxPreview(); }
+
+/** 下書きのスタイル（なし・イタリック・下線）をページに付ける。CSS の変数で、いちばん近い指定が勝つ（プレビューは欄の値） */
+function applyDraftStyle() {
+  document.documentElement.dataset.draftStyle = state.settings.draftStyle || 'italic';
 }
+if (window.ConfirmFx) {
+  ConfirmFx.installDraftEasing(document.documentElement);
+  const fill = (sel, list) => { if (sel && !sel.options.length) sel.innerHTML = list.map((o) => `<option value="${o.value}">${o.label}</option>`).join(''); };
+  fill(els.inputDraftFx, ConfirmFx.DRAFT_FX);
+  fill(els.inputDraftStyle, ConfirmFx.DRAFT_STYLE);
+  fill(els.inputConfirmFx, ConfirmFx.CONFIRM_FX);
+}
+[els.inputDraftFx, els.inputDraftStyle, els.inputConfirmFx].forEach((sel) => { if (sel) sel.addEventListener('change', restartFxPreview); });
+applyDraftStyle();
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });
 }

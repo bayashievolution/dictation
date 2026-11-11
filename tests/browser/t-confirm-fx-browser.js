@@ -70,24 +70,55 @@ const eq = (label, got, want) => {
   await page.evaluate(() => window.__p);
   eq('「なし」なら包まない', seen, 0);
 
-  console.log('\n■ 設定の見本');
+  console.log('\n■ 下書き（v0.24.120）');
+  await page.evaluate(() => { state.settings.draftEffect = 'fade'; });
+  await page.evaluate(() => { ConfirmFx.renderDraft(els.interim, '今日は', 'fade'); ConfirmFx.renderDraft(els.interim, '今日は家庭', 'fade'); });
+  eq('増えた字だけ足す（前の字は包み直さない）', await page.evaluate(() => [...els.interim.children].map((c) => c.textContent)), ['今日は', '家庭']);
+  await page.evaluate(() => ConfirmFx.renderDraft(els.interim, '今日は火事', 'fade'));
+  eq('言い直したらそこから足し直す', await page.evaluate(() => [els.interim.textContent, [...els.interim.children].map((c) => c.textContent)]), ['今日は火事', ['今日は', '火事']]);
+  eq('アニメーションの曲線はばね（linear()）', await page.evaluate(() => getComputedStyle(els.interim.lastElementChild).animationTimingFunction.startsWith('linear(')), true);
+  await page.evaluate(() => ConfirmFx.renderDraft(els.interim, '', 'fade'));
+  eq('空にすると空', await page.evaluate(() => els.interim.innerHTML), '');
+  eq('スタイルの既定はイタリック', await page.evaluate(() => { els.interim.textContent = 'x'; return getComputedStyle(els.interim).fontStyle; }), 'italic');
+
+  console.log('\n■ 設定（v0.24.120 の並び）');
   await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });
   await page.waitForTimeout(600);
-  eq('選ぶ欄に なし＋4 つ', await page.$$eval('#input-confirm-fx option', (o) => o.map((x) => x.textContent)), ['なし', 'ふわっと', '一文字ずつ流れる', 'ぼかしが晴れる', '直ったところが光る']);
-  eq('いまの設定が選ばれている', await page.inputValue('#input-confirm-fx'), 'none');
+  eq('並び: 文字起こしエフェクト・Web Speech の下書き（エフェクト・スタイル）・AI 整形・プレビュー・既定値に戻す', await page.evaluate(() => {
+    const body = document.getElementById('fx-preview').closest('.settings-acc-body');
+    const out = [];
+    let on = false;
+    for (const n of body.children) {
+      const t = (n.querySelector(':scope > .field-label') || n).textContent.trim();
+      if (t === '文字起こしエフェクト') on = true;
+      if (on) out.push(n.tagName === 'DIV' && n.querySelector('#btn-display-defaults') ? '既定値に戻す' : t.split('\n')[0]);
+    }
+    return out;
+  }), ['文字起こしエフェクト', 'Web Speech の下書き', 'エフェクト', 'スタイル', 'AI 整形', 'プレビュー', '既定値に戻す']);
+  eq('エフェクトの選択肢', await page.$$eval('#input-draft-fx option', (o) => o.map((x) => x.textContent)), ['なし', 'フェードイン', 'ぼかしから', '光ってから落ち着く']);
+  eq('スタイルの選択肢', await page.$$eval('#input-draft-style option', (o) => o.map((x) => x.textContent)), ['なし', 'イタリック', '下線']);
+  eq('AI 整形の選択肢', await page.$$eval('#input-confirm-fx option', (o) => o.map((x) => x.textContent)), ['なし', 'ふわっと', '一文字ずつ流れる', 'ぼかしが晴れる', '直ったところが光る']);
+  eq('「確定の演出」の字は無い', await page.evaluate(() => document.getElementById('settings-modal').textContent.includes('確定の演出')), false);
+  await page.evaluate(() => document.getElementById('fx-preview').scrollIntoView({ block: 'center' }));
+  await page.selectOption('#input-draft-style', 'underline');
   await page.selectOption('#input-confirm-fx', 'type');
-  await page.waitForTimeout(300);
-  eq('選ぶと見本に仮の字が出る', await page.evaluate(() => document.querySelector('#confirm-fx-preview .paragraph').className), 'paragraph provisional');
-  await page.waitForTimeout(600);
-  eq('少しして AI の字に入れ替わり、一文字ずつ流れる', await page.evaluate(() => document.querySelectorAll('#confirm-fx-preview .fxc').length > 10), true);
-  await page.waitForTimeout(2000);
-  eq('見本も終わると包みが残らない', await page.evaluate(() => [document.querySelectorAll('#confirm-fx-preview .fxc').length, document.querySelector('#confirm-fx-preview').textContent]), [0, '今日は、家庭科室で火事が起きたらどうなるかを考えてみます。熱感知器が']);
-  await page.click('#btn-confirm-fx-try');
-  await page.waitForTimeout(300);
-  eq('［試す］でもう一度', await page.evaluate(() => document.querySelector('#confirm-fx-preview .paragraph').className), 'paragraph provisional');
-  await page.click('#btn-save-settings').catch(async () => { await page.evaluate(() => saveSettingsFromForm()); });
+  await page.waitForTimeout(800);
+  const pv = await page.evaluate(() => { const d = document.querySelector('#fx-preview .draft-text'); return d && { spans: d.children.length, deco: getComputedStyle(d).textDecorationLine, style: getComputedStyle(d).fontStyle }; });
+  eq('プレビューが見えると下書きが流れ出す（欄の値＝下線で）', pv && [pv.spans > 0, pv.deco, pv.style], [true, 'underline', 'normal']);
+  await page.waitForFunction(() => document.querySelector('#fx-preview .paragraph.provisional'), null, { timeout: 8000 }).catch(() => {});
+  eq('仮の段落になる', await page.evaluate(() => !!document.querySelector('#fx-preview .paragraph.provisional')), true);
+  await page.waitForFunction(() => document.querySelector('#fx-preview .fxc'), null, { timeout: 4000 }).catch(() => {});
+  eq('AI 整形の字に、選んだ見せ方で入れ替わる', await page.evaluate(() => document.querySelectorAll('#fx-preview .fxc').length > 10), true);
+  eq('本番のスタイルは保存するまで変わらない', await page.evaluate(() => document.documentElement.dataset.draftStyle), 'italic');
+  await page.evaluate(() => saveSettingsFromForm());
   await page.waitForTimeout(400);
-  eq('保存すると設定に入る', await page.evaluate(() => JSON.parse(localStorage.getItem('dictation:settings')).confirmEffect), 'type');
+  const st = await page.evaluate(() => JSON.parse(localStorage.getItem('dictation:settings')));
+  eq('保存すると設定に入る', [st.confirmEffect, st.draftStyle, st.draftEffect], ['type', 'underline', 'fade']);
+  eq('保存すると本番のスタイルも下線に', await page.evaluate(() => document.documentElement.dataset.draftStyle), 'underline');
+  await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });
+  await page.waitForTimeout(400);
+  await page.click('#btn-display-defaults');
+  eq('既定値に戻す', [await page.inputValue('#input-draft-fx'), await page.inputValue('#input-draft-style'), await page.inputValue('#input-confirm-fx')], ['fade', 'italic', 'fade']);
 
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');
