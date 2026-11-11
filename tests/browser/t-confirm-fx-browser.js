@@ -84,7 +84,7 @@ const eq = (label, got, want) => {
   console.log('\n■ 設定（v0.24.120 の並び）');
   await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });
   await page.waitForTimeout(600);
-  // v0.24.121: 仕様書（docs/UI・UX仕様（ディクテーション）.md 4 章）の部品と区切り線の決まりで測る
+  // v0.24.122: やっさんの指定の並びで測る（区切り線は上と下の 2 本だけ・説明なし）
   const look = await page.evaluate(() => {
     const body = document.getElementById('fx-preview').closest('.settings-acc-body');
     const items = [...body.children];
@@ -106,10 +106,11 @@ const eq = (label, got, want) => {
     });
   });
   eq('並び', look.map((x) => x.t), ['文字起こしエフェクト', 'Web Speech の下書き', 'エフェクト', 'スタイル', 'AI 整形', 'プレビュー', '既定値に戻す']);
-  eq('区切り線: 項目ごとに 1 本、小見出しのすぐ下だけ線なし', look.map((x) => x.line), [true, false, true, true, true, true, true]);
-  eq('区切り線: 入れ子の子の線は下げたところから', [look[2].lineLeft - look[1].lineLeft, look[3].lineLeft - look[1].lineLeft], [14, 14]);
+  eq('区切り線は上（文字起こしエフェクトの上）と下（既定値に戻すの上）の 2 本だけ', look.map((x) => x.line), [true, false, false, false, false, false, true]);
+  eq('エフェクト・スタイルは一段下げる', [look[2].lineLeft - look[1].lineLeft, look[3].lineLeft - look[1].lineLeft], [14, 14]);
+  eq('行に説明を付けない', await page.evaluate(() => [...document.getElementById('fx-preview').closest('.settings-acc-body').querySelectorAll('.fx-in .field-hint')].length), 0);
   eq('名前は白・13.5px', look.slice(0, 6).every((x) => x.color === look[0].color && x.size === '13.5px'), true);
-  eq('欄は名前と説明のまとまりの上下まんなか', look.filter((x) => x.mid !== null).map((x) => x.mid), [true, true, true]);
+  eq('欄は名前と上下まんなか', look.filter((x) => x.mid !== null).map((x) => x.mid), [true, true, true]);
   eq('エフェクトの選択肢', await page.$$eval('#input-draft-fx option', (o) => o.map((x) => x.textContent)), ['なし', 'フェードイン', 'ぼかしから', '光ってから落ち着く']);
   eq('スタイルの選択肢', await page.$$eval('#input-draft-style option', (o) => o.map((x) => x.textContent)), ['なし', 'イタリック', '下線']);
   eq('AI 整形の選択肢', await page.$$eval('#input-confirm-fx option', (o) => o.map((x) => x.textContent)), ['なし', 'ふわっと', '一文字ずつ流れる', 'ぼかしが晴れる', '直ったところが光る']);

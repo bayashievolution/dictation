@@ -3778,14 +3778,17 @@ p.settings-lead { margin: -2px 0 8px; }
 .usage-ring.big .ring-center b { font-size: 18px; }
 .usage-ring .ring-val { transform: translateX(2px); }
 
-/* v0.24.121: 仕様書 4 章の部品（箱の中の小見出し・入れ子・プレビューの箱）。
-   区切り線は、.settings-acc-body の中の .field どうしのあいだに自動で付く（項目ごとに 1 本）。ここで足すのは 4 章の例外だけ */
+/* v0.24.122: 文字起こしエフェクト（やっさんの指定の並び）。区切り線は、まとまりの上（文字起こしエフェクトの上）と下（既定値に戻すの上）の 2 本だけ。
+   中の行には線を引かず、説明も付けない。名前は欄と上下まんなか */
 .settings-acc-box .settings-acc-body > .settings-subhead { margin: 0; padding: 12px 0 2px; font-size: 13.5px; font-weight: 600; color: var(--text); }
-.settings-acc-box .settings-acc-body > .settings-subhead + .field { border-top: none !important; }   /* 例外: 小見出しのすぐ下は線なし */
-.settings-acc-box .settings-acc-body > .settings-nest-head { margin: 0; padding: 11px 0; font-size: 13.5px; color: var(--text); }
-.settings-acc-box .settings-acc-body > label.field.settings-nest { margin-left: 14px; }   /* 例外: 子の上の線は下げたところから（margin なので線も一緒に下がる） */
-.settings-acc-box .settings-acc-body > .field:has(> .fx-preview) > .field-label { margin: 0; color: var(--text); font-size: 13.5px; }   /* プレビューの名前の行（白・13.5px） */
+.settings-acc-box .settings-acc-body > .fx-in { border-top: none !important; }
+.settings-acc-box .settings-acc-body > .settings-nest-head { margin: 0; padding: 8px 0 2px; font-size: 13.5px; color: var(--text); }
+.settings-acc-box .settings-acc-body > label.field.fx-in { padding: 5px 0; }
+.settings-acc-box .settings-acc-body > label.field.settings-nest { margin-left: 14px; }
+.modal .settings-acc-body label.field.fx-in > .field-label { grid-row: 1 / -1; align-self: center; }
 .modal .settings-acc-body label.field:has(> #input-draft-fx, > #input-draft-style, > #input-confirm-fx) > select { width: 11.5em; min-width: 0; max-width: 46vw; }
+.settings-acc-box .settings-acc-body > .field:has(> .fx-preview) { padding-top: 8px; }
+.settings-acc-box .settings-acc-body > .field:has(> .fx-preview) > .field-label { margin: 0; color: var(--text); font-size: 13.5px; }
 .fx-preview { margin-top: 8px; min-height: 5.6em; padding: 10px 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); font-size: 15px; line-height: 1.8; }
 .fx-preview .paragraph { margin: 0; padding: 0; }
 .fx-preview .draft-text, .fx-preview .paragraph.provisional .p-body { color: var(--text-muted); }
