@@ -60,5 +60,18 @@ console.log('\n■ 本体とのつなぎ');
   eq('拡張から Groq に届く（CSP）', /connect-src[^;]*https:\/\/api\.groq\.com/.test(m.content_security_policy.extension_pages), true);
 }
 
+console.log('\n■ 無音のときの決まり文句（v0.24.127・実機「何もしゃべらなかった時 ご視聴ありがとうございました って出る」）');
+const seg = (text, nsp = 0.1, lp = -0.3) => ({ text, no_speech_prob: nsp, avg_logprob: lp });
+// 実機では話していない確率が低めに付いて、v0.24.83 の目安を通り抜けた
+eq('無音なら「ご視聴ありがとうございました」を落とす（確率が低くても）', ctx.groqPickText({ segments: [seg('ご視聴ありがとうございました')] }, { quiet: true }).text, '');
+eq('句読点・続いた決まり文句も', ctx.groqPickText({ segments: [seg('ご視聴ありがとうございました。チャンネル登録よろしくお願いします！')] }, { quiet: true }).text, '');
+eq('segments が無い返事でも', ctx.groqPickText({ text: 'ご視聴ありがとうございました。' }, { quiet: true }).text, '');
+eq('無音でなくても、話していない確率が 0.3 を超えるなら落とす', ctx.groqPickText({ segments: [seg('今日は火事の話です。'), seg('ご視聴ありがとうございました', 0.45)] }).text, '今日は火事の話です。');
+eq('声があって確率が低いなら残す（本当に言った）', ctx.groqPickText({ segments: [seg('ご視聴ありがとうございました', 0.02)] }).text, 'ご視聴ありがとうございました');
+eq('無音でも、決まり文句ではない文は残す（小さな声を消さない）', ctx.groqPickText({ segments: [seg('熱感知器が反応します')] }, { quiet: true }).text, '熱感知器が反応します');
+eq('決まり文句が文の一部なら残す', ctx.groqPickText({ segments: [seg('動画のご視聴ありがとうございましたという字幕が出ます')] }, { quiet: true }).text, '動画のご視聴ありがとうございましたという字幕が出ます');
+eq('「ご清聴ありがとうございました」は発表の締めで言うので残す', ctx.groqPickText({ segments: [seg('ご清聴ありがとうございました')] }, { quiet: true }).text, 'ご清聴ありがとうございました');
+eq('「ありがとうございました」だけは残す（授業でも言う）', ctx.groqPickText({ segments: [seg('ありがとうございました')] }, { quiet: true }).text, 'ありがとうございました');
+
 console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');
 process.exit(fail ? 1 : 0);

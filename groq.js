@@ -34,17 +34,49 @@ function groqWhisperPrompt(terms, prevText, maxChars = 150) {
 }
 
 /**
+ * 無音のときに Whisper が作りがちな決まり文句 (v0.24.127)
+ * 実機 2026-11-11: 何もしゃべっていないかたまりで「ご視聴ありがとうございました」が出た（やっさん）。
+ * 話していない確率（no_speech_prob）は低めに付くことがあり、v0.24.83 の目安（0.6 超かつ自信 -1 未満）では落ちなかった。
+ * Whisper が動画の字幕を学習していて、無音の終わりに字幕の締めの文を書く、というよく知られた癖。
+ * 入れるのは講義・会議でまず言わないものだけ。「ご清聴ありがとうございました」は発表の締めで本当に言うので入れない。
+ */
+const GROQ_SILENCE_PHRASES = [
+  /^(最後まで)?ご視聴(いただき|頂き)?(まことに|誠に|本当に)?ありがとうございま(した|す)$/,
+  /^チャンネル登録(と高評価)?(を|も)?(よろしく)?お願いします$/,
+  /^チャンネル登録よろしくお願いします$/,
+  /^(次回|次の動画)もお楽しみに$/,
+  /^(では|それでは)?また(次回|次の動画)(で|でお会いしましょう)?$/,
+  /^字幕(作成|制作|提供)(者)?.*$/,
+];
+
+/** 決まり文句だけでできているか（句読点・空白・「!」は見ない。いくつか続いていても同じ） */
+function isGroqSilencePhrase(text) {
+  const parts = String(text || '').split(/[。．.！!？?\n]+/).map((x) => x.replace(/[\s、,・「」『』"'“”]/g, '')).filter(Boolean);
+  return parts.length > 0 && parts.every((p) => GROQ_SILENCE_PHRASES.some((re) => re.test(p)));
+}
+
+/**
  * verbose_json の返事から、残す文と落とす文を分ける
+ * @param {object} data
+ * @param {{quiet?: boolean}} [opts] quiet: このかたまりは無音だったらしい（音の大きさの検出・Web Speech が何も聞き取らなかった）。
+ *   そのときは決まり文句だけの部分を、話していない確率に関係なく落とす。
+ *   無音でないときも、話していない確率が 0.3 を超える決まり文句は落とす（本当に言ったなら、確率はほぼ 0 になる）
  * @returns {{text: string, dropped: string[]}}
  */
-function groqPickText(data) {
+function groqPickText(data, opts = {}) {
+  const quiet = !!(opts && opts.quiet);
   const segs = data && Array.isArray(data.segments) ? data.segments : null;
-  if (!segs) return { text: String((data && data.text) || '').trim(), dropped: [] };
+  if (!segs) {
+    const t = String((data && data.text) || '').trim();
+    if (quiet && isGroqSilencePhrase(t)) return { text: '', dropped: [t] };
+    return { text: t, dropped: [] };
+  }
   const kept = [], dropped = [];
   for (const s of segs) {
     const t = String(s.text || '').trim();
     if (!t) continue;
     if (s.no_speech_prob > 0.6 && s.avg_logprob < -1) dropped.push(t);
+    else if (isGroqSilencePhrase(t) && (quiet || s.no_speech_prob > 0.3)) dropped.push(t);
     else kept.push(t);
   }
   return { text: kept.join(' ').trim(), dropped };
@@ -56,9 +88,10 @@ function groqPickText(data) {
  * @param {Blob}   args.audioBlob   本体の録音のかたまり（webm/opus のまま送れる）
  * @param {object} [args.sessionContext]  buildContextBlock と同じ形。terms だけ使う
  * @param {string} [args.contextHint]     直前の文字起こし
+ * @param {boolean} [args.quiet]         無音だったらしい（決まり文句を落とす。groqPickText）
  * @returns {Promise<string>}
  */
-async function transcribeAudioWithGroq({ apiKey, audioBlob, sessionContext, contextHint, model, durationSec }) {
+async function transcribeAudioWithGroq({ apiKey, audioBlob, sessionContext, contextHint, model, durationSec, quiet = false }) {
   if (!apiKey) throw new Error('Groq の API キーが設定されていません');
   if (!audioBlob || audioBlob.size === 0) return '';
   const prompt = groqWhisperPrompt(sessionContext && sessionContext.terms, contextHint);
@@ -96,7 +129,7 @@ async function transcribeAudioWithGroq({ apiKey, audioBlob, sessionContext, cont
       res.headers.forEach((v, k) => { if (/^x-ratelimit-/i.test(k)) headers[k.toLowerCase()] = v; });
       usageRecordGroq(durationSec || (audioBlob.size * 8 / 64000), headers);
     }
-    const picked = groqPickText(await res.json());
+    const picked = groqPickText(await res.json(), { quiet });
     if (picked.dropped.length && window.diagLog) {
       window.diagLog.info(`Groq: 話していない見込みの部分を落としました（${picked.dropped.join(' / ').slice(0, 80)}）`);
     }

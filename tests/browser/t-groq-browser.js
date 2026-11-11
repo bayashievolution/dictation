@@ -187,6 +187,21 @@ async function sendOne(page) {
     await ctx.close();
   }
 
+  {
+    // v0.24.127: 無音のかたまりで「ご視聴ありがとうございました」（話していない確率は低め）。実機 2026-11-11
+    const silenceGroq = { status: 200, body: { text: 'ご視聴ありがとうございました', segments: [{ text: 'ご視聴ありがとうございました', no_speech_prob: 0.1, avg_logprob: -0.4 }] } };
+    const { ctx, page } = await open(browser, { ...base, aiEnabled: false }, { groq: silenceGroq });
+    await page.evaluate(() => sendAudioChunkToGemini(new Blob(['x'.repeat(2000)], { type: 'audio/webm' }), '', { startsAtSilence: true, endsAtSilence: true, durationMs: 15000, hadSpeech: false }));
+    await page.waitForTimeout(500);
+    const paras = await page.evaluate(() => Array.from(document.querySelectorAll('#confirmed .paragraph')).map(p => p.textContent.trim()));
+    eq('無音（大きい音なし）のかたまりの決まり文句は出さない', paras.some(t => t.includes('ご視聴')), false);
+    await page.evaluate(() => { els.confirmed.innerHTML = ''; });
+    await page.evaluate(() => sendAudioChunkToGemini(new Blob(['x'.repeat(2000)], { type: 'audio/webm' }), '', { startsAtSilence: true, endsAtSilence: true, durationMs: 15000, hadSpeech: true }));
+    await page.waitForTimeout(500);
+    eq('大きい音があり、確率も低いなら残す（本当に言ったかもしれない）', await page.evaluate(() => els.confirmed.textContent.includes('ご視聴ありがとうございました')), true);
+    await ctx.close();
+  }
+
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');
   process.exit(fail ? 1 : 0);

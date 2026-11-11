@@ -4479,7 +4479,7 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
   try {
     let text;
     if (engine === 'Groq') {
-      ({ text, engine } = await transcribeChunkWithGroq(blob, targetEl, edges));
+      ({ text, engine } = await transcribeChunkWithGroq(blob, targetEl, edges, provisionalText));
     } else {
       text = await transcribeAudioWithGemini({
         apiKey: geminiKey(),
@@ -4575,8 +4575,13 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
  * 料金はかかるが、失敗はまれな前提。どちらで文字にしたかは診断ログと断り書きに出す。
  * @returns {Promise<{text: string, engine: 'Groq'|'Gemini'}>}
  */
-async function transcribeChunkWithGroq(blob, targetEl, edges) {
+async function transcribeChunkWithGroq(blob, targetEl, edges, provisionalText = '') {
   const sessionContext = getSessionContextForAi();
+  // v0.24.127: 無音だったらしいか。音の大きさの検出が「大きい音なし」と言ったか、Web Speech を並走させていて何も聞き取らなかったか。
+  // そのときは Whisper の決まり文句（「ご視聴ありがとうございました」など）を落とす（groq.js の groqPickText）。
+  // 送るのはやめない: 3m 離れた声のように、検出器が拾わない小さな声でも Groq は聞き取れる（比較ページの実機）
+  const quiet = (edges && edges.hadSpeech === false)
+    || (state.settings.geminiLiveDisplay !== false && !!state.liveRecognition && !String(provisionalText || '').trim());
   let raw;
   try {
     raw = await transcribeAudioWithGroq({
@@ -4585,6 +4590,7 @@ async function transcribeChunkWithGroq(blob, targetEl, edges) {
       sessionContext,
       contextHint: getContextForGemini(300),
       durationSec: edges && edges.durationMs ? edges.durationMs / 1000 : undefined,   // v0.24.104: 無料枠の残りを数える
+      quiet,
     });
   } catch (e) {
     if (!geminiKey()) throw e;
