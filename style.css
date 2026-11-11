@@ -3780,12 +3780,15 @@ p.settings-lead { margin: -2px 0 8px; }
 
 /* v0.24.122: 文字起こしエフェクト（やっさんの指定の並び）。区切り線は、まとまりの上（文字起こしエフェクトの上）と下（既定値に戻すの上）の 2 本だけ。
    中の行には線を引かず、説明も付けない。名前は欄と上下まんなか */
-.settings-acc-box .settings-acc-body > .settings-subhead { margin: 0; padding: 12px 0 2px; font-size: 13.5px; font-weight: 600; color: var(--text); }
+.settings-acc-box .settings-acc-body > .settings-subhead { margin: 0; padding: 12px 0 2px; font-size: 13px; font-weight: 500; color: var(--text-muted); }   /* v0.24.123: 「フォントと文字サイズ」の見出しと同じグレー（やっさん） */
 .settings-acc-box .settings-acc-body > .fx-in { border-top: none !important; }
-.settings-acc-box .settings-acc-body > .settings-nest-head { margin: 0; padding: 8px 0 2px; font-size: 13.5px; color: var(--text); }
-.settings-acc-box .settings-acc-body > label.field.fx-in { padding: 5px 0; }
-.settings-acc-box .settings-acc-body > label.field.settings-nest { margin-left: 14px; }
-.modal .settings-acc-body label.field.fx-in > .field-label { grid-row: 1 / -1; align-self: center; }
+/* v0.24.123: 欄の高さと間隔を、上のフォントの欄（高さ 36px・間隔 6px）にそろえる（やっさん） */
+.settings-acc-box .settings-acc-body > label.field.fx-in { padding: 3px 0; }
+.modal .settings-acc-body label.field.fx-in > select { height: 36px; }
+/* v0.24.123: 説明の無い数字・選ぶ欄の行は、名前を欄と上下まんなかに（「停止確認までの無音時間」がずれていた・やっさん）。
+   v0.24.108 の「名前は下寄せ・説明はその下」は説明がある行の形で、説明が無いと名前が上に浮く */
+.modal .settings-acc-body label.field:has(> select):not(:has(> .field-hint)) > .field-label,
+.modal .settings-acc-body label.field:has(> .number-stepper):not(:has(> .field-hint)) > .field-label { grid-row: 1 / -1; align-self: center; }
 .modal .settings-acc-body label.field:has(> #input-draft-fx, > #input-draft-style, > #input-confirm-fx) > select { width: 11.5em; min-width: 0; max-width: 46vw; }
 .settings-acc-box .settings-acc-body > .field:has(> .fx-preview) { padding-top: 8px; }
 .settings-acc-box .settings-acc-body > .field:has(> .fx-preview) > .field-label { margin: 0; color: var(--text); font-size: 13.5px; }

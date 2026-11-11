@@ -105,11 +105,24 @@ const eq = (label, got, want) => {
       };
     });
   });
-  eq('並び', look.map((x) => x.t), ['文字起こしエフェクト', 'Web Speech の下書き', 'エフェクト', 'スタイル', 'AI 整形', 'プレビュー', '既定値に戻す']);
-  eq('区切り線は上（文字起こしエフェクトの上）と下（既定値に戻すの上）の 2 本だけ', look.map((x) => x.line), [true, false, false, false, false, false, true]);
-  eq('エフェクト・スタイルは一段下げる', [look[2].lineLeft - look[1].lineLeft, look[3].lineLeft - look[1].lineLeft], [14, 14]);
+  eq('並び（v0.24.123）', look.map((x) => x.t), ['文字起こしエフェクト', '下書きのエフェクト', '下書きのスタイル', 'AI 整形', 'プレビュー', '既定値に戻す']);
+  eq('区切り線は上（文字起こしエフェクトの上）と下（既定値に戻すの上）の 2 本だけ', look.map((x) => x.line), [true, false, false, false, false, true]);
   eq('行に説明を付けない', await page.evaluate(() => [...document.getElementById('fx-preview').closest('.settings-acc-body').querySelectorAll('.fx-in .field-hint')].length), 0);
-  eq('名前は白・13.5px', look.slice(0, 6).every((x) => x.color === look[0].color && x.size === '13.5px'), true);
+  // v0.24.123: 見出しは「フォントと文字サイズ」と同じグレー。欄の高さと間隔は、上のフォントの欄と同じ（やっさん）
+  const m = await page.evaluate(() => {
+    const r = (s) => document.querySelector(s).getBoundingClientRect();
+    const c = (n) => getComputedStyle(n).color;
+    return { head: [c(document.querySelector('.settings-subhead')), c(document.getElementById('font-transcript').closest('.field').querySelector('.field-label'))],
+      font: [r('#font-transcript').height, Math.round(r('#font-memo').top - r('#font-transcript').top)],
+      fx: [r('#input-draft-fx').height, Math.round(r('#input-draft-style').top - r('#input-draft-fx').top), Math.round(r('#input-confirm-fx').top - r('#input-draft-style').top)] };
+  });
+  eq('見出しはグレー（フォントと文字サイズと同じ）', m.head[0], m.head[1]);
+  eq('欄の高さと間隔は、上のフォントの欄と同じ', m.fx, [m.font[0], m.font[1], m.font[1]]);
+  eq('停止確認までの無音時間: 名前は欄と上下まんなか（説明の無い行）', await page.evaluate(() => {
+    const inp = document.getElementById('input-auto-stop-sec');
+    const a = inp.closest('label').querySelector('.field-label').getBoundingClientRect(), b = inp.closest('.number-stepper').getBoundingClientRect();
+    return Math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2) < 2;
+  }), true);
   eq('欄は名前と上下まんなか', look.filter((x) => x.mid !== null).map((x) => x.mid), [true, true, true]);
   eq('エフェクトの選択肢', await page.$$eval('#input-draft-fx option', (o) => o.map((x) => x.textContent)), ['なし', 'フェードイン', 'ぼかしから', '光ってから落ち着く']);
   eq('スタイルの選択肢', await page.$$eval('#input-draft-style option', (o) => o.map((x) => x.textContent)), ['なし', 'イタリック', '下線']);
