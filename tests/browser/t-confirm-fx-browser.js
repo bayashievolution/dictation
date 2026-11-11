@@ -97,7 +97,7 @@ const eq = (label, got, want) => {
       const sel = n.querySelector(':scope > select');
       const nr = name.getBoundingClientRect(), hint = n.querySelector(':scope > .field-hint');
       return {
-        t: (n.querySelector('#btn-display-defaults') ? '既定値に戻す' : name.textContent.trim()),
+        t: (n.querySelector('#btn-display-defaults') ? '既定値に戻す' : n.querySelector('#fx-preview') ? '（プレビューの箱）' : name.textContent.trim()),
         line: c.borderTopWidth !== '0px', lineLeft: left(n),
         color: getComputedStyle(name).color, size: getComputedStyle(name).fontSize,
         // 欄は、名前と説明をあわせたまとまりの上下まんなか
@@ -105,7 +105,7 @@ const eq = (label, got, want) => {
       };
     });
   });
-  eq('並び（v0.24.123）', look.map((x) => x.t), ['文字起こしの出し方', '下書きエフェクト', '下書きスタイル', 'AI 整形', 'プレビュー', '既定値に戻す']);
+  eq('並び（v0.24.123）', look.map((x) => x.t), ['文字起こしの出し方', '下書きエフェクト', '下書きスタイル', 'AI 整形', '（プレビューの箱）', '既定値に戻す']);
   eq('区切り線は上（文字起こしエフェクトの上）と下（既定値に戻すの上）の 2 本だけ', look.map((x) => x.line), [true, false, false, false, false, true]);
   eq('行に説明を付けない', await page.evaluate(() => [...document.getElementById('fx-preview').closest('.settings-acc-body').querySelectorAll('.fx-in .field-hint')].length), 0);
   // v0.24.123: 見出しは「フォントと文字サイズ」と同じグレー。欄の高さと間隔は、上のフォントの欄と同じ（やっさん）

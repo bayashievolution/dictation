@@ -3792,7 +3792,8 @@ p.settings-lead { margin: -2px 0 8px; }
 .modal .settings-acc-body label.field:has(> #input-draft-fx, > #input-draft-style, > #input-confirm-fx) > select { width: 11.5em; min-width: 0; max-width: 46vw; }
 .settings-acc-box .settings-acc-body > .field:has(> .fx-preview) { padding-top: 8px; }
 .settings-acc-box .settings-acc-body > .field:has(> .fx-preview) > .field-label { margin: 0; color: var(--text); font-size: 13.5px; }
-.fx-preview { margin-top: 8px; min-height: 5.6em; padding: 10px 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); font-size: 15px; line-height: 1.8; }
+/* v0.24.125: 「プレビュー」の字は消した（やっさん「書かなくても分かる」） */
+.fx-preview { margin-top: 4px; min-height: 5.6em; padding: 10px 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); font-size: 15px; line-height: 1.8; }
 .fx-preview .paragraph { margin: 0; padding: 0; }
 .fx-preview .draft-text, .fx-preview .paragraph.provisional .p-body { color: var(--text-muted); }
 
