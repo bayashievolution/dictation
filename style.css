@@ -2065,7 +2065,10 @@ mark.search-hit.current {
 
 #interim {
   color: var(--text-faint);
-  font-size: 17px;
+  /* v0.24.130: 段落（#confirmed）と同じ大きさ・書体に。前は 17px に固定で、設定の文字の大きさ（はじめ 15px）の段落より大きく、
+     下書きが「未確定」の段落になるときに字の大きさが変わって見えた（やっさん「サイズを揃えてほしい」） */
+  font-family: var(--transcript-font);
+  font-size: var(--transcript-size);
   line-height: 1.9;
   min-height: 1.9em;
   font-style: italic;

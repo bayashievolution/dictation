@@ -49,10 +49,26 @@ const GROQ_SILENCE_PHRASES = [
   /^字幕(作成|制作|提供)(者)?.*$/,
 ];
 
+/**
+ * 無音のときに出る、相づちだけの短い返事 (v0.24.130)
+ * 実機 2026-11-11: 無音のあいだに「はい、どうぞ。」「はい。」「はい。」「はい。」と出た（やっさん）。
+ * 前の版で再現すると、**1 つのかたまりの中で** Whisper が相づちを繰り返していた（segments が 4 つ）。全体では「どうぞ」が入るので、
+ * app.js の isFillerOnly（相づちだけのかたまりが続いたら 2 つ目から出さない）にも当たらず、整形で行が分かれて 4 行になった。
+ *   - 無音だったらしい（quiet）ときは、相づちだけの部分を落とす
+ *   - 声があるときも、同じ相づちが続けて繰り返された分は 1 つにする（Whisper の繰り返しの癖。本当の返事は 1 回残る）
+ */
+const GROQ_QUIET_FILLER = /^(はい|はーい|ええ|うん|どうぞ)+$/;
+
 /** 決まり文句だけでできているか（句読点・空白・「!」は見ない。いくつか続いていても同じ） */
 function isGroqSilencePhrase(text) {
   const parts = String(text || '').split(/[。．.！!？?\n]+/).map((x) => x.replace(/[\s、,・「」『』"'“”]/g, '')).filter(Boolean);
   return parts.length > 0 && parts.every((p) => GROQ_SILENCE_PHRASES.some((re) => re.test(p)));
+}
+
+/** 相づちだけか（句読点・空白は見ない） */
+function isGroqQuietFiller(text) {
+  const t = String(text || '').replace(/[\s、。，．,.!！?？…・ー〜~「」]/g, '');
+  return !!t && GROQ_QUIET_FILLER.test(t);
 }
 
 /**
@@ -68,7 +84,7 @@ function groqPickText(data, opts = {}) {
   const segs = data && Array.isArray(data.segments) ? data.segments : null;
   if (!segs) {
     const t = String((data && data.text) || '').trim();
-    if (quiet && isGroqSilencePhrase(t)) return { text: '', dropped: [t] };
+    if (quiet && (isGroqSilencePhrase(t) || isGroqQuietFiller(t))) return { text: '', dropped: [t] };
     return { text: t, dropped: [] };
   }
   const kept = [], dropped = [];
@@ -77,6 +93,8 @@ function groqPickText(data, opts = {}) {
     if (!t) continue;
     if (s.no_speech_prob > 0.6 && s.avg_logprob < -1) dropped.push(t);
     else if (isGroqSilencePhrase(t) && (quiet || s.no_speech_prob > 0.3)) dropped.push(t);
+    else if (quiet && isGroqQuietFiller(t)) dropped.push(t);   // v0.24.130
+    else if (isGroqQuietFiller(t) && kept.length && isGroqQuietFiller(kept[kept.length - 1])) dropped.push(t);   // v0.24.130: 相づちの繰り返し
     else kept.push(t);
   }
   return { text: kept.join(' ').trim(), dropped };

@@ -73,5 +73,13 @@ eq('決まり文句が文の一部なら残す', ctx.groqPickText({ segments: [s
 eq('「ご清聴ありがとうございました」は発表の締めで言うので残す', ctx.groqPickText({ segments: [seg('ご清聴ありがとうございました')] }, { quiet: true }).text, 'ご清聴ありがとうございました');
 eq('「ありがとうございました」だけは残す（授業でも言う）', ctx.groqPickText({ segments: [seg('ありがとうございました')] }, { quiet: true }).text, 'ありがとうございました');
 
+console.log('\n■ 無音のときの相づち・相づちの繰り返し（v0.24.130・実機「無音部分で はい、どうぞ。はい。はい。はい。となる」）');
+eq('無音なら「はい、どうぞ。」を落とす', ctx.groqPickText({ segments: [seg('はい、どうぞ。')] }, { quiet: true }).text, '');
+eq('無音なら「はい。」を落とす', ctx.groqPickText({ segments: [seg('はい。')] }, { quiet: true }).text, '');
+eq('声があるときの「はい。」は残す（本当の返事かもしれない）', ctx.groqPickText({ segments: [seg('はい。')] }).text, 'はい。');
+eq('声があっても、1 つのかたまりの中で相づちが繰り返されたら 1 つに（実機の再現）', ctx.groqPickText({ segments: ['はい、どうぞ。', 'はい。', 'はい。', 'はい。'].map((x) => seg(x)) }).text, 'はい、どうぞ。');
+eq('相づちのあいだに文があれば、それぞれ残す', ctx.groqPickText({ segments: ['はい。', '始めます。', 'はい。'].map((x) => seg(x)) }).text, 'はい。 始めます。 はい。');
+eq('無音でも、相づちで始まる文は残す', ctx.groqPickText({ segments: [seg('はい、では始めます。')] }, { quiet: true }).text, 'はい、では始めます。');
+
 console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');
 process.exit(fail ? 1 : 0);
