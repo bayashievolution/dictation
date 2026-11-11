@@ -108,6 +108,8 @@ window.diagLog = diagLog; // gemini.js 等から info() を呼べるように公
 
 const DEFAULT_SETTINGS = {
   apiKey: '',
+  // v0.24.119: AI の字に入れ替わるときの見せ方（confirm-fx.js）。試しの段階なので 4 つから選ぶ。既定はいちばん控えめな「ふわっと」
+  confirmEffect: 'fade',
   silenceSec: 3,
   // v0.24.51: 見出し追加（ミドル整形＝溜まった文字起こしをまとめ直して見出しを付ける）のタイミング（秒）。
   // 以前は「3段落たまったら、または60秒」で、段落の数の条件はやっさんの指定でなくした
@@ -406,7 +408,24 @@ function getWriteContainer() {
  * 開き直したときにずれたまま・薄いままになる（v0.24.60〜69 で起きていた。motion.js の stripMotionStyles を参照）
  */
 function savableHtml(html) {
+  // v0.24.119: 確定の演出の途中なら、1 文字ずつの包みも外す（薄いまま保存されないように。confirm-fx.js）
+  if (window.ConfirmFx) html = ConfirmFx.stripFxSpans(html);
   return window.Motion && Motion.stripMotionStyles ? Motion.stripMotionStyles(html) : html;
+}
+
+/**
+ * 仮の段落を AI の字に差し替えて、確定の演出をかける (v0.24.119)
+ * 高さの変化は今までどおり transcriptMorph。字の見せ方を confirm-fx.js が足す。
+ * 画面に見えていないとき（ほかのタブ・ほかのセッションに書いているとき）は演出しない
+ */
+function confirmSwap(targetEl, apply) {
+  const placeholder = !targetEl.classList.contains('provisional') && targetEl.classList.contains('refining')
+    && !targetEl.querySelector('.fxc') && /^（文字起こし中…）$/.test(targetEl.textContent.trim());
+  const oldText = placeholder ? '' : targetEl.textContent;
+  transcriptMorph(apply);
+  const mode = state.settings.confirmEffect || 'none';
+  const visible = state.activePane === 'pane-transcript' && els.confirmed.contains(targetEl) && targetEl.offsetParent;
+  if (window.ConfirmFx && visible) ConfirmFx.playConfirmFx(targetEl, oldText, mode);
 }
 
 function syncBgToSession() {
@@ -560,6 +579,7 @@ const els = {
   // input-webspeech-interim-opacity / btn-webspeech-defaults）への els 参照は削除。
   // HTML から削除済み（v0.13.23）+ 機能本体撤去（v0.13.24）に伴い不要。
   inputWsCommitSec: document.getElementById('input-webspeech-commit-sec'),
+  inputConfirmFx: document.getElementById('input-confirm-fx'),
   inputWsSliceChars: document.getElementById('input-webspeech-slice-chars'),
   inputWsSilenceStopSec: document.getElementById('input-webspeech-silence-stop-sec'),
   zoomBar: document.getElementById('zoom-bar'),
@@ -4474,7 +4494,7 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
       // このあと maybeConsolidateShortChunks() が 3つ溜まったら
       // refineWithGemini（見出し付き）でまとめて整形する。
       // v0.24.60: 仮の段落を差し替えると高さが変わる。下を跳ばさない
-      transcriptMorph(() => {
+      confirmSwap(targetEl, () => {   // v0.24.119: 確定の演出
         targetEl.className = 'paragraph short-refined';
         targetEl.dataset.shortTs = String(Date.now());
         setParagraphContent(targetEl, text);
@@ -4575,7 +4595,7 @@ async function transcribeChunkWithGroq(blob, targetEl, edges) {
   }
   if (!raw || !raw.trim() || !liveRefineReady()) return { text: raw || '', engine: 'Groq' };
   // 整形のあいだも、聞き取れた文字は見えているようにする（Web Speech の仮の文字より Groq のほうが確か）
-  transcriptMorph(() => setParagraphContent(targetEl, raw));
+  confirmSwap(targetEl, () => setParagraphContent(targetEl, raw));   // v0.24.119: 確定の演出
   try {
     const refined = await refineWithGemini({
       apiKey: geminiKey(),
@@ -8479,6 +8499,10 @@ function openSettings() {
   refreshAudioUsage();
   if (els.inputGeminiLiveDisplay) els.inputGeminiLiveDisplay.checked = state.settings.geminiLiveDisplay !== false;
   if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
+  if (els.inputConfirmFx) {
+    const v = state.settings.confirmEffect;
+    els.inputConfirmFx.value = (window.ConfirmFx && ConfirmFx.CONFIRM_FX.some((o) => o.value === v)) ? v : DEFAULT_SETTINGS.confirmEffect;
+  }
   if (els.inputWsCommitSec) {
     // v0.13.29: localStorage に古い値（3/4/5 等、v0.13.26 で削除した選択肢）が
     // 残っていると、UI のセレクトが空欄表示になる（option に value マッチがない）。
@@ -8594,6 +8618,7 @@ function saveSettingsFromForm() {
   }
   if (els.inputGeminiLiveDisplay) state.settings.geminiLiveDisplay = els.inputGeminiLiveDisplay.checked;
   if (els.inputMinChunkBytes) state.settings.audioMinChunkBytes = Math.max(100, Math.min(5000, Number(els.inputMinChunkBytes.value) || 400));
+  if (els.inputConfirmFx) state.settings.confirmEffect = els.inputConfirmFx.value || 'none';
   if (els.inputWsCommitSec) {
     const newSec = Math.max(0, Math.min(20, Number(els.inputWsCommitSec.value) || 0));
     if (newSec !== state.settings.webspeechCommitSec) {
@@ -12252,7 +12277,45 @@ if (els.inputClaudeCode) {
     setVal(els.fontTranscript, d.transcriptFont); setVal(els.sizeTranscript, d.transcriptSize);
     setVal(els.fontMemo, d.memoFont); setVal(els.sizeMemo, d.memoSize);
     setVal(els.fontSummary, d.summaryFont); setVal(els.sizeSummary, d.summarySize);
+    setVal(els.inputConfirmFx, d.confirmEffect);
   });
+}
+/**
+ * 確定の演出の見本 (v0.24.119)
+ * 録音しなくても見比べられるように、設定の中で仮の字 → AI の字の入れ替わりを見せる。
+ * 選んだときと［試す］で動く。見本は録音の段落と同じ見た目（.paragraph.provisional → .paragraph）
+ */
+const CONFIRM_FX_SAMPLE = {
+  before: 'えーと今日は家庭科室で火事が起きたらどうなるか考えてみます熱感知器が',
+  after: '今日は、家庭科室で火事が起きたらどうなるかを考えてみます。熱感知器が',
+};
+let confirmFxPreviewTimer = 0;
+function playConfirmFxPreview() {
+  const box = document.getElementById('confirm-fx-preview');
+  if (!box || !els.inputConfirmFx) return;
+  clearTimeout(confirmFxPreviewTimer);
+  const p = document.createElement('div');
+  p.className = 'paragraph provisional';
+  setParagraphContent(p, CONFIRM_FX_SAMPLE.before);
+  box.replaceChildren(p);
+  // 仮の字を少し見せてから入れ替える（本番では Web Speech の字が数秒見えている）
+  confirmFxPreviewTimer = setTimeout(() => {
+    if (!p.isConnected) return;
+    const old = p.textContent;
+    p.className = 'paragraph';
+    setParagraphContent(p, CONFIRM_FX_SAMPLE.after);
+    if (window.ConfirmFx) ConfirmFx.playConfirmFx(p, old, els.inputConfirmFx.value);
+  }, 700);
+}
+if (els.inputConfirmFx) {
+  if (window.ConfirmFx && !els.inputConfirmFx.options.length) {
+    els.inputConfirmFx.innerHTML = ConfirmFx.CONFIRM_FX.map((o) => `<option value="${o.value}">${o.label}</option>`).join('');
+  }
+  els.inputConfirmFx.addEventListener('change', playConfirmFxPreview);
+}
+{
+  const btn = document.getElementById('btn-confirm-fx-try');
+  if (btn) btn.addEventListener('click', playConfirmFxPreview);
 }
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });

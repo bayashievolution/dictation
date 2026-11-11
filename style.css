@@ -3777,3 +3777,9 @@ p.settings-lead { margin: -2px 0 8px; }
 .usage-ring.big { width: 104px; }
 .usage-ring.big .ring-center b { font-size: 18px; }
 .usage-ring .ring-val { transform: translateX(2px); }
+
+/* v0.24.119: 確定の演出の見本。録音の段落と同じ字の大きさで、仮の字 → AI の字を見せる */
+.confirm-fx-try { display: flex; align-items: center; gap: 10px; }
+.confirm-fx-preview { flex: 1; min-height: 3.4em; padding: 8px 10px; border-radius: 10px; background: var(--bg-subtle); font-size: 13.5px; line-height: 1.7; }
+.confirm-fx-preview .paragraph { margin: 0; padding: 0; }
+.confirm-fx-try > .btn { flex: none; }
