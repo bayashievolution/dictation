@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.120" />
+  <link rel="stylesheet" href="style.css?v=0.24.121" />
 </head>
 <body>
   <div id="app">
@@ -765,21 +765,26 @@
             </div>
             <!-- v0.24.119〜120: 文字起こしエフェクト（やっさんの指定の並び: 区切り線・文字起こしエフェクト・Web Speech の下書き（エフェクト・スタイル）・AI 整形・プレビュー・区切り線・既定値に戻す）。
                  「確定の演出」はパチンコみたいなのでやめた（やっさん）。中のキーは confirmEffect のまま。confirm-fx.js -->
-            <span class="field-label">文字起こしエフェクト</span>
-            <span class="fx-sub">Web Speech の下書き</span>
-            <label class="field fx-indent">
+            <!-- v0.24.121: 文字起こしエフェクト。仕様書（docs/UI・UX仕様（ディクテーション）.md の 4 章）の部品だけで組む：
+                 箱の中の小見出し・入れ子（親と子）・数字・選ぶ欄の行・プレビューの箱。区切り線は 4 章の「区切り線」のとおり -->
+            <div class="field settings-subhead">文字起こしエフェクト</div>
+            <div class="field settings-nest-head">Web Speech の下書き</div>
+            <label class="field settings-nest">
               <span class="field-label">エフェクト</span>
               <select id="input-draft-fx"></select>
+              <small class="field-hint">字が増えるときの出かた</small>
             </label>
-            <label class="field fx-indent">
+            <label class="field settings-nest">
               <span class="field-label">スタイル</span>
               <select id="input-draft-style"></select>
+              <small class="field-hint">まだ確定していない字の見た目</small>
             </label>
             <label class="field">
               <span class="field-label">AI 整形</span>
               <select id="input-confirm-fx"></select>
+              <small class="field-hint">AI の字に入れ替わるときの見せ方</small>
             </label>
-            <div class="field fx-preview-row">
+            <div class="field">
               <span class="field-label">プレビュー</span>
               <div id="fx-preview" class="fx-preview" aria-hidden="true"></div>
             </div>
@@ -1189,20 +1194,20 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.120"></script>
-  <script src="motion.js?v=0.24.120"></script>
-  <script src="confirm-fx.js?v=0.24.120"></script>
-  <script src="usage.js?v=0.24.120"></script>
-  <script src="gemini.js?v=0.24.120"></script>
-  <script src="groq.js?v=0.24.120"></script>
-  <script src="notion.js?v=0.24.120"></script>
-  <script src="audio-store.js?v=0.24.120"></script>
-  <script src="claude-bridge.js?v=0.24.120"></script>
-  <script src="claude-installer.js?v=0.24.120"></script>
-  <script src="live-summary.js?v=0.24.120"></script>
-  <script src="image-store.js?v=0.24.120"></script>
-  <script src="gemini-files.js?v=0.24.120"></script>
-  <script src="term-dicts.js?v=0.24.120"></script>
-  <script src="app.js?v=0.24.120"></script>
+  <script src="icons.js?v=0.24.121"></script>
+  <script src="motion.js?v=0.24.121"></script>
+  <script src="confirm-fx.js?v=0.24.121"></script>
+  <script src="usage.js?v=0.24.121"></script>
+  <script src="gemini.js?v=0.24.121"></script>
+  <script src="groq.js?v=0.24.121"></script>
+  <script src="notion.js?v=0.24.121"></script>
+  <script src="audio-store.js?v=0.24.121"></script>
+  <script src="claude-bridge.js?v=0.24.121"></script>
+  <script src="claude-installer.js?v=0.24.121"></script>
+  <script src="live-summary.js?v=0.24.121"></script>
+  <script src="image-store.js?v=0.24.121"></script>
+  <script src="gemini-files.js?v=0.24.121"></script>
+  <script src="term-dicts.js?v=0.24.121"></script>
+  <script src="app.js?v=0.24.121"></script>
 </body>
 </html>

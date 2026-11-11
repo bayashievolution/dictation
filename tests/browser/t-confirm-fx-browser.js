@@ -84,17 +84,32 @@ const eq = (label, got, want) => {
   console.log('\n■ 設定（v0.24.120 の並び）');
   await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });
   await page.waitForTimeout(600);
-  eq('並び: 文字起こしエフェクト・Web Speech の下書き（エフェクト・スタイル）・AI 整形・プレビュー・既定値に戻す', await page.evaluate(() => {
+  // v0.24.121: 仕様書（docs/UI・UX仕様（ディクテーション）.md 4 章）の部品と区切り線の決まりで測る
+  const look = await page.evaluate(() => {
     const body = document.getElementById('fx-preview').closest('.settings-acc-body');
-    const out = [];
-    let on = false;
-    for (const n of body.children) {
-      const t = (n.querySelector(':scope > .field-label') || n).textContent.trim();
-      if (t === '文字起こしエフェクト') on = true;
-      if (on) out.push(n.tagName === 'DIV' && n.querySelector('#btn-display-defaults') ? '既定値に戻す' : t.split('\n')[0]);
-    }
-    return out;
-  }), ['文字起こしエフェクト', 'Web Speech の下書き', 'エフェクト', 'スタイル', 'AI 整形', 'プレビュー', '既定値に戻す']);
+    const items = [...body.children];
+    const from = items.findIndex((n) => n.classList.contains('settings-subhead'));
+    const to = items.findIndex((n) => n.querySelector && n.querySelector('#btn-display-defaults'));
+    const left = (n) => Math.round(n.getBoundingClientRect().left);
+    return items.slice(from, to + 1).map((n) => {
+      const c = getComputedStyle(n);
+      const name = n.querySelector(':scope > .field-label') || n;
+      const sel = n.querySelector(':scope > select');
+      const nr = name.getBoundingClientRect(), hint = n.querySelector(':scope > .field-hint');
+      return {
+        t: (n.querySelector('#btn-display-defaults') ? '既定値に戻す' : name.textContent.trim()),
+        line: c.borderTopWidth !== '0px', lineLeft: left(n),
+        color: getComputedStyle(name).color, size: getComputedStyle(name).fontSize,
+        // 欄は、名前と説明をあわせたまとまりの上下まんなか
+        mid: sel ? Math.abs(((nr.top + (hint ? hint.getBoundingClientRect().bottom : nr.bottom)) / 2) - (sel.getBoundingClientRect().top + sel.offsetHeight / 2)) < 3 : null,
+      };
+    });
+  });
+  eq('並び', look.map((x) => x.t), ['文字起こしエフェクト', 'Web Speech の下書き', 'エフェクト', 'スタイル', 'AI 整形', 'プレビュー', '既定値に戻す']);
+  eq('区切り線: 項目ごとに 1 本、小見出しのすぐ下だけ線なし', look.map((x) => x.line), [true, false, true, true, true, true, true]);
+  eq('区切り線: 入れ子の子の線は下げたところから', [look[2].lineLeft - look[1].lineLeft, look[3].lineLeft - look[1].lineLeft], [14, 14]);
+  eq('名前は白・13.5px', look.slice(0, 6).every((x) => x.color === look[0].color && x.size === '13.5px'), true);
+  eq('欄は名前と説明のまとまりの上下まんなか', look.filter((x) => x.mid !== null).map((x) => x.mid), [true, true, true]);
   eq('エフェクトの選択肢', await page.$$eval('#input-draft-fx option', (o) => o.map((x) => x.textContent)), ['なし', 'フェードイン', 'ぼかしから', '光ってから落ち着く']);
   eq('スタイルの選択肢', await page.$$eval('#input-draft-style option', (o) => o.map((x) => x.textContent)), ['なし', 'イタリック', '下線']);
   eq('AI 整形の選択肢', await page.$$eval('#input-confirm-fx option', (o) => o.map((x) => x.textContent)), ['なし', 'ふわっと', '一文字ずつ流れる', 'ぼかしが晴れる', '直ったところが光る']);
