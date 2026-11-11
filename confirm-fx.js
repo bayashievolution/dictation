@@ -26,10 +26,11 @@
 (function (global) {
   const CONFIRM_FX = [
     { value: 'none', label: 'なし' },
-    { value: 'fade', label: 'ふわっと' },
-    { value: 'type', label: '一文字ずつ流れる' },
-    { value: 'blur', label: 'ぼかしが晴れる' },
-    { value: 'diff', label: '直ったところが光る' },
+    // v0.24.128: 名前をやっさんの指定に（ふわっと→フェードイン・ぼかしが晴れる→ブラー・一文字ずつ流れる→タイプライター・直ったところが光る→アップデートグロー）。並びも指定どおり
+    { value: 'fade', label: 'フェードイン' },
+    { value: 'blur', label: 'ブラー' },
+    { value: 'type', label: 'タイプライター' },
+    { value: 'diff', label: 'アップデートグロー' },
   ];
 
   /**
@@ -195,14 +196,32 @@
   const DRAFT_FX = [
     { value: 'none', label: 'なし' },
     { value: 'fade', label: 'フェードイン' },
-    { value: 'blur', label: 'ぼかしから' },
-    { value: 'glow', label: '光ってから落ち着く' },
+    { value: 'blur', label: 'ブラー' },          // v0.24.128: ぼかしから→ブラー
+    { value: 'glow', label: 'グロー' },          // v0.24.128: 光ってから落ち着く→グロー
   ];
+  // v0.24.128: スタイルは 4 つの段階（下書き・確定・聞き取り・整形）で共通。並びはやっさんの指定どおり
   const DRAFT_STYLE = [
     { value: 'none', label: 'なし' },
-    { value: 'italic', label: 'イタリック' },
     { value: 'underline', label: '下線' },
+    { value: 'italic', label: 'イタリック' },
+    { value: 'bold', label: 'ボールド' },
   ];
+
+  /**
+   * 段階のスタイルを CSS の変数にする (v0.24.128)
+   * 変数にするのは、いちばん近い指定が勝つようにするため（ページ全体は保存した値、プレビューの箱は設定の欄の値）
+   * @param {HTMLElement} el  変数を付ける要素
+   * @param {string} stage    draft / commit / heard / refine
+   * @param {string} value    DRAFT_STYLE の value
+   */
+  function applyStageStyle(el, stage, value) {
+    if (!el || !el.style) return;
+    const v = value || 'none';
+    el.style.setProperty(`--st-${stage}-fs`, v === 'italic' ? 'italic' : 'normal');
+    // 'inherit' にしない: 変数が親（ページ全体）の値を引き継いでしまい、プレビューで「なし」を選んでもボールドのままになる
+    el.style.setProperty(`--st-${stage}-fw`, v === 'bold' ? '700' : 'normal');
+    el.style.setProperty(`--st-${stage}-td`, v === 'underline' ? 'underline' : 'none');
+  }
 
   /** 頭から何文字同じか */
   function commonPrefixLen(a, b) {
@@ -285,5 +304,5 @@
   }
 
   global.ConfirmFx = { CONFIRM_FX, fxDiffMarks, fxStyle, stripFxSpans, playConfirmFx,
-    DRAFT_FX, DRAFT_STYLE, commonPrefixLen, springLinear, installDraftEasing, renderDraft };
+    DRAFT_FX, DRAFT_STYLE, commonPrefixLen, springLinear, installDraftEasing, renderDraft, applyStageStyle };
 })(typeof window !== 'undefined' ? window : globalThis);

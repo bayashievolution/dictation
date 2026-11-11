@@ -113,6 +113,14 @@ const DEFAULT_SETTINGS = {
   // v0.24.120: Web Speech の下書きの出かた・スタイル（やっさんの指定「文字起こしエフェクト」）。スタイルの既定は前と同じイタリック
   draftEffect: 'fade',
   draftStyle: 'italic',
+  // v0.24.128: 聞き取り中の表示を 4 つの段階ごとに（やっさん「個別に決められるように」）。
+  //   WebSpeech下書き（draft）・WebSpeech確定（commit）・AI聞き取り（heard）・AI整形（confirmEffect / refineStyle）
+  // はじめの値は v0.24.127 までの見た目と同じ（確定・聞き取りはイタリック、整形の字はふつう。AI整形のエフェクトはキーをそのまま使う）
+  commitEffect: 'none',
+  commitStyle: 'italic',
+  heardEffect: 'fade',
+  heardStyle: 'italic',
+  refineStyle: 'none',
   silenceSec: 3,
   // v0.24.51: 見出し追加（ミドル整形＝溜まった文字起こしをまとめ直して見出しを付ける）のタイミング（秒）。
   // 以前は「3段落たまったら、または60秒」で、段落の数の条件はやっさんの指定でなくした
@@ -417,16 +425,22 @@ function savableHtml(html) {
 }
 
 /**
- * 仮の段落を AI の字に差し替えて、確定の演出をかける (v0.24.119)
+ * 仮の段落を AI の字に差し替えて、エフェクトをかける (v0.24.119)
+ * v0.24.128: どの段階のエフェクトか（AI聞き取り＝heardEffect・AI整形＝confirmEffect）を呼ぶ側が渡す
  * 高さの変化は今までどおり transcriptMorph。字の見せ方を confirm-fx.js が足す。
  * 画面に見えていないとき（ほかのタブ・ほかのセッションに書いているとき）は演出しない
  */
-function confirmSwap(targetEl, apply) {
+/** 画面に見えている段落にだけ、段階のエフェクトをかける (v0.24.128) */
+function playStageFx(el, oldText, mode) {
+  const visible = state.activePane === 'pane-transcript' && els.confirmed.contains(el) && el.offsetParent;
+  if (window.ConfirmFx && visible) ConfirmFx.playConfirmFx(el, oldText, mode || 'none');
+}
+
+function confirmSwap(targetEl, apply, mode = state.settings.confirmEffect || 'none') {
   const placeholder = !targetEl.classList.contains('provisional') && targetEl.classList.contains('refining')
     && !targetEl.querySelector('.fxc') && /^（文字起こし中…）$/.test(targetEl.textContent.trim());
   const oldText = placeholder ? '' : targetEl.textContent;
   transcriptMorph(apply);
-  const mode = state.settings.confirmEffect || 'none';
   const visible = state.activePane === 'pane-transcript' && els.confirmed.contains(targetEl) && targetEl.offsetParent;
   if (window.ConfirmFx && visible) ConfirmFx.playConfirmFx(targetEl, oldText, mode);
 }
@@ -585,6 +599,11 @@ const els = {
   inputConfirmFx: document.getElementById('input-confirm-fx'),
   inputDraftFx: document.getElementById('input-draft-fx'),
   inputDraftStyle: document.getElementById('input-draft-style'),
+  inputCommitFx: document.getElementById('input-commit-fx'),
+  inputCommitStyle: document.getElementById('input-commit-style'),
+  inputHeardFx: document.getElementById('input-heard-fx'),
+  inputHeardStyle: document.getElementById('input-heard-style'),
+  inputRefineStyle: document.getElementById('input-refine-style'),
   inputWsSliceChars: document.getElementById('input-webspeech-slice-chars'),
   inputWsSilenceStopSec: document.getElementById('input-webspeech-silence-stop-sec'),
   zoomBar: document.getElementById('zoom-bar'),
@@ -1582,6 +1601,7 @@ function appendRawChunk(text) {
     if (forceNewPara) state.pendingChunkEl.dataset.shortTs = String(Date.now());
     container.appendChild(state.pendingChunkEl);
     state.pendingChunkText = text;
+    if (!inBg) playStageFx(state.pendingChunkEl, text, state.settings.commitEffect);   // v0.24.128: WebSpeech確定の段階
   } else {
     state.pendingChunkText += ' ' + text;
     const body = state.pendingChunkEl.querySelector('.p-body');
@@ -1676,10 +1696,10 @@ async function flushPendingToGemini() {
       context: getContextForGemini(),
       newChunk: rawText,
     });
-    transcriptMorph(() => {   // v0.24.60: 整形で高さが変わっても下を跳ばさない
+    confirmSwap(targetEl, () => {   // v0.24.60: 整形で高さが変わっても下を跳ばさない。v0.24.128: AI整形の段階のエフェクト
       targetEl.className = 'paragraph refined';
       setParagraphContent(targetEl, refined || rawText);
-    });
+    }, state.settings.confirmEffect || 'none');
     updateActionButtons();
     persist();
   } catch (e) {
@@ -4467,6 +4487,8 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
   container.appendChild(targetEl);
   if (inBg) syncBgToSession();
   else autoScroll();
+  // v0.24.128: WebSpeech確定の段階のエフェクト（下書きの字が段落になる）
+  if (provisionalText && !inBg) playStageFx(targetEl, provisionalText, state.settings.commitEffect);
 
   const persist = () => {
     if (inBg) syncBgToSession();
@@ -4476,10 +4498,16 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
 
   // v0.24.83: 文字にするのは Gemini か Groq か。画面の断り書きにも実際に答えたほうの名前を出す
   let engine = usesGroqTranscribe() ? 'Groq' : 'Gemini';
+  // v0.24.128: 最後に入れ替えるときのエフェクト。整形した字なら AI整形、聞き取ったままの字なら AI聞き取り、
+  // Groq の字をもう見せていて整形できなかった（同じ字）なら、かけない
+  let finalFx = state.settings.heardEffect || 'none';
   try {
     let text;
     if (engine === 'Groq') {
-      ({ text, engine } = await transcribeChunkWithGroq(blob, targetEl, edges, provisionalText));
+      let r;
+      ({ text, engine, ...r } = await transcribeChunkWithGroq(blob, targetEl, edges, provisionalText));
+      if (r.refined) finalFx = state.settings.confirmEffect || 'none';
+      else if (r.rawShown) finalFx = 'none';
     } else {
       text = await transcribeAudioWithGemini({
         apiKey: geminiKey(),
@@ -4499,11 +4527,11 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
       // このあと maybeConsolidateShortChunks() が 3つ溜まったら
       // refineWithGemini（見出し付き）でまとめて整形する。
       // v0.24.60: 仮の段落を差し替えると高さが変わる。下を跳ばさない
-      confirmSwap(targetEl, () => {   // v0.24.119: 確定の演出
+      confirmSwap(targetEl, () => {   // v0.24.119〜128: 段階のエフェクト（finalFx）
         targetEl.className = 'paragraph short-refined';
         targetEl.dataset.shortTs = String(Date.now());
         setParagraphContent(targetEl, text);
-      });
+      }, finalFx);
       if (state.isRecording) resetLongSilenceTimer();
       persist();
       maybeWarnLiveSilent();   // v0.24.19
@@ -4606,7 +4634,8 @@ async function transcribeChunkWithGroq(blob, targetEl, edges, provisionalText = 
   }
   if (!raw || !raw.trim() || !liveRefineReady()) return { text: raw || '', engine: 'Groq' };
   // 整形のあいだも、聞き取れた文字は見えているようにする（Web Speech の仮の文字より Groq のほうが確か）
-  confirmSwap(targetEl, () => setParagraphContent(targetEl, raw));   // v0.24.119: 確定の演出
+  // v0.24.128: AI聞き取りの段階。整形を待つあいだも「未確定」のまま、heard を付けて AI聞き取りのスタイルにする
+  confirmSwap(targetEl, () => { targetEl.classList.add('heard'); setParagraphContent(targetEl, raw); }, state.settings.heardEffect || 'none');
   try {
     const refined = await refineWithGemini({
       apiKey: geminiKey(),
@@ -4614,11 +4643,11 @@ async function transcribeChunkWithGroq(blob, targetEl, edges, provisionalText = 
       context: getContextForGemini(),
       newChunk: raw,
     });
-    return { text: (refined && refined.trim()) ? refined : raw, engine: 'Groq' };
+    return { text: (refined && refined.trim()) ? refined : raw, engine: 'Groq', refined: !!(refined && refined.trim()), rawShown: true };
   } catch (e) {
     // 整形できなくても文字は残す。見出し追加のときにもう一度まとめ直される
     diagLog.info(`Groq の文字を整形できなかったので、そのまま残します: ${(e.message || e).toString().slice(0, 120)}`);
-    return { text: raw, engine: 'Groq' };
+    return { text: raw, engine: 'Groq', rawShown: true };
   }
 }
 
@@ -8516,6 +8545,11 @@ function openSettings() {
     pick(els.inputConfirmFx, 'CONFIRM_FX', state.settings.confirmEffect, DEFAULT_SETTINGS.confirmEffect);
     pick(els.inputDraftFx, 'DRAFT_FX', state.settings.draftEffect, DEFAULT_SETTINGS.draftEffect);
     pick(els.inputDraftStyle, 'DRAFT_STYLE', state.settings.draftStyle, DEFAULT_SETTINGS.draftStyle);
+    pick(els.inputCommitFx, 'CONFIRM_FX', state.settings.commitEffect, DEFAULT_SETTINGS.commitEffect);
+    pick(els.inputCommitStyle, 'DRAFT_STYLE', state.settings.commitStyle, DEFAULT_SETTINGS.commitStyle);
+    pick(els.inputHeardFx, 'CONFIRM_FX', state.settings.heardEffect, DEFAULT_SETTINGS.heardEffect);
+    pick(els.inputHeardStyle, 'DRAFT_STYLE', state.settings.heardStyle, DEFAULT_SETTINGS.heardStyle);
+    pick(els.inputRefineStyle, 'DRAFT_STYLE', state.settings.refineStyle, DEFAULT_SETTINGS.refineStyle);
   }
   if (els.inputWsCommitSec) {
     // v0.13.29: localStorage に古い値（3/4/5 等、v0.13.26 で削除した選択肢）が
@@ -8634,7 +8668,13 @@ function saveSettingsFromForm() {
   if (els.inputMinChunkBytes) state.settings.audioMinChunkBytes = Math.max(100, Math.min(5000, Number(els.inputMinChunkBytes.value) || 400));
   if (els.inputConfirmFx) state.settings.confirmEffect = els.inputConfirmFx.value || 'none';
   if (els.inputDraftFx) state.settings.draftEffect = els.inputDraftFx.value || 'none';
-  if (els.inputDraftStyle) { state.settings.draftStyle = els.inputDraftStyle.value || 'italic'; applyDraftStyle(); }
+  if (els.inputDraftStyle) state.settings.draftStyle = els.inputDraftStyle.value || 'none';
+  if (els.inputCommitFx) state.settings.commitEffect = els.inputCommitFx.value || 'none';
+  if (els.inputCommitStyle) state.settings.commitStyle = els.inputCommitStyle.value || 'none';
+  if (els.inputHeardFx) state.settings.heardEffect = els.inputHeardFx.value || 'none';
+  if (els.inputHeardStyle) state.settings.heardStyle = els.inputHeardStyle.value || 'none';
+  if (els.inputRefineStyle) state.settings.refineStyle = els.inputRefineStyle.value || 'none';
+  applyStageStyles();
   if (els.inputWsCommitSec) {
     const newSec = Math.max(0, Math.min(20, Number(els.inputWsCommitSec.value) || 0));
     if (newSec !== state.settings.webspeechCommitSec) {
@@ -12296,55 +12336,72 @@ if (els.inputClaudeCode) {
     setVal(els.inputConfirmFx, d.confirmEffect);
     setVal(els.inputDraftFx, d.draftEffect);
     setVal(els.inputDraftStyle, d.draftStyle);
+    setVal(els.inputCommitFx, d.commitEffect); setVal(els.inputCommitStyle, d.commitStyle);
+    setVal(els.inputHeardFx, d.heardEffect); setVal(els.inputHeardStyle, d.heardStyle);
+    setVal(els.inputRefineStyle, d.refineStyle);
     restartFxPreview();
   });
 }
 /**
- * 文字起こしエフェクトのプレビュー (v0.24.119・v0.24.120 で下書きも)
- * 録音しなくても見比べられるように、設定の中で「下書きが出てくる → 仮の段落になる → AI 整形の字に入れ替わる」を繰り返し見せる。
- * 設定の欄の値（保存前）で見せる。プレビューが画面に見えているあいだだけ動く（設定を閉じる・表示をたたむと止まる）。
- * v0.24.119 の［試す］ボタンは、やっさんの並びの指定（区切り線〜プレビュー〜区切り線〜既定値に戻す）で外し、繰り返しにした
+ * 聞き取り中の表示のプレビュー (v0.24.119〜128)
+ * 録音しなくても見比べられるように、設定の中で 4 つの段階を順に繰り返し見せる:
+ *   WebSpeech下書き（字が増えていく）→ WebSpeech確定（区切られて段落になる）→ AI聞き取り（Groq の字に入れ替わる）→ AI整形（整えた字に入れ替わる）
+ * 設定の欄の値（保存前）で見せる。プレビューが画面に見えているあいだだけ動く（設定を閉じる・表示をたたむと止まる）
  */
 const FX_SAMPLE = {
-  before: 'えーと今日は家庭科室で火事が起きたらどうなるか考えてみます熱感知器が',
-  after: '今日は、家庭科室で火事が起きたらどうなるかを考えてみます。熱感知器が',
+  draft: 'えーと今日は家庭科室で火事が起きたらどうなるか考えてみます',
+  heard: 'えーと、今日は家庭科室で火事が起きたらどうなるか考えてみます。',   // Groq は句読点を付けることが多い（実機 2026-11-11）
+  refined: '今日は、家庭科室で火事が起きたらどうなるかを考えてみます。',
 };
 let fxPreviewRun = 0;
 const fxWait = (ms) => new Promise((r) => setTimeout(r, ms));
 function fxPreviewBox() { return document.getElementById('fx-preview'); }
 // 設定を閉じる・表示をたたむと offsetParent が無くなる
 function fxPreviewVisible() { const b = fxPreviewBox(); return !!(b && b.offsetParent); }
+const fxVal = (sel) => (sel && sel.value) || 'none';
 async function playFxPreview() {
   const box = fxPreviewBox();
   if (!box || !window.ConfirmFx) return;
   const run = ++fxPreviewRun;
   const alive = () => run === fxPreviewRun && fxPreviewVisible();
   while (alive()) {
-    box.dataset.draftStyle = (els.inputDraftStyle && els.inputDraftStyle.value) || 'italic';
-    // 1. 下書き: Web Speech のように、数文字ずつ全文が送られてくる
+    // プレビューの箱には欄の値のスタイルを付ける（ページ全体の値より近いので勝つ）
+    ConfirmFx.applyStageStyle(box, 'draft', fxVal(els.inputDraftStyle));
+    ConfirmFx.applyStageStyle(box, 'commit', fxVal(els.inputCommitStyle));
+    ConfirmFx.applyStageStyle(box, 'heard', fxVal(els.inputHeardStyle));
+    ConfirmFx.applyStageStyle(box, 'refine', fxVal(els.inputRefineStyle));
+    // 1. WebSpeech下書き: Web Speech のように、数文字ずつ全文が送られてくる
     const draft = document.createElement('div');
     draft.className = 'draft-text';
     box.replaceChildren(draft);
-    const text = FX_SAMPLE.before;
+    const text = FX_SAMPLE.draft;
     for (let n = 0; n < text.length && alive();) {
       n = Math.min(text.length, n + 2 + Math.floor(Math.random() * 3));
-      ConfirmFx.renderDraft(draft, text.slice(0, n), (els.inputDraftFx && els.inputDraftFx.value) || 'none');
+      ConfirmFx.renderDraft(draft, text.slice(0, n), fxVal(els.inputDraftFx));
       await fxWait(140);
     }
     await fxWait(600);
     if (!alive()) break;
-    // 2. 区切りで仮の段落になる（本番でも、ここで AI に送る）
+    // 2. WebSpeech確定: 区切られて「未確定」の段落になる（本番でも、ここで AI に送る）
     const p = document.createElement('div');
     p.className = 'paragraph provisional';
     setParagraphContent(p, text);
     box.replaceChildren(p);
-    await fxWait(900);
+    ConfirmFx.playConfirmFx(p, text, fxVal(els.inputCommitFx));
+    await fxWait(1200);
     if (!alive()) break;
-    // 3. AI 整形の字に入れ替わる
-    const old = p.textContent;
-    p.className = 'paragraph';
-    setParagraphContent(p, FX_SAMPLE.after);
-    ConfirmFx.playConfirmFx(p, old, (els.inputConfirmFx && els.inputConfirmFx.value) || 'none');
+    // 3. AI聞き取り: Groq の字に入れ替わる（整形を待つあいだは「未確定」のまま）
+    let old = p.textContent;
+    p.classList.add('heard');
+    setParagraphContent(p, FX_SAMPLE.heard);
+    ConfirmFx.playConfirmFx(p, old, fxVal(els.inputHeardFx));
+    await fxWait(1600);
+    if (!alive()) break;
+    // 4. AI整形: 整えた字に入れ替わる
+    old = p.textContent;
+    p.className = 'paragraph short-refined';
+    setParagraphContent(p, FX_SAMPLE.refined);
+    ConfirmFx.playConfirmFx(p, old, fxVal(els.inputConfirmFx));
     await fxWait(2600);
   }
 }
@@ -12352,19 +12409,25 @@ async function playFxPreview() {
 setInterval(() => { if (fxPreviewVisible() && !fxPreviewBox().childElementCount) playFxPreview(); }, 500);
 function restartFxPreview() { if (fxPreviewVisible()) playFxPreview(); }
 
-/** 下書きのスタイル（なし・イタリック・下線）をページに付ける。CSS の変数で、いちばん近い指定が勝つ（プレビューは欄の値） */
-function applyDraftStyle() {
-  document.documentElement.dataset.draftStyle = state.settings.draftStyle || 'italic';
+/** 4 つの段階のスタイルをページに付ける（保存した値）。CSS の変数で、いちばん近い指定が勝つ（プレビューは欄の値） */
+function applyStageStyles() {
+  if (!window.ConfirmFx) return;
+  const root = document.documentElement, st = state.settings;
+  ConfirmFx.applyStageStyle(root, 'draft', st.draftStyle);
+  ConfirmFx.applyStageStyle(root, 'commit', st.commitStyle);
+  ConfirmFx.applyStageStyle(root, 'heard', st.heardStyle);
+  ConfirmFx.applyStageStyle(root, 'refine', st.refineStyle);
 }
 if (window.ConfirmFx) {
   ConfirmFx.installDraftEasing(document.documentElement);
   const fill = (sel, list) => { if (sel && !sel.options.length) sel.innerHTML = list.map((o) => `<option value="${o.value}">${o.label}</option>`).join(''); };
   fill(els.inputDraftFx, ConfirmFx.DRAFT_FX);
-  fill(els.inputDraftStyle, ConfirmFx.DRAFT_STYLE);
-  fill(els.inputConfirmFx, ConfirmFx.CONFIRM_FX);
+  [els.inputCommitFx, els.inputHeardFx, els.inputConfirmFx].forEach((sel) => fill(sel, ConfirmFx.CONFIRM_FX));
+  [els.inputDraftStyle, els.inputCommitStyle, els.inputHeardStyle, els.inputRefineStyle].forEach((sel) => fill(sel, ConfirmFx.DRAFT_STYLE));
 }
-[els.inputDraftFx, els.inputDraftStyle, els.inputConfirmFx].forEach((sel) => { if (sel) sel.addEventListener('change', restartFxPreview); });
-applyDraftStyle();
+[els.inputDraftFx, els.inputDraftStyle, els.inputCommitFx, els.inputCommitStyle, els.inputHeardFx, els.inputHeardStyle, els.inputConfirmFx, els.inputRefineStyle]
+  .forEach((sel) => { if (sel) sel.addEventListener('change', restartFxPreview); });
+applyStageStyles();
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });
 }

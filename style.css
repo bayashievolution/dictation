@@ -3789,7 +3789,10 @@ p.settings-lead { margin: -2px 0 8px; }
    v0.24.108 の「名前は下寄せ・説明はその下」は説明がある行の形で、説明が無いと名前が上に浮く */
 .modal .settings-acc-body label.field:has(> select):not(:has(> .field-hint)) > .field-label,
 .modal .settings-acc-body label.field:has(> .number-stepper):not(:has(> .field-hint)) > .field-label { grid-row: 1 / -1; align-self: center; }
-.modal .settings-acc-body label.field:has(> #input-draft-fx, > #input-draft-style, > #input-confirm-fx) > select { width: 11.5em; min-width: 0; max-width: 46vw; }
+/* v0.24.128: 段階の名前の下に、エフェクトとスタイルを横に並べて 1 行に。欄の高さは上のフォントの欄と同じ 36px */
+.settings-acc-box .settings-acc-body > .field.fx-stage { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; row-gap: 4px; padding: 6px 0 4px; }
+.settings-acc-box .settings-acc-body > .field.fx-stage > .field-label { grid-column: 1 / -1; margin: 0; color: var(--text); font-size: 13.5px; }
+.settings-acc-box .settings-acc-body > .field.fx-stage > select { height: 36px; width: 100%; min-width: 0; }
 .settings-acc-box .settings-acc-body > .field:has(> .fx-preview) { padding-top: 8px; }
 .settings-acc-box .settings-acc-body > .field:has(> .fx-preview) > .field-label { margin: 0; color: var(--text); font-size: 13.5px; }
 /* v0.24.125: 「プレビュー」の字は消した（やっさん「書かなくても分かる」） */
@@ -3797,17 +3800,22 @@ p.settings-lead { margin: -2px 0 8px; }
 .fx-preview .paragraph { margin: 0; padding: 0; }
 .fx-preview .draft-text, .fx-preview .paragraph.provisional .p-body { color: var(--text-muted); }
 
-/* 下書きのスタイル（v0.24.120）。CSS の変数にして、いちばん近い指定が勝つようにする（プレビューは欄の値、本番は保存した値） */
-[data-draft-style="italic"] { --draft-font-style: italic; --draft-deco: none; }
-[data-draft-style="none"] { --draft-font-style: normal; --draft-deco: none; }
-[data-draft-style="underline"] { --draft-font-style: normal; --draft-deco: underline; }
-#interim, .draft-text, .paragraph.provisional .p-body {
-  font-style: var(--draft-font-style, italic);
-  text-decoration-line: var(--draft-deco, none);
-  text-decoration-color: var(--text-faint);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 4px;
+/* 4 つの段階のスタイル（v0.24.128）。変数は confirm-fx.js の applyStageStyle が付ける（ページ全体は保存した値、プレビューの箱は欄の値）
+   WebSpeech下書き: 下書きの行 ／ WebSpeech確定: 「未確定」の段落（Web Speech の字）と Web Speech モードの確定した段落 ／
+   AI聞き取り: Groq の字に入れ替わって整形を待つ段落 ／ AI整形: 整えた字の段落 */
+#interim, .draft-text {
+  font-style: var(--st-draft-fs, normal); font-weight: var(--st-draft-fw, inherit); text-decoration-line: var(--st-draft-td, none);
 }
+.paragraph.provisional:not(.heard) .p-body, .paragraph.raw .p-body, .paragraph.refining:not(.provisional) .p-body {
+  font-style: var(--st-commit-fs, normal); font-weight: var(--st-commit-fw, inherit); text-decoration-line: var(--st-commit-td, none);
+}
+.paragraph.provisional.heard .p-body {
+  font-style: var(--st-heard-fs, normal); font-weight: var(--st-heard-fw, inherit); text-decoration-line: var(--st-heard-td, none);
+}
+.paragraph.short-refined:not(.raw) .p-body, .paragraph.refined .p-body {
+  font-style: var(--st-refine-fs, normal); font-weight: var(--st-refine-fw, inherit); text-decoration-line: var(--st-refine-td, none);
+}
+#interim, .draft-text, .paragraph .p-body { text-decoration-color: var(--text-faint); text-decoration-thickness: 1px; text-underline-offset: 4px; }
 
 /* 下書きの字の出かた（v0.24.120）。曲線はばねから作った linear()（confirm-fx.js の springLinear） */
 .draft-in-fade { animation: draftFade var(--draft-ms, 450ms) var(--draft-ease, linear) both; }

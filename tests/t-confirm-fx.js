@@ -34,7 +34,7 @@ for (const m of ['fade', 'type', 'blur', 'diff']) {
   eq(`${m}: 終わりは元の見た目`, ok, true);
 }
 eq('一文字ずつ: 途中では頭のほうが濃い', F.fxStyle('type', 0.5, 0, 20).opacity > F.fxStyle('type', 0.5, 19, 20).opacity, true);
-eq('選べるのは なし＋4 つ', F.CONFIRM_FX.map((o) => o.value), ['none', 'fade', 'type', 'blur', 'diff']);
+eq('確定・聞き取り・整形のエフェクト（v0.24.128 の名前と並び）', F.CONFIRM_FX.map((o) => o.label), ['なし', 'フェードイン', 'ブラー', 'タイプライター', 'アップデートグロー']);
 
 // v0.24.120: Web Speech の下書き
 eq('頭から同じ長さ', [F.commonPrefixLen('今日は家庭', '今日は火事'), F.commonPrefixLen('', 'あ'), F.commonPrefixLen('同じ', '同じ')], [3, 0, 2]);
@@ -44,8 +44,8 @@ const pts = sl.easing.replace(/^linear\(|\)$/g, '').split(',').map(Number);
 eq('ばねの曲線: 0 から始まり 1 で終わる', [pts[0], pts[pts.length - 1]], [0, 1]);
 eq('ばねの曲線: 行き過ぎない（減衰 1）・増えていく', pts.every((v, i) => v <= 1 && (i === 0 || v >= pts[i - 1])), true);
 eq('ばねの長さ: 0.3〜1 秒', sl.ms > 300 && sl.ms < 1000, true);
-eq('下書きの見せ方', F.DRAFT_FX.map((o) => o.value), ['none', 'fade', 'blur', 'glow']);
-eq('下書きのスタイル', F.DRAFT_STYLE.map((o) => o.label), ['なし', 'イタリック', '下線']);
+eq('下書きのエフェクト（v0.24.128 の名前）', F.DRAFT_FX.map((o) => o.label), ['なし', 'フェードイン', 'ブラー', 'グロー']);
+eq('スタイル（4 つの段階で共通・v0.24.128）', F.DRAFT_STYLE.map((o) => o.label), ['なし', '下線', 'イタリック', 'ボールド']);
 
 console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');
 process.exit(fail ? 1 : 0);
