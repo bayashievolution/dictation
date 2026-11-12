@@ -3764,7 +3764,7 @@ p.settings-lead { margin: -2px 0 8px; }
 .usage-ring .ring-left { font-size: 10px; color: var(--text-muted); margin-bottom: 2px; }
 .usage-ring .ring-center b { font-size: 18px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .usage-ring.big .ring-center b { font-size: 24px; }
-.usage-ring .ring-center small { font-size: 10px; color: var(--text-muted); margin: 0 1px; }
+.usage-ring .ring-center small { font-size: 10px; color: var(--text-muted); margin: 0 1px; font-weight: 700; }   /* v0.24.138: 単位（時間・分・回）も太字（やっさんの指定） */
 .usage-ring .ring-center { flex-direction: column; }
 .usage-ring .ring-center > b, .usage-ring .ring-center > small { display: inline; }
 .usage-ring .ring-label { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; white-space: nowrap; }
@@ -3780,6 +3780,8 @@ p.settings-lead { margin: -2px 0 8px; }
 .usage-ring.big { width: 104px; }
 .usage-ring.big .ring-center b { font-size: 18px; }
 .usage-ring .ring-val { transform: translateX(2px); }
+/* v0.24.138: 真ん中の字（残り・数字）を少し上へ（やっさん「もう少し上にしたほうがバランスがいい」）。下の余白で寄せる（字の大きさの比は変えない） */
+.usage-ring .ring-center { padding-bottom: 8px; box-sizing: border-box; }
 
 /* v0.24.122: 文字起こしエフェクト（やっさんの指定の並び）。区切り線は、まとまりの上（文字起こしエフェクトの上）と下（既定値に戻すの上）の 2 本だけ。
    中の行には線を引かず、説明も付けない。名前は欄と上下まんなか */
