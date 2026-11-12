@@ -115,7 +115,7 @@ const DEFAULT_SETTINGS = {
   //     下書き＝Web Speech の下書きの行／確定＝最後の処理（整形・整形が無ければ AI の聞き取り・AI が無ければ Web Speech の確定）／処理＝そのあいだ全部
   //   キー: 確定のエフェクトは confirmEffect をそのまま使う（v0.24.119 からの保存の値を生かす）。処理は procEffect / procStyle、確定のスタイルは finalStyle
   //   v0.24.128 の 4 段階（commit* / heard* / refineStyle）は、読み込むときに引き継ぐ（loadSettings）
-  draftEffect: 'fade',
+  draftEffect: 'glow',   // v0.24.141: はじめの値をグローに（やっさんの指定）
   draftStyle: 'underline',
   procEffect: 'diff',
   procStyle: 'underline',

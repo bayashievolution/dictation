@@ -100,7 +100,7 @@ const eq = (label, got, want) => {
   eq('処理・確定のエフェクト', rows.slice(1).map((r) => r.fx), Array(2).fill(['なし', 'フェードイン', 'ブラー', 'タイプライター', 'アップデートグロー']));
   eq('スタイルは 3 つとも同じ選択肢', rows.map((r) => r.st), Array(3).fill(['なし', '下線', 'イタリック', 'ボールド']));
   eq('はじめの値（IME のように 下書き・処理は下線、確定はなし）', await page.evaluate(() => { const d = DEFAULT_SETTINGS; return [d.draftEffect, d.draftStyle, d.procEffect, d.procStyle, d.confirmEffect, d.finalStyle]; }),
-    ['fade', 'underline', 'diff', 'underline', 'diff', 'none']);
+    ['glow', 'underline', 'diff', 'underline', 'diff', 'none']);   // v0.24.141: 下書きの演出の既定はグロー
 
   console.log('\n■ プレビュー: 設定の欄で道が変わる（本番と同じ割り当て）');
   const steps = () => page.evaluate(() => fxPreviewSteps().map((x) => x.phase + ':' + (x.text.includes('、') ? (x.text.startsWith('えーと') ? 'Groq' : '整形') : 'WebSpeech')));
@@ -141,7 +141,7 @@ const eq = (label, got, want) => {
   await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });
   await page.waitForTimeout(400);
   await page.click('#btn-display-defaults');
-  eq('既定値に戻す', await page.evaluate(() => ['input-draft-style', 'input-proc-style', 'input-proc-fx', 'input-confirm-fx', 'input-final-style'].map((id) => document.getElementById(id).value)), ['underline', 'underline', 'diff', 'diff', 'none']);
+  eq('既定値に戻す', await page.evaluate(() => ['input-draft-fx', 'input-draft-style', 'input-proc-style', 'input-proc-fx', 'input-confirm-fx', 'input-final-style'].map((id) => document.getElementById(id).value)), ['glow', 'underline', 'underline', 'diff', 'diff', 'none']);
   console.log('\n■ プレビューの再生・停止のボタン（v0.24.136・やっさん「プレビューが止まっていることがある」）');
   const btn = () => page.evaluate(() => { const b = document.getElementById('btn-fx-preview'); const r = b.getBoundingClientRect(), box = document.getElementById('fx-preview').getBoundingClientRect(); return { t: b.textContent, topLeft: r.left - box.left < 20 && r.top - box.top < 20 }; });
   await page.evaluate(() => document.getElementById('fx-preview').scrollIntoView({ block: 'center' }));
