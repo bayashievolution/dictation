@@ -10977,7 +10977,7 @@ function renderUsageCard() {
       </div>
       ${hdrReq != null ? `<small class="field-hint">Groq の返事では、残り ${escapeHtmlSimple(String(hdrReq))} 回です。</small>` : ''}
       <div class="usage-actions"><button type="button" class="usage-reset" id="btn-usage-reset-groq">リセット</button></div>
-      <small class="field-hint">このアプリから送った時間を数えています。</small>
+      <small class="field-hint">このアプリから送ったデータを集計しています。</small>
     </div>
     <div id="usage-chart" class="usage-chart" role="dialog" aria-label="Gemini の月別のトークン" hidden></div>`;
   installUsageLongPress();   // v0.24.110: 描き直すたびに数字が新しくなるので、そのつど付け直す
