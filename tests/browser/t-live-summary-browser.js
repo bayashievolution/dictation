@@ -164,7 +164,7 @@ const summary = (page) => page.evaluate(() => ({
     await page.waitForTimeout(200);
     const st = () => page.evaluate(() => ({
       disabled: document.getElementById('input-live-summary').disabled,
-      note: !document.getElementById('live-summary-note').hidden,
+      note: (() => { const n = document.getElementById('live-summary-note'); return !n.hidden && !n.parentElement.hidden; })(),   // v0.24.132: 入れ物（.field）ごと隠すので、入れ物も見る
     }));
     eq('押せない・理由が出る', await st(), { disabled: true, note: true });
     // v0.24.39: ライブ要約の前提は「Claude Code」（連携を使う）のトグル

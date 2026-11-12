@@ -49,7 +49,7 @@ const form = (page) => page.evaluate(() => {
   const g = (id) => { const e = document.getElementById(id); return { checked: e.checked, disabled: e.disabled }; };
   return {
     code: g('input-claude-code'), live: g('input-live-summary'),
-    liveNote: !document.getElementById('live-summary-note').hidden,
+    liveNote: (() => { const n = document.getElementById('live-summary-note'); return !n.hidden && !n.parentElement.hidden; })(),   // v0.24.132: 入れ物（.field）ごと隠すので、入れ物も見る
   };
 });
 const openSettings = async (page) => { await page.evaluate(() => document.getElementById('btn-settings').click()); await page.waitForTimeout(250); };
@@ -150,6 +150,44 @@ const clickCode = async (page) => { await page.click('#input-claude-code'); awai
     const { ctx, page } = await open(browser, { apiKey: 'AIza-test' });
     eq('「オフにすると、録音停止時の自動要約・タイトル付けも止まります」が無い',
        (await page.textContent('#settings-modal')).includes('自動要約・タイトル付けも止まります'), false);
+    await ctx.close();
+  }
+
+  console.log('■ 要約・タイトル生成がオフなら「要約の詳しさ」を隠す（v0.24.132・やっさんの指定）');
+  {
+    const { ctx, page } = await open(browser, { apiKey: 'AIza-test', autoSummarize: false });
+    await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });
+    await page.waitForTimeout(500);
+    const shown = () => page.evaluate(() => { const e = document.getElementById('summary-detail-field'); return !e.hidden && e.getBoundingClientRect().height > 10; });
+    eq('オフで開くと隠れている', await shown(), false);
+    await page.evaluate(() => document.getElementById('input-auto-summarize').scrollIntoView({ block: 'center' }));
+    await page.click('#input-auto-summarize');
+    await page.waitForTimeout(800);
+    eq('オンにすると出る', await shown(), true);
+    await page.click('#input-auto-summarize');
+    await page.waitForTimeout(800);
+    eq('オフにすると隠れる', await shown(), false);
+    await ctx.close();
+  }
+
+  console.log('■ ライブ整形・ライブ要約がオフなら、その下の数字の欄を隠す（v0.24.132・やっさんの指定）');
+  {
+    const { ctx, page } = await open(browser, { apiKey: 'AIza-test', aiEnabled: true, liveSummary: true });
+    await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });
+    await page.waitForTimeout(500);
+    const vis = () => page.evaluate(() => ['live-refine-sec-field', 'mid-consolidate-field', 'live-summary-min-field'].map((id) => { const e = document.getElementById(id); return !e.hidden && e.getBoundingClientRect().height > 10; }));
+    eq('オンで開くと 3 つとも出ている', await vis(), [true, true, true]);
+    await page.evaluate(() => document.getElementById('input-ai-enabled').scrollIntoView({ block: 'center' }));
+    await page.click('#input-ai-enabled');
+    await page.waitForTimeout(800);
+    eq('ライブ整形をオフにすると、タイミングの 2 つが隠れる', await vis(), [false, false, true]);
+    await page.evaluate(() => document.getElementById('input-live-summary').scrollIntoView({ block: 'center' }));
+    await page.click('#input-live-summary');
+    await page.waitForTimeout(800);
+    eq('ライブ要約をオフにすると、間隔が隠れる', await vis(), [false, false, false]);
+    await page.click('#btn-ai-defaults');
+    await page.waitForTimeout(800);
+    eq('既定値に戻すと出し入れも戻る', (await vis()).slice(0, 2), [true, true]);
     await ctx.close();
   }
 

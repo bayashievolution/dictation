@@ -4694,6 +4694,12 @@ function applyAiSettingsVisibility(animated = true) {
   revealSettingRow(document.getElementById('gemini-key-fields'), on(els.inputGeminiEnabled), animated);
   revealSettingRow(document.getElementById('groq-key-fields'), on(els.inputGroqEnabled), animated);
   revealSettingRow(document.getElementById('claude-code-fields'), on(els.inputClaudeCode), animated);
+  // v0.24.132: 要約・タイトル生成がオフなら「要約の詳しさ」を隠す（やっさんの指定）
+  revealSettingRow(document.getElementById('summary-detail-field'), on(els.inputAutoSummarize), animated);
+  // v0.24.132: ライブ整形がオフなら「ライブ整形のタイミング」「見出し追加のタイミング」、ライブ要約がオフなら「ライブ要約の間隔」を隠す（やっさんの指定）
+  revealSettingRow(document.getElementById('live-refine-sec-field'), on(els.inputAiEnabled), animated);
+  revealSettingRow(document.getElementById('mid-consolidate-field'), on(els.inputAiEnabled), animated);
+  revealSettingRow(document.getElementById('live-summary-min-field'), on(els.inputLiveSummary), animated);
 }
 
 /* ───────── 使う AI の表 (v0.24.92) ─────────
@@ -5171,8 +5177,12 @@ function applyLiveSummaryAvailability(animated = true) {
     if (extra) extra.disabled = !ok;
     if (!ok) box.checked = false;
     // v0.24.77: 「オンにすると選べます」の断り書きも、ばねで出し入れ（前は一瞬）
-    revealSettingRow(note, !ok, animated, true);
+    // v0.24.132: ライブ要約の断り書きは入れ物（.field）ごと出し入れする。字だけ隠すと、入れ物の余白（11px）が残って行のあいだが空いた
+    const wrap = note && note.parentElement && note.parentElement.classList.contains('field') && note.parentElement.children.length === 1 ? note.parentElement : note;
+    revealSettingRow(wrap, !ok, animated, true);
   }
+  // v0.24.132: 押せなくてチェックが外れたら、ライブ要約の間隔も隠す
+  revealSettingRow(document.getElementById('live-summary-min-field'), !!(els.inputLiveSummary && els.inputLiveSummary.checked), animated);
 }
 
 /**
@@ -12320,6 +12330,7 @@ if (els.inputClaudeCode) {
     setChk(els.inputLiveSummary, d.liveSummary);
     setVal(els.inputLiveSummaryMin, d.liveSummaryMin);
     setChk(els.inputAutoSummarize, d.autoSummarize);
+    applyAiSettingsVisibility(true);   // v0.24.132: 要約の詳しさの出し入れも戻す
     const det = { low: els.summaryDetailLow, medium: els.summaryDetailMedium, high: els.summaryDetailHigh }[d.summaryDetail || 'medium'];
     if (det) det.checked = true;
   });
@@ -12429,6 +12440,8 @@ if (window.ConfirmFx) {
 [els.inputDraftFx, els.inputDraftStyle, els.inputCommitFx, els.inputCommitStyle, els.inputHeardFx, els.inputHeardStyle, els.inputConfirmFx, els.inputRefineStyle]
   .forEach((sel) => { if (sel) sel.addEventListener('change', restartFxPreview); });
 applyStageStyles();
+// v0.24.132: 要約・タイトル生成・ライブ整形・ライブ要約を切り替えたら、その下の欄を出し入れ（起動時に登録。tests/browser/t-settings-ai-browser.js で押して確かめる）
+[els.inputAutoSummarize, els.inputAiEnabled, els.inputLiveSummary].forEach((box) => { if (box) box.addEventListener('change', () => applyAiSettingsVisibility(true)); });
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });
 }
