@@ -62,7 +62,8 @@ const eq = (label, got, want) => {
   eq('残り（1,999 回・15 秒使った分だけ減る）', [rings[2].val, rings[0].rem], ['1,999回', Number((1 - 15 / 28800).toFixed(4))]);
   await page.waitForTimeout(1500);
   eq('輪は残りの長さまで減る', await page.evaluate(() => { const a = document.querySelector('#usage-card .usage-ring:nth-of-type(1) .ring-rem'); return Number(a.style.strokeDashoffset) > 0; }), true);
-  eq('Groq の返事の残りも出る', text.includes('Groq の返事では、残り 1999 回'), true);
+  eq('Groq の返事の残りは出さない（v0.24.140・輪の数と並んで迷うため）', text.includes('Groq の返事では'), false);
+  eq('一番下は「このアプリから送ったデータを集計しています。」（v0.24.139）', text.includes('このアプリから送ったデータを集計しています。'), true);
 
   console.log('\n■ 押すと月別のグラフ（v0.24.114 で長押しから押すだけに）');
   await page.evaluate(() => {

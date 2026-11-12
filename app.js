@@ -10944,8 +10944,6 @@ function renderUsageCard() {
   const maxF = feats.length ? feats[0][1].tokens || 1 : 1;
   const prev = Object.keys(u.gemini || {}).filter((k) => k < mk).sort().reverse().slice(0, 3);
   const g = usageGroqNow(u, now);
-  const hdr = g.headers || {};
-  const hdrReq = hdr['x-ratelimit-remaining-requests'];
   const featRows = feats.map(([k, f]) => `<div class="usage-feature"><span class="usage-feature-name">${escapeHtmlSimple(labels[k] || k)}</span>`
     + `<span class="usage-bar thin"><span style="width:${(f.tokens / maxF * 100).toFixed(1)}%"></span></span>`
     + `<span class="usage-feature-n">${fmtNum(f.tokens)}</span></div>`).join('');
@@ -10975,7 +10973,7 @@ function renderUsageCard() {
           ${usageRing('今日の回数', g.dayReq, GROQ_FREE.dayReq, `<b>${fmtNum(Math.max(0, GROQ_FREE.dayReq - g.dayReq))}</b><small>回</small>`)}
         </div>
       </div>
-      ${hdrReq != null ? `<small class="field-hint">Groq の返事では、残り ${escapeHtmlSimple(String(hdrReq))} 回です。</small>` : ''}
+      <!-- v0.24.140: 「Groq の返事では、残り ◯ 回です。」は出さない（輪の数と 2 つ並んで、どちらを信じるか迷う・やっさんの指定）。返事の値は usage.js に覚えたまま -->
       <div class="usage-actions"><button type="button" class="usage-reset" id="btn-usage-reset-groq">リセット</button></div>
       <small class="field-hint">このアプリから送ったデータを集計しています。</small>
     </div>
