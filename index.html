@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.134" />
+  <link rel="stylesheet" href="style.css?v=0.24.135" />
 </head>
 <body>
   <div id="app">
@@ -771,22 +771,23 @@
                  （v0.24.123 で「Web Speech の下書き」の行を消し、名前を「下書きの〜」に）。
                  中の行のあいだに線は引かない。行に説明は付けない（指定に無い。v0.24.121 で勝手に足して「指示も仕様書も無視してる」と言われた） -->
             <div class="field settings-subhead">聞き取り中の表示</div>
-            <!-- v0.24.133: 下書き・処理・確定の 3 つの過程ごとに、エフェクトとスタイルを横に並べて 1 行に（やっさんの指定）。
+            <!-- v0.24.133: 下書き・処理・確定の 3 つの過程ごとに、スタイルとエフェクトを横に並べて 1 行に（やっさんの指定）。
+                 v0.24.135: 説明を「〜される文字のスタイル・演出」にし、その順に左がスタイル・右がエフェクト（やっさんの指定）。
                  どの処理がどの過程に当たるかは、設定から自動で決める（app.js の phaseFxMode のコメント） -->
             <div class="field fx-in fx-stage">
-              <span class="field-label">下書き<small class="field-hint" style="display:block">初めに表示される文字</small></span>
-              <select id="input-draft-fx" aria-label="下書きのエフェクト"></select>
+              <span class="field-label">下書き<small class="field-hint" style="display:block">初めに表示される文字のスタイル・演出</small></span>
               <select id="input-draft-style" aria-label="下書きのスタイル"></select>
+              <select id="input-draft-fx" aria-label="下書きのエフェクト"></select>
             </div>
             <div class="field fx-in fx-stage">
-              <span class="field-label">処理<small class="field-hint" style="display:block">処理過程で表示される文字</small></span>
-              <select id="input-proc-fx" aria-label="処理のエフェクト"></select>
+              <span class="field-label">処理<small class="field-hint" style="display:block">処理過程で表示される文字のスタイル・演出</small></span>
               <select id="input-proc-style" aria-label="処理のスタイル"></select>
+              <select id="input-proc-fx" aria-label="処理のエフェクト"></select>
             </div>
             <div class="field fx-in fx-stage">
-              <span class="field-label">確定<small class="field-hint" style="display:block">確定時に表示される文字</small></span>
-              <select id="input-confirm-fx" aria-label="確定のエフェクト"></select>
+              <span class="field-label">確定<small class="field-hint" style="display:block">確定時に表示される文字のスタイル・演出</small></span>
               <select id="input-final-style" aria-label="確定のスタイル"></select>
+              <select id="input-confirm-fx" aria-label="確定のエフェクト"></select>
             </div>
             <div class="field fx-in">
               <div id="fx-preview" class="fx-preview" aria-hidden="true"></div>
@@ -1197,20 +1198,20 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.134"></script>
-  <script src="motion.js?v=0.24.134"></script>
-  <script src="confirm-fx.js?v=0.24.134"></script>
-  <script src="usage.js?v=0.24.134"></script>
-  <script src="gemini.js?v=0.24.134"></script>
-  <script src="groq.js?v=0.24.134"></script>
-  <script src="notion.js?v=0.24.134"></script>
-  <script src="audio-store.js?v=0.24.134"></script>
-  <script src="claude-bridge.js?v=0.24.134"></script>
-  <script src="claude-installer.js?v=0.24.134"></script>
-  <script src="live-summary.js?v=0.24.134"></script>
-  <script src="image-store.js?v=0.24.134"></script>
-  <script src="gemini-files.js?v=0.24.134"></script>
-  <script src="term-dicts.js?v=0.24.134"></script>
-  <script src="app.js?v=0.24.134"></script>
+  <script src="icons.js?v=0.24.135"></script>
+  <script src="motion.js?v=0.24.135"></script>
+  <script src="confirm-fx.js?v=0.24.135"></script>
+  <script src="usage.js?v=0.24.135"></script>
+  <script src="gemini.js?v=0.24.135"></script>
+  <script src="groq.js?v=0.24.135"></script>
+  <script src="notion.js?v=0.24.135"></script>
+  <script src="audio-store.js?v=0.24.135"></script>
+  <script src="claude-bridge.js?v=0.24.135"></script>
+  <script src="claude-installer.js?v=0.24.135"></script>
+  <script src="live-summary.js?v=0.24.135"></script>
+  <script src="image-store.js?v=0.24.135"></script>
+  <script src="gemini-files.js?v=0.24.135"></script>
+  <script src="term-dicts.js?v=0.24.135"></script>
+  <script src="app.js?v=0.24.135"></script>
 </body>
 </html>

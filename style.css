@@ -3793,7 +3793,7 @@ p.settings-lead { margin: -2px 0 8px; }
 .modal .settings-acc-body label.field:has(> select):not(:has(> .field-hint)) > .field-label,
 .modal .settings-acc-body label.field:has(> .number-stepper):not(:has(> .field-hint)) > .field-label { grid-row: 1 / -1; align-self: center; }
 /* v0.24.128: 段階の名前の下に、エフェクトとスタイルを横に並べて 1 行に。欄の高さは上のフォントの欄と同じ 36px */
-.settings-acc-box .settings-acc-body > .field.fx-stage { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);   /* v0.24.133: エフェクトの字（アップデートグロー）が切れないよう、エフェクトの欄を広く */
+.settings-acc-box .settings-acc-body > .field.fx-stage { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);   /* v0.24.133: エフェクトの字（アップデートグロー）が切れないよう、エフェクトの欄を広く。v0.24.135 でエフェクトは右に */
   column-gap: 8px; row-gap: 4px; padding: 6px 0 4px; }
 .settings-acc-box .settings-acc-body > .field.fx-stage > .field-label { grid-column: 1 / -1; margin: 0; color: var(--text); font-size: 13.5px; }
 .settings-acc-box .settings-acc-body > .field.fx-stage > select { height: 36px; width: 100%; min-width: 0; }

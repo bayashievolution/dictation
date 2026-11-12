@@ -85,13 +85,17 @@ const eq = (label, got, want) => {
   await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });
   await page.waitForTimeout(600);
   const rows = await page.evaluate(() => [...document.querySelectorAll('.fx-stage')].map((r) => {
+    // v0.24.135: 左がスタイル、右がエフェクト。名前の下に説明（小さい字）
     const sels = [...r.querySelectorAll('select')];
     const a = sels[0].getBoundingClientRect(), b = sels[1].getBoundingClientRect();
-    return { name: r.querySelector('.field-label').textContent.trim(), oneLine: Math.round(a.top) === Math.round(b.top) && a.right <= b.left,
-      fx: [...sels[0].options].map((o) => o.textContent), st: [...sels[1].options].map((o) => o.textContent) };
+    const label = r.querySelector('.field-label');
+    return { name: label.firstChild.textContent.trim(), hint: label.querySelector('.field-hint').textContent.trim(),
+      oneLine: Math.round(a.top) === Math.round(b.top) && a.right <= b.left, order: sels.map((x) => /style/.test(x.id) ? 'style' : 'fx'),
+      fx: [...sels[1].options].map((o) => o.textContent), st: [...sels[0].options].map((o) => o.textContent) };
   }));
   eq('過程の並び', rows.map((r) => r.name), ['下書き', '処理', '確定']);
-  eq('エフェクトとスタイルを横に並べて 1 行に', rows.map((r) => r.oneLine), [true, true, true]);
+  eq('説明（v0.24.135）', rows.map((r) => r.hint), ['初めに表示される文字のスタイル・演出', '処理過程で表示される文字のスタイル・演出', '確定時に表示される文字のスタイル・演出']);
+  eq('スタイル（左）とエフェクト（右）を横に並べて 1 行に', rows.map((r) => [r.oneLine, r.order.join('/')]), Array(3).fill([true, 'style/fx']));
   eq('下書きのエフェクト', rows[0].fx, ['なし', 'フェードイン', 'ブラー', 'グロー']);
   eq('処理・確定のエフェクト', rows.slice(1).map((r) => r.fx), Array(2).fill(['なし', 'フェードイン', 'ブラー', 'タイプライター', 'アップデートグロー']));
   eq('スタイルは 3 つとも同じ選択肢', rows.map((r) => r.st), Array(3).fill(['なし', '下線', 'イタリック', 'ボールド']));
