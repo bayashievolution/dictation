@@ -12408,6 +12408,8 @@ const FX_SAMPLE = {
 let fxPreviewRun = 0;
 const fxWait = (ms) => new Promise((r) => setTimeout(r, ms));
 function fxPreviewBox() { return document.getElementById('fx-preview'); }
+// v0.24.136: 字を出すところ（左上の再生・停止のボタンは残す）
+function fxPreviewStage() { const b = fxPreviewBox(); return b && b.querySelector('.fx-preview-stage'); }
 // 設定を閉じる・表示をたたむと offsetParent が無くなる
 function fxPreviewVisible() { const b = fxPreviewBox(); return !!(b && b.offsetParent); }
 const fxVal = (sel) => (sel && sel.value) || 'none';
@@ -12447,11 +12449,39 @@ function fxPreviewSteps() {
   return steps;
 }
 
+/**
+ * 再生・停止 (v0.24.136)
+ * 前は「見えていて、枠の中が空のとき」だけ動き出したので、表示のまとまりをたたんで開き直すと、前の字が残っていて二度と動かなかった
+ * （やっさん「プレビューが止まっていることがある」）。いまは「再生中か」を覚えて、見えていて止めていなければ動き出す。
+ * 左上のボタンで止める・再生する。止めたあとで選ぶ欄を変えたら、また再生する（変えた結果を見るため）
+ */
+let fxPreviewPlaying = false;
+let fxPreviewUserStopped = false;
+function paintFxPreviewBtn() {
+  const btn = document.getElementById('btn-fx-preview');
+  if (!btn) return;
+  btn.textContent = fxPreviewPlaying ? 'プレビュー ■' : 'プレビュー ▶';
+  btn.setAttribute('aria-pressed', String(fxPreviewPlaying));
+}
+function stopFxPreview() {
+  fxPreviewRun++;   // 動いている繰り返しを止める
+  fxPreviewPlaying = false;
+  paintFxPreviewBtn();
+}
+
 async function playFxPreview() {
-  const box = fxPreviewBox();
+  const box = fxPreviewStage();
   if (!box || !window.ConfirmFx) return;
   const run = ++fxPreviewRun;
   const alive = () => run === fxPreviewRun && fxPreviewVisible();
+  fxPreviewPlaying = true;
+  paintFxPreviewBtn();
+  try { await fxPreviewLoop(box, alive); } finally {
+    if (run === fxPreviewRun) { fxPreviewPlaying = false; paintFxPreviewBtn(); }
+  }
+}
+
+async function fxPreviewLoop(box, alive) {
   while (alive()) {
     // プレビューの箱には欄の値のスタイルを付ける（ページ全体の値より近いので勝つ）
     ConfirmFx.applyStageStyle(box, 'draft', fxVal(els.inputDraftStyle));
@@ -12497,9 +12527,16 @@ async function playFxPreview() {
     }
   }
 }
-// プレビューが見えたら始める（表示のまとまりを開いたとき）。見張りは軽い（見えているかを確かめるだけ）
-setInterval(() => { if (fxPreviewVisible() && !fxPreviewBox().childElementCount) playFxPreview(); }, 500);
-function restartFxPreview() { if (fxPreviewVisible()) playFxPreview(); }
+// プレビューが見えたら始める（表示のまとまりを開いたとき）。止めていれば始めない。見張りは軽い（見えているかを確かめるだけ）
+setInterval(() => { if (fxPreviewVisible() && !fxPreviewPlaying && !fxPreviewUserStopped) playFxPreview(); }, 500);
+function restartFxPreview() { fxPreviewUserStopped = false; if (fxPreviewVisible()) playFxPreview(); }
+{
+  const btn = document.getElementById('btn-fx-preview');
+  if (btn) btn.addEventListener('click', () => {
+    if (fxPreviewPlaying) { fxPreviewUserStopped = true; stopFxPreview(); }
+    else { fxPreviewUserStopped = false; playFxPreview(); }
+  });
+}
 
 /** 3 つの過程のスタイルをページに付ける（保存した値）。CSS の変数で、いちばん近い指定が勝つ（プレビューは欄の値） */
 function applyStageStyles() {

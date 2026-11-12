@@ -142,6 +142,31 @@ const eq = (label, got, want) => {
   await page.waitForTimeout(400);
   await page.click('#btn-display-defaults');
   eq('既定値に戻す', await page.evaluate(() => ['input-draft-style', 'input-proc-style', 'input-proc-fx', 'input-confirm-fx', 'input-final-style'].map((id) => document.getElementById(id).value)), ['underline', 'underline', 'diff', 'diff', 'none']);
+  console.log('\n■ プレビューの再生・停止のボタン（v0.24.136・やっさん「プレビューが止まっていることがある」）');
+  const btn = () => page.evaluate(() => { const b = document.getElementById('btn-fx-preview'); const r = b.getBoundingClientRect(), box = document.getElementById('fx-preview').getBoundingClientRect(); return { t: b.textContent, topLeft: r.left - box.left < 20 && r.top - box.top < 20 }; });
+  await page.evaluate(() => document.getElementById('fx-preview').scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(800);
+  eq('見えると再生して、ボタンは「プレビュー ■」（枠の左上）', await btn(), { t: 'プレビュー ■', topLeft: true });
+  await page.click('#btn-fx-preview');
+  await page.waitForTimeout(300);
+  const frozen = await page.evaluate(() => document.querySelector('#fx-preview .fx-preview-stage').innerHTML);
+  await page.waitForTimeout(1500);
+  eq('押すと止まり「プレビュー ▶」', [(await btn()).t, await page.evaluate(() => document.querySelector('#fx-preview .fx-preview-stage').innerHTML) === frozen], ['プレビュー ▶', true]);
+  await page.waitForTimeout(1200);
+  eq('止めたら、勝手には動き出さない', (await btn()).t, 'プレビュー ▶');
+  await page.click('#btn-fx-preview');
+  await page.waitForTimeout(300);
+  eq('もう一度押すと再生', (await btn()).t, 'プレビュー ■');
+  // 前の不具合: 表示のまとまりをたたんで開き直すと、前の字が残っていて二度と動かなかった
+  await page.evaluate(() => { const h = document.getElementById('fx-preview').closest('.settings-acc').querySelector('.settings-acc-head'); h.click(); });
+  await page.waitForTimeout(1200);
+  await page.evaluate(() => { const h = document.getElementById('fx-preview').closest('.settings-acc').querySelector('.settings-acc-head'); h.click(); });
+  await page.waitForTimeout(1500);
+  eq('たたんで開き直しても、また再生する', (await btn()).t, 'プレビュー ■');
+  await page.click('#btn-fx-preview');
+  await page.selectOption('#input-proc-fx', 'fade');
+  await page.waitForTimeout(300);
+  eq('止めていても、選ぶ欄を変えたら再生する', (await btn()).t, 'プレビュー ■');
   await page.evaluate(() => closeSettings());
 
   console.log('\n■ 本当の道（AI で聞き取る・Groq・整形オン）: Web Speech の字と Groq の字は処理、整形した字は確定');

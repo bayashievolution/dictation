@@ -3802,6 +3802,13 @@ p.settings-lead { margin: -2px 0 8px; }
 /* v0.24.125: 「プレビュー」の字は消した（やっさん「書かなくても分かる」） */
 .fx-preview { margin-top: 4px; min-height: 5.6em; padding: 10px 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); font-size: 15px; line-height: 1.8; }
 .fx-preview .paragraph { margin: 0; padding: 0; }
+/* v0.24.136: 左上の再生・停止のボタン。字は下（.fx-preview-stage）に出し、ボタンと重ねない */
+.fx-preview-btn { display: inline-flex; align-items: center; gap: 4px; margin: 0 0 6px; padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-subtle); color: var(--text-muted); font: inherit; font-size: 12px; line-height: 1.6; cursor: pointer; }
+.fx-preview-btn:hover { color: var(--text); }
+.fx-preview-btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.fx-preview-btn:focus-visible { outline: 2px solid var(--heading); outline-offset: 1px; }
+.fx-preview-stage { min-height: 3.6em; }
 .fx-preview .draft-text, .fx-preview .paragraph.provisional .p-body { color: var(--text-muted); }
 
 /* 3 つの過程のスタイル（v0.24.133）。変数は confirm-fx.js の applyStageStyle が付ける（ページ全体は保存した値、プレビューの箱は欄の値）
