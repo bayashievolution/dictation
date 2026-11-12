@@ -3793,7 +3793,8 @@ p.settings-lead { margin: -2px 0 8px; }
 .modal .settings-acc-body label.field:has(> select):not(:has(> .field-hint)) > .field-label,
 .modal .settings-acc-body label.field:has(> .number-stepper):not(:has(> .field-hint)) > .field-label { grid-row: 1 / -1; align-self: center; }
 /* v0.24.128: 段階の名前の下に、エフェクトとスタイルを横に並べて 1 行に。欄の高さは上のフォントの欄と同じ 36px */
-.settings-acc-box .settings-acc-body > .field.fx-stage { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; row-gap: 4px; padding: 6px 0 4px; }
+.settings-acc-box .settings-acc-body > .field.fx-stage { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);   /* v0.24.133: エフェクトの字（アップデートグロー）が切れないよう、エフェクトの欄を広く */
+  column-gap: 8px; row-gap: 4px; padding: 6px 0 4px; }
 .settings-acc-box .settings-acc-body > .field.fx-stage > .field-label { grid-column: 1 / -1; margin: 0; color: var(--text); font-size: 13.5px; }
 .settings-acc-box .settings-acc-body > .field.fx-stage > select { height: 36px; width: 100%; min-width: 0; }
 .settings-acc-box .settings-acc-body > .field:has(> .fx-preview) { padding-top: 8px; }
@@ -3803,20 +3804,20 @@ p.settings-lead { margin: -2px 0 8px; }
 .fx-preview .paragraph { margin: 0; padding: 0; }
 .fx-preview .draft-text, .fx-preview .paragraph.provisional .p-body { color: var(--text-muted); }
 
-/* 4 つの段階のスタイル（v0.24.128）。変数は confirm-fx.js の applyStageStyle が付ける（ページ全体は保存した値、プレビューの箱は欄の値）
-   WebSpeech下書き: 下書きの行 ／ WebSpeech確定: 「未確定」の段落（Web Speech の字）と Web Speech モードの確定した段落 ／
-   AI聞き取り: Groq の字に入れ替わって整形を待つ段落 ／ AI整形: 整えた字の段落 */
+/* 3 つの過程のスタイル（v0.24.133）。変数は confirm-fx.js の applyStageStyle が付ける（ページ全体は保存した値、プレビューの箱は欄の値）
+   下書き: 下書きの行 ／ 処理: ph-proc を付けた段落（最後の処理を待っている段落） ／ 確定: それ以外の段落（前に保存した記録も確定の見た目） */
 #interim, .draft-text {
   font-style: var(--st-draft-fs, normal); font-weight: var(--st-draft-fw, inherit); text-decoration-line: var(--st-draft-td, none);
 }
-.paragraph.provisional:not(.heard) .p-body, .paragraph.raw .p-body, .paragraph.refining:not(.provisional) .p-body {
-  font-style: var(--st-commit-fs, normal); font-weight: var(--st-commit-fw, inherit); text-decoration-line: var(--st-commit-td, none);
+.paragraph .p-body {
+  font-style: var(--st-final-fs, normal); font-weight: var(--st-final-fw, inherit); text-decoration-line: var(--st-final-td, none);
 }
-.paragraph.provisional.heard .p-body {
-  font-style: var(--st-heard-fs, normal); font-weight: var(--st-heard-fw, inherit); text-decoration-line: var(--st-heard-td, none);
+.paragraph.ph-proc .p-body {
+  font-style: var(--st-proc-fs, normal); font-weight: var(--st-proc-fw, inherit); text-decoration-line: var(--st-proc-td, none);
 }
-.paragraph.short-refined:not(.raw) .p-body, .paragraph.refined .p-body {
-  font-style: var(--st-refine-fs, normal); font-weight: var(--st-refine-fw, inherit); text-decoration-line: var(--st-refine-td, none);
+/* Web Speech を並走させないとき、最初に出る AI の字が下書き（v0.24.133） */
+.paragraph.ph-draft .p-body {
+  font-style: var(--st-draft-fs, normal); font-weight: var(--st-draft-fw, inherit); text-decoration-line: var(--st-draft-td, none);
 }
 #interim, .draft-text, .paragraph .p-body { text-decoration-color: var(--text-faint); text-decoration-thickness: 1px; text-underline-offset: 4px; }
 

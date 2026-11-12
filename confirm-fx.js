@@ -74,6 +74,10 @@
       const head = p * (total + W);
       return { opacity: Math.max(0, Math.min(1, (head - rank) / W)) };
     }
+    if (mode === 'glow') {
+      // v0.24.133: 下書きのグローを段落にかけるとき（Web Speech を並走させず、AI の字が下書きになる場合）。緑から字の色へ
+      return { color: `color-mix(in srgb, var(--accent) ${(100 * (1 - p)).toFixed(1)}%, var(--text))` };
+    }
     if (mode === 'diff') {
       return { opacity: Math.min(1, 0.25 + p * 3), backgroundColor: `color-mix(in srgb, var(--accent) ${(45 * (1 - p)).toFixed(1)}%, transparent)` };
     }
@@ -84,6 +88,7 @@
     fade: { response: 0.45, dampingFraction: 1 },
     blur: { response: 0.55, dampingFraction: 1 },
     diff: { response: 1.1, dampingFraction: 1 },   // 光は少し残す（どこが直ったか目で追えるように）
+    glow: { response: 1.0, dampingFraction: 1 },   // 下書きのグロー（CSS の draftGlow と同じ長さ）
   };
   const typeSpring = (total) => ({ response: Math.max(0.45, Math.min(1.4, 0.35 + total / 250)), dampingFraction: 1 });
 

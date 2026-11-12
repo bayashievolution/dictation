@@ -56,7 +56,8 @@ async function open(browser, settings, { groq, extraStorage } = {}) {
 async function sendOne(page) {
   await page.evaluate(() => sendAudioChunkToGemini(new Blob(['x'.repeat(2000)], { type: 'audio/webm' }), '', { startsAtSilence: true, endsAtSilence: true, durationMs: 15000 }));
   await page.waitForTimeout(300);
-  return page.evaluate(() => Array.from(document.querySelectorAll('#confirmed .paragraph')).map(p => ({ cls: p.className, text: p.textContent.trim() })));
+  // v0.24.133: 過程の印（ph-draft など）は演出のあいだだけ付くので、比べるときは外す（過程は tests/browser/t-confirm-fx-browser.js で見る）
+  return page.evaluate(() => Array.from(document.querySelectorAll('#confirmed .paragraph')).map(p => ({ cls: p.className.replace(/ ph-(?:draft|proc)/g, ''), text: p.textContent.trim() })));
 }
 
 (async () => {

@@ -32,7 +32,7 @@ const eq = (label, got, want) => {
   });
   await page.goto(URL);
   const setMode = (m) => page.evaluate((m) => {
-    localStorage.setItem('dictation:settings', JSON.stringify({ inputMode: 'gemini-audio', apiKey: 'A', groqApiKey: 'g', transcribeEngine: 'groq', aiEnabled: true, confirmEffect: m, heardEffect: m, commitEffect: m }));   // v0.24.128: 段階ごとに分かれたので、確かめる見せ方を全部の段階にそろえる
+    localStorage.setItem('dictation:settings', JSON.stringify({ inputMode: 'gemini-audio', apiKey: 'A', groqApiKey: 'g', transcribeEngine: 'groq', aiEnabled: true, confirmEffect: m, procEffect: m }));   // v0.24.133: 過程ごとに分かれたので、確かめる見せ方を処理と確定にそろえる
   }, m);
 
   for (const mode of ['type', 'diff', 'fade', 'blur']) {
@@ -79,60 +79,113 @@ const eq = (label, got, want) => {
   eq('アニメーションの曲線はばね（linear()）', await page.evaluate(() => getComputedStyle(els.interim.lastElementChild).animationTimingFunction.startsWith('linear(')), true);
   await page.evaluate(() => ConfirmFx.renderDraft(els.interim, '', 'fade'));
   eq('空にすると空', await page.evaluate(() => els.interim.innerHTML), '');
-  eq('スタイルの既定はイタリック', await page.evaluate(() => { els.interim.textContent = 'x'; return getComputedStyle(els.interim).fontStyle; }), 'italic');
+  eq('下書きのスタイルの既定は下線（v0.24.133・IME のように）', await page.evaluate(() => { els.interim.textContent = 'x'; return getComputedStyle(els.interim).textDecorationLine; }), 'underline');
 
-  console.log('\n■ 設定（v0.24.128: 4 つの段階ごとにエフェクトとスタイル）');
+  console.log('\n■ 設定（v0.24.133: 下書き・処理・確定の 3 つの過程）');
   await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });
   await page.waitForTimeout(600);
   const rows = await page.evaluate(() => [...document.querySelectorAll('.fx-stage')].map((r) => {
     const sels = [...r.querySelectorAll('select')];
     const a = sels[0].getBoundingClientRect(), b = sels[1].getBoundingClientRect();
-    return { name: r.querySelector('.field-label').textContent.trim(), ids: sels.map((x) => x.id), oneLine: Math.round(a.top) === Math.round(b.top) && a.right <= b.left,
+    return { name: r.querySelector('.field-label').textContent.trim(), oneLine: Math.round(a.top) === Math.round(b.top) && a.right <= b.left,
       fx: [...sels[0].options].map((o) => o.textContent), st: [...sels[1].options].map((o) => o.textContent) };
   }));
-  eq('段階の並び', rows.map((r) => r.name), ['WebSpeech下書き', 'WebSpeech確定', 'AI聞き取り', 'AI整形']);
-  eq('エフェクトとスタイルを横に並べて 1 行に', rows.map((r) => r.oneLine), [true, true, true, true]);
+  eq('過程の並び', rows.map((r) => r.name), ['下書き', '処理', '確定']);
+  eq('エフェクトとスタイルを横に並べて 1 行に', rows.map((r) => r.oneLine), [true, true, true]);
   eq('下書きのエフェクト', rows[0].fx, ['なし', 'フェードイン', 'ブラー', 'グロー']);
-  eq('確定・聞き取り・整形のエフェクト', rows.slice(1).map((r) => r.fx), Array(3).fill(['なし', 'フェードイン', 'ブラー', 'タイプライター', 'アップデートグロー']));
-  eq('スタイルは 4 つとも同じ選択肢', rows.map((r) => r.st), Array(4).fill(['なし', '下線', 'イタリック', 'ボールド']));
-  eq('はじめの値は前の見た目と同じ（下書き・確定・聞き取りはイタリック、整形の字はふつう）', await page.evaluate(() => { const d = DEFAULT_SETTINGS; return [d.draftEffect, d.draftStyle, d.commitEffect, d.commitStyle, d.heardEffect, d.heardStyle, d.confirmEffect, d.refineStyle]; }),
-    ['fade', 'italic', 'none', 'italic', 'fade', 'italic', 'fade', 'none']);
+  eq('処理・確定のエフェクト', rows.slice(1).map((r) => r.fx), Array(2).fill(['なし', 'フェードイン', 'ブラー', 'タイプライター', 'アップデートグロー']));
+  eq('スタイルは 3 つとも同じ選択肢', rows.map((r) => r.st), Array(3).fill(['なし', '下線', 'イタリック', 'ボールド']));
+  eq('はじめの値（IME のように 下書き・処理は下線、確定はなし）', await page.evaluate(() => { const d = DEFAULT_SETTINGS; return [d.draftEffect, d.draftStyle, d.procEffect, d.procStyle, d.confirmEffect, d.finalStyle]; }),
+    ['fade', 'underline', 'diff', 'underline', 'diff', 'none']);
 
-  console.log('\n■ プレビュー: 4 つの段階を順に、欄の値のスタイルで');
+  console.log('\n■ プレビュー: 設定の欄で道が変わる（本番と同じ割り当て）');
+  const steps = () => page.evaluate(() => fxPreviewSteps().map((x) => x.phase + ':' + (x.text.includes('、') ? (x.text.startsWith('えーと') ? 'Groq' : '整形') : 'WebSpeech')));
+  eq('AI で聞き取る（Groq）＋ライブ整形オン: 処理 WebSpeech確定 → 処理 Groq → 確定 整形', await steps(), ['proc:WebSpeech', 'proc:Groq', 'final:整形']);
+  await page.evaluate(() => { const b = document.getElementById('input-ai-enabled'); b.checked = false; b.dispatchEvent(new Event('change')); });
+  eq('ライブ整形オフ: 処理 WebSpeech確定 → 確定 Groq', await steps(), ['proc:WebSpeech', 'final:Groq']);
+  await page.evaluate(() => { const r = document.getElementById('mode-webspeech'); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); });
+  eq('Web Speech だけ（整形オフ）: 確定 WebSpeech確定', await steps(), ['final:WebSpeech']);
+  await page.evaluate(() => { const b = document.getElementById('input-ai-enabled'); b.checked = true; b.dispatchEvent(new Event('change')); });
+  eq('Web Speech＋ライブ整形オン: 処理 WebSpeech確定 → 確定 整形', await steps(), ['proc:WebSpeech', 'final:整形']);
+  await page.evaluate(() => { const r = document.getElementById('mode-gemini'); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); });
+  await page.evaluate(() => { const b = document.getElementById('input-gemini-live-display'); b.checked = false; b.dispatchEvent(new Event('change')); });
+  eq('AI で聞き取る・Web Speech を並走させない＋整形オン: （文字起こし中…）→ 下書き Groq → 確定 整形', await page.evaluate(() => fxPreviewSteps().map((x) => x.phase)), ['wait', 'draft', 'final']);
+  await page.evaluate(() => { const b = document.getElementById('input-ai-enabled'); b.checked = false; b.dispatchEvent(new Event('change')); });
+  eq('並走させない＋整形オフ: （文字起こし中…）→ Groq が下書き＝確定（下書きの演出のあと確定の演出）', await page.evaluate(() => fxPreviewSteps().map((x) => x.phase)), ['wait', 'draftfinal']);
+  await page.evaluate(() => { for (const id of ['input-gemini-live-display', 'input-ai-enabled']) { const b = document.getElementById(id); b.checked = true; b.dispatchEvent(new Event('change')); } });
+
   await page.evaluate(() => document.getElementById('fx-preview').scrollIntoView({ block: 'center' }));
   await page.selectOption('#input-draft-style', 'underline');
-  await page.selectOption('#input-commit-style', 'bold');
-  await page.selectOption('#input-heard-style', 'none');
-  await page.selectOption('#input-heard-fx', 'diff');
+  await page.selectOption('#input-proc-style', 'bold');
+  await page.selectOption('#input-proc-fx', 'diff');
   await page.selectOption('#input-confirm-fx', 'type');
+  await page.selectOption('#input-final-style', 'italic');
   await page.waitForTimeout(700);
   eq('下書き: 下線', await page.evaluate(() => { const d = document.querySelector('#fx-preview .draft-text'); return d && getComputedStyle(d).textDecorationLine; }), 'underline');
-  await page.waitForFunction(() => document.querySelector('#fx-preview .paragraph.provisional:not(.heard)'), null, { timeout: 8000 }).catch(() => {});
-  eq('確定: ボールド（下線は付かない）', await page.evaluate(() => { const b = document.querySelector('#fx-preview .paragraph.provisional .p-body'); const c = getComputedStyle(b); return [c.fontWeight, c.textDecorationLine]; }), ['700', 'none']);
+  await page.waitForFunction(() => document.querySelector('#fx-preview .paragraph.ph-proc'), null, { timeout: 8000 }).catch(() => {});
+  eq('処理: ボールド（下線は付かない）', await page.evaluate(() => { const c = getComputedStyle(document.querySelector('#fx-preview .paragraph .p-body')); return [c.fontWeight, c.textDecorationLine]; }), ['700', 'none']);
   await page.waitForFunction(() => document.querySelector('#fx-preview .paragraph.heard'), null, { timeout: 4000 }).catch(() => {});
-  const heard = await page.evaluate(() => { const b = document.querySelector('#fx-preview .paragraph.heard .p-body'); const c = getComputedStyle(b); return { w: c.fontWeight, d: c.textDecorationLine, glow: [...document.querySelectorAll('#fx-preview .fxc')].map((s) => s.textContent).join('') }; });
-  eq('聞き取り: スタイルなし・足された句読点だけ光る（アップデートグロー）', [heard.w, heard.d, heard.glow], ['400', 'none', '、。']);
+  eq('処理（Groq の字）: 足された句読点だけ光る（アップデートグロー）', await page.evaluate(() => [...document.querySelectorAll('#fx-preview .fxc')].map((x) => x.textContent).join('')), '、。');
   await page.waitForFunction(() => document.querySelector('#fx-preview .paragraph.short-refined'), null, { timeout: 4000 }).catch(() => {});
-  eq('整形: タイプライターで出る', await page.evaluate(() => document.querySelectorAll('#fx-preview .fxc').length > 10), true);
-  eq('本番のスタイルは保存するまで変わらない', await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--st-commit-fw').trim()), 'normal');
+  eq('確定: タイプライターで出て、イタリック', await page.evaluate(() => [document.querySelectorAll('#fx-preview .fxc').length > 10, getComputedStyle(document.querySelector('#fx-preview .paragraph .p-body')).fontStyle]), [true, 'italic']);
+  eq('本番のスタイルは保存するまで変わらない', await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--st-proc-fw').trim()), 'normal');
   await page.evaluate(() => saveSettingsFromForm());
   await page.waitForTimeout(300);
   const st = await page.evaluate(() => JSON.parse(localStorage.getItem('dictation:settings')));
-  eq('保存すると設定に入る', [st.draftStyle, st.commitStyle, st.heardStyle, st.heardEffect, st.confirmEffect], ['underline', 'bold', 'none', 'diff', 'type']);
-  eq('保存すると本番のスタイルも変わる', await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--st-commit-fw').trim()), '700');
+  eq('保存すると設定に入る', [st.draftStyle, st.procStyle, st.procEffect, st.confirmEffect, st.finalStyle], ['underline', 'bold', 'diff', 'type', 'italic']);
+  eq('保存すると本番のスタイルも変わる', await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--st-proc-fw').trim()), '700');
   await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });
   await page.waitForTimeout(400);
   await page.click('#btn-display-defaults');
-  eq('既定値に戻す', await page.evaluate(() => ['input-draft-style', 'input-commit-style', 'input-heard-fx', 'input-confirm-fx'].map((id) => document.getElementById(id).value)), ['italic', 'italic', 'fade', 'fade']);
+  eq('既定値に戻す', await page.evaluate(() => ['input-draft-style', 'input-proc-style', 'input-proc-fx', 'input-confirm-fx', 'input-final-style'].map((id) => document.getElementById(id).value)), ['underline', 'underline', 'diff', 'diff', 'none']);
+  await page.evaluate(() => closeSettings());
 
-  console.log('\n■ 本当の道: 段階ごとのスタイル（Groq の字は AI聞き取り、整形した字は AI整形）');
-  await page.evaluate(() => { closeSettings && closeSettings(); state.settings.heardStyle = 'underline'; state.settings.refineStyle = 'none'; state.settings.commitStyle = 'italic'; applyStageStyles(); els.confirmed.innerHTML = '';
+  console.log('\n■ 本当の道（AI で聞き取る・Groq・整形オン）: Web Speech の字と Groq の字は処理、整形した字は確定');
+  await page.evaluate(() => { state.settings.procStyle = 'underline'; state.settings.finalStyle = 'none'; applyStageStyles(); els.confirmed.innerHTML = '';
     window.__p = sendAudioChunkToGemini(new Blob(['x'.repeat(3000)], { type: 'audio/webm' }), 'えーと今日は', { startsAtSilence: true, endsAtSilence: true, durationMs: 12000 }); });
-  eq('区切った直後は WebSpeech確定（イタリック）', await page.evaluate(() => getComputedStyle(document.querySelector('#confirmed .paragraph .p-body')).fontStyle), 'italic');
+  const deco = () => page.evaluate(() => getComputedStyle(document.querySelector('#confirmed .paragraph .p-body')).textDecorationLine);
+  eq('区切った直後（Web Speech の字）は処理＝下線', await deco(), 'underline');
   await page.waitForFunction(() => document.querySelector('#confirmed .paragraph.heard'), null, { timeout: 4000 }).catch(() => {});
-  eq('Groq の字は AI聞き取り（下線・イタリックでない）', await page.evaluate(() => { const c = getComputedStyle(document.querySelector('#confirmed .paragraph.heard .p-body')); return [c.textDecorationLine, c.fontStyle]; }), ['underline', 'normal']);
+  eq('Groq の字も処理＝下線', await deco(), 'underline');
   await page.evaluate(() => window.__p);
-  eq('整形した字は AI整形（下線なし）', await page.evaluate(() => getComputedStyle(document.querySelector('#confirmed .paragraph.short-refined .p-body')).textDecorationLine), 'none');
+  eq('整形した字は確定＝下線なし', await deco(), 'none');
+
+  console.log('\n■ 本当の道（ライブ整形オフ）: Groq の字が確定');
+  await page.evaluate(() => { state.settings.aiEnabled = false; els.confirmed.innerHTML = '';
+    window.__p = sendAudioChunkToGemini(new Blob(['x'.repeat(3000)], { type: 'audio/webm' }), 'えーと今日は', { startsAtSilence: true, endsAtSilence: true, durationMs: 12000 }); });
+  eq('区切った直後は処理＝下線', await deco(), 'underline');
+  await page.evaluate(() => window.__p);
+  eq('Groq の字は確定＝下線なし（ph-proc が外れる）', [await deco(), await page.evaluate(() => document.querySelector('#confirmed .paragraph').classList.contains('ph-proc'))], ['none', false]);
+
+  console.log('\n■ 本当の道（Web Speech を並走させない・整形オン）: 「（文字起こし中…）」は過程の見た目なし、Groq の字は下書き、整形した字は確定');
+  await page.evaluate(() => { state.settings.aiEnabled = true; state.settings.draftStyle = 'italic'; applyStageStyles(); els.confirmed.innerHTML = '';
+    window.__p = sendAudioChunkToGemini(new Blob(['x'.repeat(3000)], { type: 'audio/webm' }), '', { startsAtSilence: true, endsAtSilence: true, durationMs: 12000 }); });
+  eq('（文字起こし中…）には過程の見た目を付けない', await page.evaluate(() => [...document.querySelector('#confirmed .paragraph').classList].filter((c) => c.startsWith('ph-'))), []);
+  await page.waitForFunction(() => document.querySelector('#confirmed .paragraph.heard'), null, { timeout: 4000 }).catch(() => {});
+  const look = () => page.evaluate(() => { const p = document.querySelector('#confirmed .paragraph'); const c = getComputedStyle(p.querySelector('.p-body')); return [[...p.classList].filter((x) => x.startsWith('ph-')).join(''), c.fontStyle, c.textDecorationLine]; });
+  eq('Groq の字は下書き（イタリック）', await look(), ['ph-draft', 'italic', 'none']);
+  eq('途中で保存しても、過程の印は保存されない', await page.evaluate(() => savableHtml(els.confirmed.innerHTML).includes('ph-')), false);
+  await page.evaluate(() => window.__p);
+  eq('整形した字は確定（ふつう）', await look(), ['', 'normal', 'none']);
+
+  console.log('\n■ 本当の道（Web Speech を並走させない・整形オフ）: Groq の字が下書き＝確定。下書きの演出のあと確定の演出');
+  await page.evaluate(() => { state.settings.aiEnabled = false; state.settings.draftEffect = 'fade'; state.settings.confirmEffect = 'type'; els.confirmed.innerHTML = '';
+    window.__p = sendAudioChunkToGemini(new Blob(['x'.repeat(3000)], { type: 'audio/webm' }), '', { startsAtSilence: true, endsAtSilence: true, durationMs: 12000 }); });
+  await page.evaluate(() => window.__p);
+  eq('出た直後は下書き（イタリック）', await look(), ['ph-draft', 'italic', 'none']);
+  await page.waitForFunction(() => !document.querySelector('#confirmed .paragraph.ph-draft'), null, { timeout: 4000 }).catch(() => {});
+  eq('下書きの演出が終わると確定（ふつう）', await look(), ['', 'normal', 'none']);
+  eq('続けて確定の演出（タイプライター）', await page.evaluate(() => document.querySelectorAll('#confirmed .fxc').length > 5), true);
+  await page.waitForTimeout(2000);
+  await page.evaluate(() => { state.settings.draftStyle = 'underline'; applyStageStyles(); });
+
+  console.log('\n■ 本当の道（Web Speech だけ）: 整形が続かなければ確定、続くなら処理');
+  await page.evaluate(() => { state.settings.inputMode = 'web-speech'; state.settings.aiEnabled = false; els.confirmed.innerHTML = ''; appendRawChunk('今日は晴れです'); });
+  eq('整形オフ: 確定した段落は確定＝下線なし', await deco(), 'none');
+  await page.evaluate(() => { state.settings.aiEnabled = true; els.confirmed.innerHTML = ''; appendRawChunk('今日は晴れですね本当にいい天気です'); });
+  eq('整形オン: 確定した段落は処理＝下線', await deco(), 'underline');
+  await page.waitForTimeout(1500);
+  eq('整形した字は確定＝下線なし', await deco(), 'none');
 
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');

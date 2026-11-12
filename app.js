@@ -108,19 +108,19 @@ window.diagLog = diagLog; // gemini.js 等から info() を呼べるように公
 
 const DEFAULT_SETTINGS = {
   apiKey: '',
-  // v0.24.119: AI の字に入れ替わるときの見せ方（confirm-fx.js）。試しの段階なので 4 つから選ぶ。既定はいちばん控えめな「ふわっと」
-  confirmEffect: 'fade',
   // v0.24.120: Web Speech の下書きの出かた・スタイル（やっさんの指定「文字起こしエフェクト」）。スタイルの既定は前と同じイタリック
+  // v0.24.133: 聞き取り中の表示は「下書き・処理・確定」の 3 つの過程で決める（やっさん「何で処理したかではなく、過程で演出を決めたい」）。
+  //   PC で文字を打つと 下線（下書き）→ 変換（処理）→ Enter（確定）。それをアプリが自動でしていることを見せる。
+  //   どの処理がどの過程に当たるかは、そのときの設定から自動で決める（phaseOfWebSpeechFinal など）:
+  //     下書き＝Web Speech の下書きの行／確定＝最後の処理（整形・整形が無ければ AI の聞き取り・AI が無ければ Web Speech の確定）／処理＝そのあいだ全部
+  //   キー: 確定のエフェクトは confirmEffect をそのまま使う（v0.24.119 からの保存の値を生かす）。処理は procEffect / procStyle、確定のスタイルは finalStyle
+  //   v0.24.128 の 4 段階（commit* / heard* / refineStyle）は、読み込むときに引き継ぐ（loadSettings）
   draftEffect: 'fade',
-  draftStyle: 'italic',
-  // v0.24.128: 聞き取り中の表示を 4 つの段階ごとに（やっさん「個別に決められるように」）。
-  //   WebSpeech下書き（draft）・WebSpeech確定（commit）・AI聞き取り（heard）・AI整形（confirmEffect / refineStyle）
-  // はじめの値は v0.24.127 までの見た目と同じ（確定・聞き取りはイタリック、整形の字はふつう。AI整形のエフェクトはキーをそのまま使う）
-  commitEffect: 'none',
-  commitStyle: 'italic',
-  heardEffect: 'fade',
-  heardStyle: 'italic',
-  refineStyle: 'none',
+  draftStyle: 'underline',
+  procEffect: 'diff',
+  procStyle: 'underline',
+  confirmEffect: 'diff',
+  finalStyle: 'none',
   silenceSec: 3,
   // v0.24.51: 見出し追加（ミドル整形＝溜まった文字起こしをまとめ直して見出しを付ける）のタイミング（秒）。
   // 以前は「3段落たまったら、または60秒」で、段落の数の条件はやっさんの指定でなくした
@@ -421,16 +421,38 @@ function getWriteContainer() {
 function savableHtml(html) {
   // v0.24.119: 確定の演出の途中なら、1 文字ずつの包みも外す（薄いまま保存されないように。confirm-fx.js）
   if (window.ConfirmFx) html = ConfirmFx.stripFxSpans(html);
+  // v0.24.133: 過程の印（下書き・処理）も外す。演出の途中で保存されると、開き直したときに下書き・処理の見た目のまま残る
+  if (html && html.indexOf(' ph-') >= 0) html = html.replace(/ ph-(?:draft|proc)(?=[\s"])/g, '');
   return window.Motion && Motion.stripMotionStyles ? Motion.stripMotionStyles(html) : html;
 }
 
 /**
  * 仮の段落を AI の字に差し替えて、エフェクトをかける (v0.24.119)
- * v0.24.128: どの段階のエフェクトか（AI聞き取り＝heardEffect・AI整形＝confirmEffect）を呼ぶ側が渡す
+ * v0.24.133: どの過程のエフェクトか（phaseFxMode）を呼ぶ側が渡す
  * 高さの変化は今までどおり transcriptMorph。字の見せ方を confirm-fx.js が足す。
  * 画面に見えていないとき（ほかのタブ・ほかのセッションに書いているとき）は演出しない
  */
-/** 画面に見えている段落にだけ、段階のエフェクトをかける (v0.24.128) */
+/**
+ * 過程（下書き・処理・確定）の割り当て (v0.24.133)
+ * 「最後の処理が確定、そのあいだが処理」。そのときの設定で決める（録音の途中で設定を変えても、次のかたまりから合う）
+ *   - AI で聞き取る: Web Speech の字の段落は必ず処理（あとで AI の字に入れ替わる）。AI の字は、整形が続くなら処理、続かなければ確定
+ *   - Web Speech だけ: 確定した段落は、整形が続くなら処理、続かなければ確定
+ * 段落に ph-proc を付けたものが処理（style.css）。付いていない段落は確定の見た目
+ *
+ * Web Speech を並走させないとき（AI で聞き取る）は下書きの行が無いので、**最初に出る AI の字が下書き**（ph-draft）（やっさんの指定）:
+ *   - 整形が続く: Groq の字＝下書き → 整形した字＝確定
+ *   - 続かない（整形オフ・Gemini で聞き取る）: AI の字が下書きでもあり確定でもある。**下書きの演出のあと、続けて確定の演出**（「下書き＝確定でも演出はする」）
+ */
+function webSpeechFinalWillBeRefined() {
+  // appendRawChunk が flushPendingToGemini を呼ぶ条件と同じ
+  return state.settings.inputMode === 'web-speech' && !!state.settings.aiEnabled && !!geminiKey();
+}
+function phaseFxMode(phase) {
+  if (phase === 'draft') return state.settings.draftEffect || 'none';
+  return (phase === 'proc' ? state.settings.procEffect : state.settings.confirmEffect) || 'none';
+}
+
+/** 画面に見えている段落にだけ、過程のエフェクトをかける (v0.24.128) */
 function playStageFx(el, oldText, mode) {
   const visible = state.activePane === 'pane-transcript' && els.confirmed.contains(el) && el.offsetParent;
   if (window.ConfirmFx && visible) ConfirmFx.playConfirmFx(el, oldText, mode || 'none');
@@ -442,7 +464,8 @@ function confirmSwap(targetEl, apply, mode = state.settings.confirmEffect || 'no
   const oldText = placeholder ? '' : targetEl.textContent;
   transcriptMorph(apply);
   const visible = state.activePane === 'pane-transcript' && els.confirmed.contains(targetEl) && targetEl.offsetParent;
-  if (window.ConfirmFx && visible) ConfirmFx.playConfirmFx(targetEl, oldText, mode);
+  // v0.24.133: 終わりを待てるように返す（下書きと確定が同じ字のとき、下書きの演出のあとに確定の演出を続ける）
+  return (window.ConfirmFx && visible) ? ConfirmFx.playConfirmFx(targetEl, oldText, mode) : Promise.resolve();
 }
 
 function syncBgToSession() {
@@ -599,11 +622,9 @@ const els = {
   inputConfirmFx: document.getElementById('input-confirm-fx'),
   inputDraftFx: document.getElementById('input-draft-fx'),
   inputDraftStyle: document.getElementById('input-draft-style'),
-  inputCommitFx: document.getElementById('input-commit-fx'),
-  inputCommitStyle: document.getElementById('input-commit-style'),
-  inputHeardFx: document.getElementById('input-heard-fx'),
-  inputHeardStyle: document.getElementById('input-heard-style'),
-  inputRefineStyle: document.getElementById('input-refine-style'),
+  inputProcFx: document.getElementById('input-proc-fx'),
+  inputProcStyle: document.getElementById('input-proc-style'),
+  inputFinalStyle: document.getElementById('input-final-style'),
   inputWsSliceChars: document.getElementById('input-webspeech-slice-chars'),
   inputWsSilenceStopSec: document.getElementById('input-webspeech-silence-stop-sec'),
   zoomBar: document.getElementById('zoom-bar'),
@@ -637,7 +658,15 @@ const els = {
 function loadSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) state.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // v0.24.133: v0.24.128 の 4 段階の設定を、3 つの過程に引き継ぐ（処理＝WebSpeech確定・確定のスタイル＝AI整形のスタイル）
+      if (saved.procEffect === undefined && saved.commitEffect !== undefined) saved.procEffect = saved.commitEffect;
+      if (saved.procStyle === undefined && saved.commitStyle !== undefined) saved.procStyle = saved.commitStyle;
+      if (saved.finalStyle === undefined && saved.refineStyle !== undefined) saved.finalStyle = saved.refineStyle;
+      for (const k of ['commitEffect', 'commitStyle', 'heardEffect', 'heardStyle', 'refineStyle']) delete saved[k];
+      state.settings = { ...DEFAULT_SETTINGS, ...saved };
+    }
   } catch (e) {
     console.warn('loadSettings failed', e);
   }
@@ -1601,7 +1630,10 @@ function appendRawChunk(text) {
     if (forceNewPara) state.pendingChunkEl.dataset.shortTs = String(Date.now());
     container.appendChild(state.pendingChunkEl);
     state.pendingChunkText = text;
-    if (!inBg) playStageFx(state.pendingChunkEl, text, state.settings.commitEffect);   // v0.24.128: WebSpeech確定の段階
+    // v0.24.133: 整形が続くなら処理、続かなければ確定
+    const phase = webSpeechFinalWillBeRefined() ? 'proc' : 'final';
+    if (phase === 'proc') state.pendingChunkEl.classList.add('ph-proc');
+    if (!inBg) playStageFx(state.pendingChunkEl, text, phaseFxMode(phase));
   } else {
     state.pendingChunkText += ' ' + text;
     const body = state.pendingChunkEl.querySelector('.p-body');
@@ -1687,7 +1719,7 @@ async function flushPendingToGemini() {
     return;
   }
 
-  targetEl.className = 'paragraph refining';
+  targetEl.className = 'paragraph refining ph-proc';   // v0.24.133: 整形を待つあいだも処理の見た目
 
   try {
     const refined = await refineWithGemini({
@@ -1699,7 +1731,7 @@ async function flushPendingToGemini() {
     confirmSwap(targetEl, () => {   // v0.24.60: 整形で高さが変わっても下を跳ばさない。v0.24.128: AI整形の段階のエフェクト
       targetEl.className = 'paragraph refined';
       setParagraphContent(targetEl, refined || rawText);
-    }, state.settings.confirmEffect || 'none');
+    }, phaseFxMode('final'));   // v0.24.133: 整形した字は確定
     updateActionButtons();
     persist();
   } catch (e) {
@@ -4488,7 +4520,12 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
   if (inBg) syncBgToSession();
   else autoScroll();
   // v0.24.128: WebSpeech確定の段階のエフェクト（下書きの字が段落になる）
-  if (provisionalText && !inBg) playStageFx(targetEl, provisionalText, state.settings.commitEffect);
+  // v0.24.133: Web Speech の字の段落は、AI の字に入れ替わるまで処理。
+  // Web Speech を並走させないときの「（文字起こし中…）」は字ではないので、処理の見た目は付けない（やっさん「WebSpeech を並走させないとき」）
+  if (provisionalText) {
+    targetEl.classList.add('ph-proc');
+    if (!inBg) playStageFx(targetEl, provisionalText, phaseFxMode('proc'));
+  }
 
   const persist = () => {
     if (inBg) syncBgToSession();
@@ -4498,16 +4535,12 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
 
   // v0.24.83: 文字にするのは Gemini か Groq か。画面の断り書きにも実際に答えたほうの名前を出す
   let engine = usesGroqTranscribe() ? 'Groq' : 'Gemini';
-  // v0.24.128: 最後に入れ替えるときのエフェクト。整形した字なら AI整形、聞き取ったままの字なら AI聞き取り、
-  // Groq の字をもう見せていて整形できなかった（同じ字）なら、かけない
-  let finalFx = state.settings.heardEffect || 'none';
+  // v0.24.133: 最後に入れ替えるのは確定（整形した字でも、整形が無くて聞き取ったままの字でも）
+  const finalFx = phaseFxMode('final');
   try {
     let text;
     if (engine === 'Groq') {
-      let r;
-      ({ text, engine, ...r } = await transcribeChunkWithGroq(blob, targetEl, edges, provisionalText));
-      if (r.refined) finalFx = state.settings.confirmEffect || 'none';
-      else if (r.rawShown) finalFx = 'none';
+      ({ text, engine } = await transcribeChunkWithGroq(blob, targetEl, edges, provisionalText));
     } else {
       text = await transcribeAudioWithGemini({
         apiKey: geminiKey(),
@@ -4527,11 +4560,21 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
       // このあと maybeConsolidateShortChunks() が 3つ溜まったら
       // refineWithGemini（見出し付き）でまとめて整形する。
       // v0.24.60: 仮の段落を差し替えると高さが変わる。下を跳ばさない
-      confirmSwap(targetEl, () => {   // v0.24.119〜128: 段階のエフェクト（finalFx）
-        targetEl.className = 'paragraph short-refined';
+      // v0.24.133: 最初に出る字がこれ（Web Speech を並走させず、Groq の字も見せていない）なら、下書きでもあり確定でもある。
+      // 下書きの見た目と演出で出し、終わったら確定の見た目と演出に続ける
+      const draftToo = !String(provisionalText || '').trim() && !targetEl.classList.contains('heard');
+      const shown = confirmSwap(targetEl, () => {   // v0.24.119〜133: 確定のエフェクト（className を替えるので ph-proc も外れる）
+        targetEl.className = 'paragraph short-refined' + (draftToo ? ' ph-draft' : '');
         targetEl.dataset.shortTs = String(Date.now());
         setParagraphContent(targetEl, text);
-      }, finalFx);
+      }, draftToo ? phaseFxMode('draft') : finalFx);
+      if (draftToo) {
+        shown.then(() => {
+          if (!targetEl.isConnected || !targetEl.classList.contains('ph-draft')) return;   // そのあいだに見出し追加でまとめられた・差し替えられた
+          targetEl.classList.remove('ph-draft');
+          playStageFx(targetEl, targetEl.textContent, finalFx);
+        });
+      }
       if (state.isRecording) resetLongSilenceTimer();
       persist();
       maybeWarnLiveSilent();   // v0.24.19
@@ -4634,8 +4677,9 @@ async function transcribeChunkWithGroq(blob, targetEl, edges, provisionalText = 
   }
   if (!raw || !raw.trim() || !liveRefineReady()) return { text: raw || '', engine: 'Groq' };
   // 整形のあいだも、聞き取れた文字は見えているようにする（Web Speech の仮の文字より Groq のほうが確か）
-  // v0.24.128: AI聞き取りの段階。整形を待つあいだも「未確定」のまま、heard を付けて AI聞き取りのスタイルにする
-  confirmSwap(targetEl, () => { targetEl.classList.add('heard'); setParagraphContent(targetEl, raw); }, state.settings.heardEffect || 'none');
+  // v0.24.133: 整形が続くので、Groq の字は処理。Web Speech を並走させず、これが最初に出る字なら下書き（整形を待つあいだも「未確定」のまま）
+  const rawPhase = String(provisionalText || '').trim() ? 'proc' : 'draft';
+  confirmSwap(targetEl, () => { targetEl.classList.add('heard', rawPhase === 'proc' ? 'ph-proc' : 'ph-draft'); setParagraphContent(targetEl, raw); }, phaseFxMode(rawPhase));
   try {
     const refined = await refineWithGemini({
       apiKey: geminiKey(),
@@ -4643,11 +4687,11 @@ async function transcribeChunkWithGroq(blob, targetEl, edges, provisionalText = 
       context: getContextForGemini(),
       newChunk: raw,
     });
-    return { text: (refined && refined.trim()) ? refined : raw, engine: 'Groq', refined: !!(refined && refined.trim()), rawShown: true };
+    return { text: (refined && refined.trim()) ? refined : raw, engine: 'Groq' };
   } catch (e) {
     // 整形できなくても文字は残す。見出し追加のときにもう一度まとめ直される
     diagLog.info(`Groq の文字を整形できなかったので、そのまま残します: ${(e.message || e).toString().slice(0, 120)}`);
-    return { text: raw, engine: 'Groq', rawShown: true };
+    return { text: raw, engine: 'Groq' };
   }
 }
 
@@ -4759,6 +4803,8 @@ function renderAiTable() {
   renderIcons(body);
   // AI で聞き取るのに、文字起こしに使える AI が無ければ、モードの下に注意書き（設定の見本の 1 段目）
   revealSettingRow(document.getElementById('stt-ai-caution'), !ws && !now.stt, true);
+  // v0.24.133: 使えるAI・選んだAIが変わると、プレビューの道（下書き → 処理 → 確定）も変わる
+  if (typeof restartFxPreview === 'function') restartFxPreview();
 }
 
 function applyGeminiOnlyVisibility(animated = true) {
@@ -8555,11 +8601,9 @@ function openSettings() {
     pick(els.inputConfirmFx, 'CONFIRM_FX', state.settings.confirmEffect, DEFAULT_SETTINGS.confirmEffect);
     pick(els.inputDraftFx, 'DRAFT_FX', state.settings.draftEffect, DEFAULT_SETTINGS.draftEffect);
     pick(els.inputDraftStyle, 'DRAFT_STYLE', state.settings.draftStyle, DEFAULT_SETTINGS.draftStyle);
-    pick(els.inputCommitFx, 'CONFIRM_FX', state.settings.commitEffect, DEFAULT_SETTINGS.commitEffect);
-    pick(els.inputCommitStyle, 'DRAFT_STYLE', state.settings.commitStyle, DEFAULT_SETTINGS.commitStyle);
-    pick(els.inputHeardFx, 'CONFIRM_FX', state.settings.heardEffect, DEFAULT_SETTINGS.heardEffect);
-    pick(els.inputHeardStyle, 'DRAFT_STYLE', state.settings.heardStyle, DEFAULT_SETTINGS.heardStyle);
-    pick(els.inputRefineStyle, 'DRAFT_STYLE', state.settings.refineStyle, DEFAULT_SETTINGS.refineStyle);
+    pick(els.inputProcFx, 'CONFIRM_FX', state.settings.procEffect, DEFAULT_SETTINGS.procEffect);
+    pick(els.inputProcStyle, 'DRAFT_STYLE', state.settings.procStyle, DEFAULT_SETTINGS.procStyle);
+    pick(els.inputFinalStyle, 'DRAFT_STYLE', state.settings.finalStyle, DEFAULT_SETTINGS.finalStyle);
   }
   if (els.inputWsCommitSec) {
     // v0.13.29: localStorage に古い値（3/4/5 等、v0.13.26 で削除した選択肢）が
@@ -8679,11 +8723,9 @@ function saveSettingsFromForm() {
   if (els.inputConfirmFx) state.settings.confirmEffect = els.inputConfirmFx.value || 'none';
   if (els.inputDraftFx) state.settings.draftEffect = els.inputDraftFx.value || 'none';
   if (els.inputDraftStyle) state.settings.draftStyle = els.inputDraftStyle.value || 'none';
-  if (els.inputCommitFx) state.settings.commitEffect = els.inputCommitFx.value || 'none';
-  if (els.inputCommitStyle) state.settings.commitStyle = els.inputCommitStyle.value || 'none';
-  if (els.inputHeardFx) state.settings.heardEffect = els.inputHeardFx.value || 'none';
-  if (els.inputHeardStyle) state.settings.heardStyle = els.inputHeardStyle.value || 'none';
-  if (els.inputRefineStyle) state.settings.refineStyle = els.inputRefineStyle.value || 'none';
+  if (els.inputProcFx) state.settings.procEffect = els.inputProcFx.value || 'none';
+  if (els.inputProcStyle) state.settings.procStyle = els.inputProcStyle.value || 'none';
+  if (els.inputFinalStyle) state.settings.finalStyle = els.inputFinalStyle.value || 'none';
   applyStageStyles();
   if (els.inputWsCommitSec) {
     const newSec = Math.max(0, Math.min(20, Number(els.inputWsCommitSec.value) || 0));
@@ -12347,20 +12389,18 @@ if (els.inputClaudeCode) {
     setVal(els.inputConfirmFx, d.confirmEffect);
     setVal(els.inputDraftFx, d.draftEffect);
     setVal(els.inputDraftStyle, d.draftStyle);
-    setVal(els.inputCommitFx, d.commitEffect); setVal(els.inputCommitStyle, d.commitStyle);
-    setVal(els.inputHeardFx, d.heardEffect); setVal(els.inputHeardStyle, d.heardStyle);
-    setVal(els.inputRefineStyle, d.refineStyle);
+    setVal(els.inputProcFx, d.procEffect); setVal(els.inputProcStyle, d.procStyle);
+    setVal(els.inputFinalStyle, d.finalStyle);
     restartFxPreview();
   });
 }
 /**
- * 聞き取り中の表示のプレビュー (v0.24.119〜128)
- * 録音しなくても見比べられるように、設定の中で 4 つの段階を順に繰り返し見せる:
- *   WebSpeech下書き（字が増えていく）→ WebSpeech確定（区切られて段落になる）→ AI聞き取り（Groq の字に入れ替わる）→ AI整形（整えた字に入れ替わる）
- * 設定の欄の値（保存前）で見せる。プレビューが画面に見えているあいだだけ動く（設定を閉じる・表示をたたむと止まる）
+ * 聞き取り中の表示のプレビュー (v0.24.119〜133)
+ * 録音しなくても見比べられるように、設定の中で「下書き → 処理 → 確定」を繰り返し見せる。
+ * どの処理がどの過程に当たるかは、設定の欄（モード・リアルタイム表示・ライブ整形・使用するAI）の値で決める（本番と同じ決まり）。
+ * プレビューが画面に見えているあいだだけ動く（設定を閉じる・表示をたたむと止まる）。欄を変えると、その場でやり直す
  */
 const FX_SAMPLE = {
-  // v0.24.129: 講義でも会議でも通じる例文に（やっさん「もっと汎用的な例文に」。前は模擬授業の火事の話）
   draft: 'えーとそれでは今日の内容について順番にお話ししていきます',
   heard: 'えーと、それでは今日の内容について順番にお話ししていきます。',   // Groq は句読点を付けることが多い（実機 2026-11-11）
   refined: 'それでは、今日の内容について順番にお話ししていきます。',
@@ -12371,6 +12411,42 @@ function fxPreviewBox() { return document.getElementById('fx-preview'); }
 // 設定を閉じる・表示をたたむと offsetParent が無くなる
 function fxPreviewVisible() { const b = fxPreviewBox(); return !!(b && b.offsetParent); }
 const fxVal = (sel) => (sel && sel.value) || 'none';
+
+/**
+ * 設定の欄の値から、段落が通る道を作る（本番の割り当てと同じ決まり）
+ * @returns {Array<{phase:'draft'|'proc'|'final'|'draftfinal'|'wait', text:string, cls?:string}>} 下書きのあとに通る段階（最後が確定。
+ *   wait は「（文字起こし中…）」で過程の見た目なし。draft は下書きになる段落、draftfinal は下書きの演出のあと確定の演出）
+ */
+function fxPreviewSteps() {
+  const ai = !!(els.modeGemini && els.modeGemini.checked);
+  const refineOn = !!(els.inputAiEnabled && els.inputAiEnabled.checked);
+  const avail = typeof formAiAvail === 'function' ? formAiAvail() : { gemini: true, groq: false, claude: false };
+  const steps = [];
+  const draftOn = !ai || !(els.inputGeminiLiveDisplay && !els.inputGeminiLiveDisplay.checked);   // AI で聞き取るとき、Web Speech を並走させるか
+  if (!ai) {
+    // Web Speech だけ: 確定した段落 →（整形が続くなら）整形した字。Web Speech モードの整形は Gemini のキーがあるとき（webSpeechFinalWillBeRefined）
+    const willRefine = refineOn && avail.gemini;
+    steps.push({ phase: willRefine ? 'proc' : 'final', text: FX_SAMPLE.draft });
+    if (willRefine) steps.push({ phase: 'final', text: FX_SAMPLE.refined });
+    return steps;
+  }
+  const stt = typeof pickAvailable === 'function' ? pickAvailable(aiPickWorking && aiPickWorking.stt, avail, ['groq', 'gemini']) : 'groq';
+  const liveRefine = refineOn && (avail.gemini || avail.claude);
+  // Web Speech を並走させないときは下書きも、Web Speech の字の段落も無い。「（文字起こし中…）」のあと AI の字から
+  if (draftOn) steps.push({ phase: 'proc', text: FX_SAMPLE.draft, cls: 'provisional' });
+  else steps.push({ phase: 'wait', text: '（文字起こし中…）', cls: 'refining' });
+  if (stt === 'groq' && liveRefine) {
+    // 並走させないときは、Groq の字が最初に出る字＝下書き
+    steps.push({ phase: draftOn ? 'proc' : 'draft', text: FX_SAMPLE.heard, cls: 'provisional heard' });
+    steps.push({ phase: 'final', text: FX_SAMPLE.refined });
+  } else {
+    // Groq で整形なし → 聞き取ったままの字が確定。Gemini で聞き取る → 整えた字がそのまま返ってくるので確定。
+    // 並走させないときは、その字が下書きでもある（下書きの演出のあと確定の演出）
+    steps.push({ phase: draftOn ? 'final' : 'draftfinal', text: stt === 'groq' ? FX_SAMPLE.heard : FX_SAMPLE.refined });
+  }
+  return steps;
+}
+
 async function playFxPreview() {
   const box = fxPreviewBox();
   if (!box || !window.ConfirmFx) return;
@@ -12379,65 +12455,68 @@ async function playFxPreview() {
   while (alive()) {
     // プレビューの箱には欄の値のスタイルを付ける（ページ全体の値より近いので勝つ）
     ConfirmFx.applyStageStyle(box, 'draft', fxVal(els.inputDraftStyle));
-    ConfirmFx.applyStageStyle(box, 'commit', fxVal(els.inputCommitStyle));
-    ConfirmFx.applyStageStyle(box, 'heard', fxVal(els.inputHeardStyle));
-    ConfirmFx.applyStageStyle(box, 'refine', fxVal(els.inputRefineStyle));
-    // 1. WebSpeech下書き: Web Speech のように、数文字ずつ全文が送られてくる
-    const draft = document.createElement('div');
-    draft.className = 'draft-text';
-    box.replaceChildren(draft);
+    ConfirmFx.applyStageStyle(box, 'proc', fxVal(els.inputProcStyle));
+    ConfirmFx.applyStageStyle(box, 'final', fxVal(els.inputFinalStyle));
+    const steps = fxPreviewSteps();
     const text = FX_SAMPLE.draft;
-    for (let n = 0; n < text.length && alive();) {
-      n = Math.min(text.length, n + 2 + Math.floor(Math.random() * 3));
-      ConfirmFx.renderDraft(draft, text.slice(0, n), fxVal(els.inputDraftFx));
-      await fxWait(140);
+    let old = '';
+    if (steps[0].phase !== 'wait') {
+      // 下書き: Web Speech のように、数文字ずつ全文が送られてくる
+      const draft = document.createElement('div');
+      draft.className = 'draft-text';
+      box.replaceChildren(draft);
+      for (let n = 0; n < text.length && alive();) {
+        n = Math.min(text.length, n + 2 + Math.floor(Math.random() * 3));
+        ConfirmFx.renderDraft(draft, text.slice(0, n), fxVal(els.inputDraftFx));
+        await fxWait(140);
+      }
+      await fxWait(600);
+      old = text;
+      if (!alive()) break;
     }
-    await fxWait(600);
-    if (!alive()) break;
-    // 2. WebSpeech確定: 区切られて「未確定」の段落になる（本番でも、ここで AI に送る）
+    // 処理・確定: 設定で決まる道を順に
     const p = document.createElement('div');
-    p.className = 'paragraph provisional';
-    setParagraphContent(p, text);
-    box.replaceChildren(p);
-    ConfirmFx.playConfirmFx(p, text, fxVal(els.inputCommitFx));
-    await fxWait(1200);
-    if (!alive()) break;
-    // 3. AI聞き取り: Groq の字に入れ替わる（整形を待つあいだは「未確定」のまま）
-    let old = p.textContent;
-    p.classList.add('heard');
-    setParagraphContent(p, FX_SAMPLE.heard);
-    ConfirmFx.playConfirmFx(p, old, fxVal(els.inputHeardFx));
-    await fxWait(1600);
-    if (!alive()) break;
-    // 4. AI整形: 整えた字に入れ替わる
-    old = p.textContent;
-    p.className = 'paragraph short-refined';
-    setParagraphContent(p, FX_SAMPLE.refined);
-    ConfirmFx.playConfirmFx(p, old, fxVal(els.inputConfirmFx));
-    await fxWait(2600);
+    for (const [k, st] of steps.entries()) {
+      if (!alive()) break;
+      const ph = { proc: ' ph-proc', draft: ' ph-draft', draftfinal: ' short-refined ph-draft', final: ' short-refined' }[st.phase] || '';
+      p.className = 'paragraph' + (st.cls ? ' ' + st.cls : '') + ph;
+      setParagraphContent(p, st.text);
+      if (k === 0) box.replaceChildren(p);
+      if (st.phase === 'wait') { await fxWait(900); continue; }
+      const fxSel = { proc: els.inputProcFx, draft: els.inputDraftFx, draftfinal: els.inputDraftFx, final: els.inputConfirmFx }[st.phase];
+      const done = ConfirmFx.playConfirmFx(p, old, fxVal(fxSel));
+      old = p.textContent;
+      if (st.phase === 'draftfinal') {
+        // 下書き＝確定: 下書きの演出が終わったら、確定の見た目と演出に続ける
+        await done;
+        if (!alive()) break;
+        p.classList.remove('ph-draft');
+        ConfirmFx.playConfirmFx(p, old, fxVal(els.inputConfirmFx));
+      }
+      await fxWait(st.phase === 'proc' || st.phase === 'draft' ? 1400 : 2600);
+    }
   }
 }
 // プレビューが見えたら始める（表示のまとまりを開いたとき）。見張りは軽い（見えているかを確かめるだけ）
 setInterval(() => { if (fxPreviewVisible() && !fxPreviewBox().childElementCount) playFxPreview(); }, 500);
 function restartFxPreview() { if (fxPreviewVisible()) playFxPreview(); }
 
-/** 4 つの段階のスタイルをページに付ける（保存した値）。CSS の変数で、いちばん近い指定が勝つ（プレビューは欄の値） */
+/** 3 つの過程のスタイルをページに付ける（保存した値）。CSS の変数で、いちばん近い指定が勝つ（プレビューは欄の値） */
 function applyStageStyles() {
   if (!window.ConfirmFx) return;
   const root = document.documentElement, st = state.settings;
   ConfirmFx.applyStageStyle(root, 'draft', st.draftStyle);
-  ConfirmFx.applyStageStyle(root, 'commit', st.commitStyle);
-  ConfirmFx.applyStageStyle(root, 'heard', st.heardStyle);
-  ConfirmFx.applyStageStyle(root, 'refine', st.refineStyle);
+  ConfirmFx.applyStageStyle(root, 'proc', st.procStyle);
+  ConfirmFx.applyStageStyle(root, 'final', st.finalStyle);
 }
 if (window.ConfirmFx) {
   ConfirmFx.installDraftEasing(document.documentElement);
   const fill = (sel, list) => { if (sel && !sel.options.length) sel.innerHTML = list.map((o) => `<option value="${o.value}">${o.label}</option>`).join(''); };
   fill(els.inputDraftFx, ConfirmFx.DRAFT_FX);
-  [els.inputCommitFx, els.inputHeardFx, els.inputConfirmFx].forEach((sel) => fill(sel, ConfirmFx.CONFIRM_FX));
-  [els.inputDraftStyle, els.inputCommitStyle, els.inputHeardStyle, els.inputRefineStyle].forEach((sel) => fill(sel, ConfirmFx.DRAFT_STYLE));
+  [els.inputProcFx, els.inputConfirmFx].forEach((sel) => fill(sel, ConfirmFx.CONFIRM_FX));
+  [els.inputDraftStyle, els.inputProcStyle, els.inputFinalStyle].forEach((sel) => fill(sel, ConfirmFx.DRAFT_STYLE));
 }
-[els.inputDraftFx, els.inputDraftStyle, els.inputCommitFx, els.inputCommitStyle, els.inputHeardFx, els.inputHeardStyle, els.inputConfirmFx, els.inputRefineStyle]
+[els.inputDraftFx, els.inputDraftStyle, els.inputProcFx, els.inputProcStyle, els.inputConfirmFx, els.inputFinalStyle, els.inputAiEnabled, els.modeGemini, els.modeWebSpeech, els.inputGeminiLiveDisplay]
   .forEach((sel) => { if (sel) sel.addEventListener('change', restartFxPreview); });
 applyStageStyles();
 // v0.24.132: 要約・タイトル生成・ライブ整形・ライブ要約を切り替えたら、その下の欄を出し入れ（起動時に登録。tests/browser/t-settings-ai-browser.js で押して確かめる）
