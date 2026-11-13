@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.141" />
+  <link rel="stylesheet" href="style.css?v=0.24.142" />
 </head>
 <body>
   <div id="app">
@@ -834,6 +834,30 @@
               </div>
               <small class="field-hint">アップロード時はこの保存先が最初から選ばれた状態で確認ダイアログが出ます。</small>
             </div>
+            <!-- v0.24.142: 録音を止めたら Notion に自動で保存（やっさんの指定 2026-11-13・見せた形で OK をもらった） -->
+            <label class="field field-row">
+              <input id="input-notion-auto-save" type="checkbox" />
+              <span>録音を止めたら Notion に保存する</span>
+            </label>
+            <div class="field-conditional" id="notion-auto-fields" hidden>
+              <div class="field-conditional-inner">
+              <label class="field">
+                <span class="field-label">保存先</span>
+                <select id="input-notion-auto-target"></select>
+              </label>
+              <div class="field">
+                <button type="button" id="btn-notion-auto-pick" class="btn btn-ghost btn-sm">保存先を選ぶ</button>
+              </div>
+              <label class="field field-row">
+                <input id="input-notion-auto-close" type="checkbox" />
+                <span>保存したらタブを閉じる</span>
+              </label>
+              <label class="field field-row">
+                <input id="input-notion-auto-keep-audio" type="checkbox" />
+                <span>保存したら録音を残す<small class="field-hint" style="display:block">保管している録音に「残す」で入れます。タブを閉じても消えません。</small></span>
+              </label>
+              </div>
+            </div>
             </div>
           </div>
 
@@ -1202,20 +1226,20 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.141"></script>
-  <script src="motion.js?v=0.24.141"></script>
-  <script src="confirm-fx.js?v=0.24.141"></script>
-  <script src="usage.js?v=0.24.141"></script>
-  <script src="gemini.js?v=0.24.141"></script>
-  <script src="groq.js?v=0.24.141"></script>
-  <script src="notion.js?v=0.24.141"></script>
-  <script src="audio-store.js?v=0.24.141"></script>
-  <script src="claude-bridge.js?v=0.24.141"></script>
-  <script src="claude-installer.js?v=0.24.141"></script>
-  <script src="live-summary.js?v=0.24.141"></script>
-  <script src="image-store.js?v=0.24.141"></script>
-  <script src="gemini-files.js?v=0.24.141"></script>
-  <script src="term-dicts.js?v=0.24.141"></script>
-  <script src="app.js?v=0.24.141"></script>
+  <script src="icons.js?v=0.24.142"></script>
+  <script src="motion.js?v=0.24.142"></script>
+  <script src="confirm-fx.js?v=0.24.142"></script>
+  <script src="usage.js?v=0.24.142"></script>
+  <script src="gemini.js?v=0.24.142"></script>
+  <script src="groq.js?v=0.24.142"></script>
+  <script src="notion.js?v=0.24.142"></script>
+  <script src="audio-store.js?v=0.24.142"></script>
+  <script src="claude-bridge.js?v=0.24.142"></script>
+  <script src="claude-installer.js?v=0.24.142"></script>
+  <script src="live-summary.js?v=0.24.142"></script>
+  <script src="image-store.js?v=0.24.142"></script>
+  <script src="gemini-files.js?v=0.24.142"></script>
+  <script src="term-dicts.js?v=0.24.142"></script>
+  <script src="app.js?v=0.24.142"></script>
 </body>
 </html>

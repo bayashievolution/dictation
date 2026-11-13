@@ -221,6 +221,16 @@ const DEFAULT_SETTINGS = {
   notionToken: '',
   // v0.24.50: Notion 連携を使うか。未設定（それ以前の設定）は loadSettings でトークンの有無から決める
   notionEnabled: undefined,
+  // v0.24.142: 録音を止めたら Notion に自動で保存する（やっさんの指定 2026-11-13）。
+  //   notionAutoTarget: 'last'＝前回の保存先（手で保存したときの保存先に合わせて変わる・いつも新しいノート）／'fixed'＝設定で決めた保存先（notionAutoDest）
+  //   notionAutoDest: 保存先の小窓（openNotionPicker）が返す形のまま { id, title, titleProp, dateProp, pageId, pageUrl, pageTitle }。pageId があれば既存のノートに追記
+  //   v0.21.4 で「自動で閉じる」を設定として覚えない、と決めていた（聞かれずにタブが消えるため）。
+  //   今回はやっさんが設定として明示的に求めたので、自動保存のときだけの設定として持つ（手で保存するときの小窓は今までどおり毎回オフから）
+  notionAutoSave: false,
+  notionAutoTarget: 'last',
+  notionAutoDest: null,
+  notionAutoCloseTab: false,
+  notionAutoKeepAudio: false,
   notionLastDataSourceId: '',
   notionLastDataSourceTitle: '',
   // v0.15.0: 録音日時を入れる日付プロパティ名。'' なら使わない（タイトルに日時が残る）
@@ -569,6 +579,11 @@ const els = {
   inputNotionEnabled: document.getElementById('input-notion-enabled'),   // v0.24.50
   notionTestResult: document.getElementById('notion-test-result'),
   notionLastTarget: document.getElementById('notion-last-target'),
+  inputNotionAutoSave: document.getElementById('input-notion-auto-save'),
+  inputNotionAutoTarget: document.getElementById('input-notion-auto-target'),
+  btnNotionAutoPick: document.getElementById('btn-notion-auto-pick'),
+  inputNotionAutoClose: document.getElementById('input-notion-auto-close'),
+  inputNotionAutoKeepAudio: document.getElementById('input-notion-auto-keep-audio'),
   btnNotionForget: document.getElementById('btn-notion-forget'),
   silenceDialog: document.getElementById('silence-dialog'),
   silenceCountdown: document.getElementById('silence-countdown'),
@@ -2592,6 +2607,8 @@ function stopRecording() {
       await generateSummary({ silent: true, sessionId: recSessionId });
       await autoGenerateTitle({ sessionId: recSessionId });
     }
+    // v0.24.142: 要約・タイトル生成のあとで、Notion に自動で保存（設定がオンのとき）
+    await autoSaveToNotion(recSessionId);
   });
 }
 
@@ -5708,6 +5725,14 @@ async function uploadSessionsToNotion(sessions) {
   state.settings.notionLastDatePropName = dest.dateProp || '';
   saveSettings();
 
+  return notionSendSessions(targets, dest);
+}
+
+/**
+ * 決まった保存先へ、タブを 1 つずつ送る (v0.24.142 で uploadSessionsToNotion から切り出した)
+ * 手で保存するとき（保存先の小窓のあと）と、録音を止めたあとの自動保存（autoSaveToNotion）で同じものを使う
+ */
+async function notionSendSessions(targets, dest) {
   // v0.23.0: 既存ノートへの追記かどうかで、画面の言葉を変える。
   // 「保存」と出したまま既存ノートに書き足すのは、起きたことと違う
   const appending = !!dest.pageId;
@@ -5882,6 +5907,92 @@ function notionFinish({ results, cancelled, remaining, verb }) {
   };
   els.btnNotionKeepTabs.onclick = notionProgressClose;
   els.btnNotionCloseTabs.focus();
+}
+
+/* ───────── 録音を止めたら Notion に自動で保存 (v0.24.142) ─────────
+ *
+ * やっさんの指定（2026-11-13）: 録音を止めたら Notion へのアップロードまで自動で。設定で、保存先（前回の保存先／決めた保存先）・
+ * 保存したらタブを閉じるか・録音を残すか（保管している録音に「残す」で入れる）を決める。
+ * 閉じないときは、今までどおり Notion 保存済みの印（雲）が付いたタブが残る。
+ * 失敗したら、タブは閉じず録音も消さず、右下の小窓で知らせる（手で保存し直せる）。
+ * 録音を止めたあとの要約・タイトル生成が終わってから動く（stopRecording の最後）。
+ */
+let notionAutoDestWorking = null;   // 設定の欄で選んだ保存先（保存を押すまで state.settings に入れない）
+
+/** 保存先の選ぶ欄の中身。「決めた保存先」は名前を出す（まだ選んでいなければ選べない） */
+function renderNotionAutoTargetOptions(value) {
+  const sel = els.inputNotionAutoTarget;
+  if (!sel) return;
+  const d = notionAutoDestWorking;
+  const fixedLabel = d
+    ? `決めた保存先：${d.pageId ? `${d.title} のノート「${d.pageTitle}」に追記` : d.title}`
+    : '決めた保存先（「保存先を選ぶ」で選びます）';
+  sel.innerHTML = `<option value="last">前回の保存先</option><option value="fixed"${d ? '' : ' disabled'}>${escapeHtml(fixedLabel)}</option>`;
+  sel.value = value === 'fixed' && d ? 'fixed' : 'last';
+}
+
+/** 自動保存の保存先を決める。前回の保存先は列の構成（タイトルの列）をその場で読む */
+async function resolveNotionAutoDest() {
+  const st = state.settings;
+  if (st.notionAutoTarget === 'fixed' && st.notionAutoDest) return st.notionAutoDest;
+  if (!st.notionLastDataSourceId) throw new Error('保存先がまだありません。設定 → Notion 連携 で「保存先を選ぶ」か、一度手で保存してください');
+  const schema = await notionGetSchema(st.notionToken, st.notionLastDataSourceId);
+  const dateProp = st.notionLastDatePropName && schema.dateProps.includes(st.notionLastDatePropName) ? st.notionLastDatePropName : '';
+  return { id: st.notionLastDataSourceId, title: st.notionLastDataSourceTitle || '', titleProp: schema.titleProp, dateProp, pageId: '', pageUrl: '', pageTitle: '' };
+}
+
+async function autoSaveToNotion(sessionId) {
+  const st = state.settings;
+  if (!st.notionAutoSave || !st.notionEnabled || !st.notionToken || typeof notionIsAvailable === 'function' && !notionIsAvailable()) return;
+  const session = state.sessions.find((s) => s.id === sessionId);
+  if (!session || !sessionHasContentForNotion(session)) return;
+  // 止めた直後なので、確定待ちの文字起こしは聞かずに待つ（最大 60 秒。手で保存するときのような確認は出さない）
+  const deadline = Date.now() + 60000;
+  while (state.audioInFlightCount > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 500));
+  if (sessionId === state.activeId) snapshotActiveToSession();
+
+  let dest;
+  try {
+    dest = await resolveNotionAutoDest();
+  } catch (e) {
+    notionProgressOpen('Notion への自動保存に失敗しました', { cancellable: false });
+    notionAutoFinish({ results: [{ session, ok: false, error: e.message }] });
+    return;
+  }
+  diagLog.info(`録音を止めたので Notion に自動で保存します（${dest.pageId ? `追記先: ${dest.pageTitle}` : `保存先: ${dest.title}`}）`);
+  const outcome = await notionSendSessions([session], dest);
+  notionAutoFinish(outcome);
+}
+
+/** 自動保存の結果。聞かずに設定どおりにする（閉じる・録音を残す）。失敗したらタブを残して知らせる */
+function notionAutoFinish({ results, verb }) {
+  const act = verb || '保存';
+  const r = results[0];
+  els.btnNotionCancel.hidden = true;
+  notionFadeOut(els.notionAutoCloseRow);
+  els.btnNotionCloseTabs.hidden = true;
+  els.btnNotionKeepTabs.textContent = '閉じる';
+  els.btnNotionKeepTabs.onclick = notionProgressClose;
+  notionFadeIn(els.btnNotionKeepTabs);
+  if (!r || !r.ok) {
+    els.notionProgressTitle.textContent = `Notion への自動${act}に失敗しました`;
+    notionProgressSet(`${r && r.error ? r.error + '\n' : ''}タブと録音はそのまま残しています。Notion のボタンから保存し直せます。`);
+    return;
+  }
+  // 録音を残すのは、閉じる前に（閉じると「タブを閉じたら消す」で消えるため）
+  if (state.settings.notionAutoKeepAudio) setAudioPinned(r.session.id, true, { title: r.session.title });
+  // 保存中に書き足されたら閉じない（書き足した分は送っていないので、閉じると消える。notionFinish と同じ）
+  snapshotActiveToSession();
+  const changed = r.sentSig != null && sessionContentSig(r.session) !== r.sentSig;
+  if (changed) { r.session.notionUploadedAt = null; persistSessions(); renderTabs(); }
+  els.notionProgressTitle.textContent = `Notion への自動${act}が完了しました`;
+  const keep = state.settings.notionAutoKeepAudio ? '録音は残しました。' : '';
+  if (state.settings.notionAutoCloseTab && !changed) {
+    closeMultipleSessions([r.session.id], { skipConfirm: true });
+    notionProgressSet(`「${r.session.title}」を${act}して閉じました。${keep}`);
+  } else {
+    notionProgressSet(`「${r.session.title}」を${act}しました。${keep}${changed ? `（${act}中に書き足されたので、閉じずに残します。書き足した分は送っていません）` : ''}`);
+  }
 }
 
 /** クリック = 今開いているタブだけ */
@@ -8482,6 +8593,13 @@ function syncNotionSettingsUi() {
   if (!els.inputNotionToken) return;
   els.inputNotionToken.value = state.settings.notionToken || '';
   if (els.inputNotionEnabled) els.inputNotionEnabled.checked = !!state.settings.notionEnabled;
+  // v0.24.142: 録音を止めたら自動で保存
+  notionAutoDestWorking = state.settings.notionAutoDest || null;
+  if (els.inputNotionAutoSave) els.inputNotionAutoSave.checked = !!state.settings.notionAutoSave;
+  renderNotionAutoTargetOptions(state.settings.notionAutoTarget || 'last');
+  if (els.inputNotionAutoClose) els.inputNotionAutoClose.checked = !!state.settings.notionAutoCloseTab;
+  if (els.inputNotionAutoKeepAudio) els.inputNotionAutoKeepAudio.checked = !!state.settings.notionAutoKeepAudio;
+  revealSettingRow(document.getElementById('notion-auto-fields'), !!state.settings.notionAutoSave, false);
 
   if (els.notionLastTarget) {
     const t = state.settings.notionLastDataSourceTitle;
@@ -8658,6 +8776,12 @@ function saveSettingsFromForm() {
   state.settings.apiKey = els.inputApiKey.value.trim();
   if (els.inputNotionToken) state.settings.notionToken = els.inputNotionToken.value.trim();
   if (els.inputNotionEnabled) state.settings.notionEnabled = els.inputNotionEnabled.checked;   // v0.24.50
+  // v0.24.142: 録音を止めたら自動で保存
+  if (els.inputNotionAutoSave) state.settings.notionAutoSave = els.inputNotionAutoSave.checked;
+  if (els.inputNotionAutoTarget) state.settings.notionAutoTarget = els.inputNotionAutoTarget.value === 'fixed' && notionAutoDestWorking ? 'fixed' : 'last';
+  state.settings.notionAutoDest = notionAutoDestWorking;
+  if (els.inputNotionAutoClose) state.settings.notionAutoCloseTab = els.inputNotionAutoClose.checked;
+  if (els.inputNotionAutoKeepAudio) state.settings.notionAutoKeepAudio = els.inputNotionAutoKeepAudio.checked;
   updateActionButtons();   // v0.24.50: Notion 連携のオン/オフで保存ボタンの押せる/押せないが変わる
   state.settings.silenceSec = Math.max(1, Math.min(30, Number(els.inputSilenceSec.value) || 3));
   if (els.inputMidConsolidateSec) {
@@ -12556,6 +12680,16 @@ if (window.ConfirmFx) {
 applyStageStyles();
 // v0.24.132: 要約・タイトル生成・ライブ整形・ライブ要約を切り替えたら、その下の欄を出し入れ（起動時に登録。tests/browser/t-settings-ai-browser.js で押して確かめる）
 [els.inputAutoSummarize, els.inputAiEnabled, els.inputLiveSummary].forEach((box) => { if (box) box.addEventListener('change', () => applyAiSettingsVisibility(true)); });
+// v0.24.142: 録音を止めたら Notion に自動で保存（設定の欄）
+if (els.inputNotionAutoSave) els.inputNotionAutoSave.addEventListener('change', () => revealSettingRow(document.getElementById('notion-auto-fields'), els.inputNotionAutoSave.checked, true));
+if (els.btnNotionAutoPick) els.btnNotionAutoPick.addEventListener('click', async () => {
+  const token = els.inputNotionToken ? els.inputNotionToken.value.trim() : state.settings.notionToken;
+  if (token && token !== state.settings.notionToken) state.settings.notionToken = token;   // 入れたばかりのトークンでも選べるように
+  const dest = await openNotionPicker('録音を止めたときに、自動で保存する先を選びます。');
+  if (!dest) return;
+  notionAutoDestWorking = dest;
+  renderNotionAutoTargetOptions('fixed');
+});
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });
 }

@@ -3838,3 +3838,6 @@ p.settings-lead { margin: -2px 0 8px; }
 @keyframes draftBlur { from { opacity: 0.2; filter: blur(4px); } to { opacity: 1; filter: blur(0); } }
 @keyframes draftGlow { from { color: var(--accent); } }
 @media (prefers-reduced-motion: reduce) { .draft-in { animation: none !important; } }
+
+/* v0.24.142: 録音を止めたら Notion に保存する（の下の欄）。入れ物の上の線と、最初の行の上の線が重なって二重になるので、最初の行の線を外す */
+.settings-acc-box .settings-acc-body #notion-auto-fields .field-conditional-inner > .field:first-child { border-top: none; }
