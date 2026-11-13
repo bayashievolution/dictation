@@ -49,6 +49,7 @@ async function open(browser, settings, { groq, extraStorage } = {}) {
     for (const [k, v] of Object.entries(extra || {})) localStorage.setItem(k, v);
   }, [settings, extraStorage]);
   await page.reload();
+  await page.evaluate(() => state.sessions.forEach((x) => { delete x.opts; }));   // v0.24.143: 設定の値に従わせる（タブのオン・オフは t-tab-opts-browser.js）
   await page.waitForTimeout(600);
   return { ctx, page, calls };
 }
@@ -149,6 +150,7 @@ async function sendOne(page) {
     eq('保存される', [saved.transcribeEngine, saved.groqApiKey], ['groq', 'gsk_from_compare']);
     eq('右上の印は (Groq)', await page.evaluate(() => recordingLabel()), '聞き取り中 (Groq)');
     await page.reload();
+    await page.evaluate(() => state.sessions.forEach((x) => { delete x.opts; }));   // v0.24.143: 設定の値に従わせる（タブのオン・オフは t-tab-opts-browser.js）
     await page.waitForTimeout(500);
     await page.evaluate(() => { openSettings(); expandAllSettingsSections(); });   // v0.24.95: 詳細設定はたたんである
     await page.waitForTimeout(300);

@@ -63,6 +63,7 @@ async function open(browser, { settings = {}, claude = 'ok' } = {}) {
     useClaudeBridge: true, liveSummary: true, liveSummaryMin: 1, ...settings,
   });
   await page.reload();
+  await page.evaluate(() => state.sessions.forEach((x) => { delete x.opts; }));   // v0.24.143: 設定の値に従わせる（タブのオン・オフは t-tab-opts-browser.js）
   await page.waitForTimeout(800);
   return { ctx, page, seen };
 }
@@ -134,9 +135,13 @@ const summary = (page) => page.evaluate(() => ({
     // 見るのは、目次付きのライブ要約が要約タブに入っていないこと
     eq('ライブ要約は要約タブに書いていない（別のタブ）', await page.evaluate(() => !document.querySelector('#summary .live-summary-toc')), true);
 
-    console.log('■ リアルタイム要約タブの「最初から要約し直す」');
+    // v0.24.143: ［最初から要約し直す］は、ライブ要約のトグルの名前を押す働きに入れた（押すと「作り直しますか？」と聞く）
+    console.log('■ ライブ要約のトグルの名前を押す → 作り直す');
     await page.evaluate(() => { switchInnerPane('pane-live'); });
-    await page.click('#btn-live-redo');
+    await page.click('#btn-live-combo .toggle-label');
+    await page.waitForTimeout(400);
+    eq('作り直すかを聞く', await page.textContent('#confirm-title'), 'ライブ要約を作り直しますか？');
+    await page.click('#confirm-ok');
     await page.waitForTimeout(1500);
     const last = seen.claude.filter(p => p.includes('目次付きの要約')).pop();
     eq('前回に縛られず全体から組み立てる', [last.includes('いまある文字起こし全体を見て'), last.includes('【前回の要約】')], [true, false]);

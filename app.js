@@ -273,10 +273,32 @@ const PANE_META = {
  * 隠すだけで中身は消さない（オンに戻せば見える）。保存・コピー・Notion にも、
  * 出ているタブだけを載せる（隠れているものが知らないうちに送られないように）。
  */
+/* ───────── タブごとのオン・オフ (v0.24.143) ─────────
+ *
+ * やっさんの指定（2026-11-13）: ライブ整形・要約・タイトル生成・ライブ要約のトグルを、タブの上にも置く。
+ * タブのトグルは設定のトグルと同じ働きだが、**タブごとに決められる**。設定は「新しいタブの初めの値」（設定を変えても、前からあるタブはそのまま）。
+ * 中のキー: session.opts = { liveRefine, autoSummary, liveSummary }（設定の aiEnabled / autoSummarize / liveSummary に当たる）。
+ * opts を持っていない前の版のタブは、設定の値で動く（読み込むときに埋めない。前の版と同じ動きのまま）
+ */
+const TAB_OPT_SETTING = { liveRefine: 'aiEnabled', autoSummary: 'autoSummarize', liveSummary: 'liveSummary' };
+function tabOpt(sessionOrId, key) {
+  const s = typeof sessionOrId === 'string' ? state.sessions.find((x) => x.id === sessionOrId) : sessionOrId;
+  const v = s && s.opts ? s.opts[key] : undefined;
+  return v === undefined ? !!state.settings[TAB_OPT_SETTING[key]] : !!v;
+}
+function setTabOpt(session, key, on) {
+  if (!session) return;
+  session.opts = { ...(session.opts || {}), [key]: !!on };
+  persistSessions();
+}
+/** いま働いているタブ（録音中なら録音しているタブ） */
+function workingSessionId() { return state.recordingSessionId || state.activeId; }
+
 function paneVisible(id) {
   // v0.24.39: 「Claude Code」がオフならライブ要約は動かないので、タブも出さない
   // v0.24.93: ライブ要約は 7 個セットと同じ AI で作る（Gemini でも作れるようにした・やっさん「Gemini API は全てできるように」）
-  if (id === 'pane-live') return !!(state.settings.liveSummary && postEngineNow());
+  // v0.24.143: 設定かこのタブのどちらかでオンなら出す（タブのトグルでオンにできるように）
+  if (id === 'pane-live') return !!((state.settings.liveSummary || tabOpt(state.activeId, 'liveSummary')) && postEngineNow());
   return true;
 }
 function visiblePaneOrder() {
@@ -455,7 +477,7 @@ function savableHtml(html) {
  */
 function webSpeechFinalWillBeRefined() {
   // appendRawChunk が flushPendingToGemini を呼ぶ条件と同じ
-  return state.settings.inputMode === 'web-speech' && !!state.settings.aiEnabled && !!geminiKey();
+  return state.settings.inputMode === 'web-speech' && tabOpt(workingSessionId(), 'liveRefine') && !!geminiKey();   // v0.24.143: タブごと
 }
 function phaseFxMode(phase) {
   if (phase === 'draft') return state.settings.draftEffect || 'none';
@@ -513,7 +535,7 @@ const els = {
   paneLive: document.getElementById('pane-live'),                       // v0.24.25
   liveSummary: document.getElementById('live-summary'),                 // v0.24.25
   liveSummaryEmpty: document.getElementById('live-summary-empty'),      // v0.24.25
-  btnLiveRedo: document.getElementById('btn-live-redo'),                // v0.24.25
+  btnLiveRedo: document.getElementById('btn-live-combo'),               // v0.24.25（v0.24.143 からライブ要約のトグル。作っているあいだは押せなくする）
   paneChat: document.getElementById('pane-chat'),
   paneTranscriptBody: document.querySelector('#pane-transcript .pane-body'),
   paneMemoBody: document.querySelector('#pane-memo .pane-body'),   // v0.22.1
@@ -724,16 +746,23 @@ function saveSettings() {
 }
 
 function applyAiButtonState() {
+  // v0.24.143: タブのトグルは、いま開いているタブのオン・オフ
   if (els.btnRefineTranscript) {
-    const on = !!state.settings.aiEnabled;
+    const on = tabOpt(state.activeId, 'liveRefine');
     els.btnRefineTranscript.classList.toggle('on', on);
     els.btnRefineTranscript.setAttribute('aria-pressed', on ? 'true' : 'false');
     els.btnRefineTranscript.classList.toggle('needs-key', on && !geminiKey());
   }
   if (els.btnSummaryCombo) {
-    const on = !!state.settings.autoSummarize;
+    const on = tabOpt(state.activeId, 'autoSummary');
     els.btnSummaryCombo.classList.toggle('on', on);
     els.btnSummaryCombo.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  const live = document.getElementById('btn-live-combo');
+  if (live) {
+    const on = tabOpt(state.activeId, 'liveSummary');
+    live.classList.toggle('on', on);
+    live.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
 }
 
@@ -1681,7 +1710,7 @@ function appendRawChunk(text) {
   // 既存のミドル整形（maybeConsolidateShortChunks、3 段落 or 60 秒）が拾って統合・見出し付け。
   if (
     state.settings.inputMode === 'web-speech' &&
-    state.settings.aiEnabled &&
+    tabOpt(workingSessionId(), 'liveRefine') &&   // v0.24.143: タブごと
     geminiKey()
   ) {
     flushPendingToGemini();
@@ -1706,7 +1735,7 @@ function getContextForGemini(maxChars = 800) {
  * （Web Speech モードなら Gemini を一度も使わずに済む）。
  */
 function liveRefineReady() {
-  if (!state.settings.aiEnabled) return false;
+  if (!tabOpt(workingSessionId(), 'liveRefine')) return false;   // v0.24.143: タブごと
   if (geminiKey()) return true;
   return typeof claudeBridgeIsEnabled === 'function' && claudeBridgeIsEnabled();
 }
@@ -1772,7 +1801,7 @@ async function refineUnstructuredInTranscript({ force = false, showFeedback = tr
     if (showFeedback) { alert('Gemini API キーが未設定です'); openSettings(); }
     return;
   }
-  if (!force && !state.settings.aiEnabled) return;
+  if (!force && !tabOpt(state.activeId, 'liveRefine')) return;   // v0.24.143: タブごと
 
   // .paragraph でない直下ノードを収集
   const unstructuredNodes = Array.from(els.confirmed.childNodes).filter(n => {
@@ -2598,12 +2627,12 @@ function stopRecording() {
     renderTabs(); // 録音中の赤線消去
     // v0.24.25: リアルタイム要約は別のタブになったので、最終版に更新したうえで、
     // 普通の要約もこれまでどおり作る（v0.24.22〜24 は同じタブだったので、普通の要約を止めていた）
-    if (liveSummaryActive()) {
+    if (liveSummaryActive(recSessionId)) {   // v0.24.143: 止めたタブのオン・オフで（recordingSessionId はもう空）
       await runLiveSummary({ sessionId: recSessionId, final: true });
     }
     // v0.24.39: 「要約・タイトル生成」はライブ整形（aiEnabled）と独立。以前はライブ整形をオフにすると
     // 要約も止まっていた（やっさん「ここに矛盾がある。独立させてほしい」）
-    if (state.settings.autoSummarize && geminiKey()) {
+    if (tabOpt(recSessionId, 'autoSummary') && geminiKey()) {   // v0.24.143: タブごと
       await generateSummary({ silent: true, sessionId: recSessionId });
       await autoGenerateTitle({ sessionId: recSessionId });
     }
@@ -2672,8 +2701,8 @@ async function runLiveSummaryWithGemini(prompt) {
 const LIVE_SUMMARY_TIMEOUT_MS = 600000;
 
 /** いま使える状態か。設定がオンで、Claude 連携がオンで、ログイン切れ等で止まっていない */
-function liveSummaryActive() {
-  if (!state.settings.liveSummary) return false;
+function liveSummaryActive(sessionId = workingSessionId()) {
+  if (!tabOpt(sessionId, 'liveSummary')) return false;   // v0.24.143: タブごと
   // v0.24.93: 作るのは 7 個セットの AI（使う AI の表）。Claude ならログイン切れ等で止まっていないかも見る
   const engine = postEngineNow();
   if (!engine) return false;
@@ -2798,7 +2827,7 @@ function liveSummaryJumpToTranscript(li) {
  * ライブ要約を使っていないときは空（使っていない人のプロンプトを変えない）
  */
 function liveSummaryTocTitles(sessionId) {
-  if (!liveSummaryActive()) return [];
+  if (!liveSummaryActive(sessionId)) return [];
   const s = state.sessions.find((x) => x.id === sessionId);
   const html = sessionId === state.activeId && els.liveSummary ? els.liveSummary.innerHTML : ((s && s.liveSummary) || '');
   if (!html) return [];
@@ -7145,11 +7174,12 @@ function doRedo() { doPaneRedo(state.activePane || 'pane-transcript'); }
 
 function toggleAi() {
   if (!geminiKey()) { openSettings(); return; }
-  state.settings.aiEnabled = !state.settings.aiEnabled;
-  saveSettings();
+  // v0.24.143: このタブだけ切り替える（設定は新しいタブの初めの値）
+  const session = getActiveSession();
+  setTabOpt(session, 'liveRefine', !tabOpt(session, 'liveRefine'));
   applyAiButtonState();
   // ONにした瞬間、ペインの生テキストがあれば即整形
-  if (state.settings.aiEnabled) {
+  if (tabOpt(session, 'liveRefine')) {
     refineUnstructuredInTranscript({ showFeedback: false });
   }
 }
@@ -7342,7 +7372,7 @@ function paneAiName(id) {
 const EMPTY_HINTS = {
   'pane-transcript': { el: 'emptyHint', icon: 'sm-wave', role: '聞き取り', text: () => '録音を始めると、ここに文字が出ます' },
   'pane-live': { el: 'liveSummaryEmpty', icon: 'sm-clock', role: '要約', text: () => `録音中、${clampLiveSummaryMinutes(state.settings.liveSummaryMin)}分ごとに目次つきの要約ができます` },
-  'pane-summary': { el: 'summaryEmpty', icon: 'sm-note', role: '要約', text: () => state.settings.autoSummarize ? '録音を止めると、ここに要約ができます' : '「要約を生成」で作れます' },
+  'pane-summary': { el: 'summaryEmpty', icon: 'sm-note', role: '要約', text: () => tabOpt(state.activeId, 'autoSummary') ? '録音を止めると、ここに要約ができます' : '「要約・タイトル生成」で作れます' },
   'pane-chat': { el: 'chatEmpty', icon: 'sm-chat', role: '答える AI', text: () => '文字起こし・メモ・要約について質問できます' },
 };
 function renderEmptyHints() {
@@ -9120,6 +9150,8 @@ function createSession({ activate = true, title = null, skipSave = false } = {})
     },
     // v0.16.1: 記録から自動で拾った語彙と議題。手入力とは別に持ち、手入力を優先する
     autoContext: { terms: [], topicPath: [], flow: '', updatedAt: 0 },
+    // v0.24.143: タブごとのオン・オフ。設定の値で始める（設定は新しいタブの初めの値）
+    opts: { liveRefine: !!state.settings.aiEnabled, autoSummary: !!state.settings.autoSummarize, liveSummary: !!state.settings.liveSummary },
   };
   state.sessions.push(session);
   if (activate) state.activeId = id;
@@ -9851,6 +9883,8 @@ function loadActiveSessionIntoDOM() {
   renderDictBar();   // v0.20.0: タブごとに辞書が違うので、切り替えたら描き直す
   updateDiarizeButton();   // v0.21.2: 保存済みの結果もタブごとに違う
   refreshBusyIndicators(); // v0.24.27: 動いている処理の印も、そのタブのものに付け直す
+  applyAiButtonState();    // v0.24.143: タブのトグルは、そのタブのオン・オフ
+  if (typeof applyLiveSummaryTab === 'function') applyLiveSummaryTab();   // v0.24.143: ライブ要約のタブを出すかも、タブごとに変わる
   const s = getActiveSession();
   els.confirmed.innerHTML = s?.transcript || '';
   clearImageSelection();            // v0.22.1: 前のタブの画像の枠を消す
@@ -10674,7 +10708,7 @@ const ONBOARDING_STEPS = [
   {
     target: '.inner-tab[data-pane="pane-transcript"]',
     title: '文字起こし',
-    text: '話した内容がここに出ます。聞き取り方は設定の「文字起こしのモード」で選べます（Web Speech／AI で聞き取る）。「文字起こし整形」をオンにすると、AI が句読点・段落・見出しを整えます。',
+    text: '話した内容がここに出ます。聞き取り方は設定の「文字起こしのモード」で選べます（Web Speech／AI で聞き取る）。「ライブ整形」をオンにすると、AI が句読点・段落・見出しを整えます。',
   },
   {
     target: '.inner-tab[data-pane="pane-memo"]',
@@ -10690,7 +10724,7 @@ const ONBOARDING_STEPS = [
   {
     target: '.inner-tab[data-pane="pane-summary"]',
     title: '要約',
-    text: '録音を止めると自動で作られます。「要約を生成」で作り直せます。詳しさは「詳細・バランス・概要」から選べます。',
+    text: '録音を止めると自動で作られます。「要約・タイトル生成」で作り直せます。詳しさは「詳細・バランス・概要」から選べます。',
   },
   {
     target: '.inner-tab[data-pane="pane-chat"]',
@@ -10886,14 +10920,23 @@ if (els.btnSummaryCombo) {
     const hit = e.target.closest('[data-role]');
     const role = hit?.dataset.role;
     if (role === 'toggle') {
-      state.settings.autoSummarize = !state.settings.autoSummarize;
-      saveSettings();
+      // v0.24.143: このタブだけ切り替える
+      const session = getActiveSession();
+      setTabOpt(session, 'autoSummary', !tabOpt(session, 'autoSummary'));
       applyAiButtonState();
+      renderEmptyHints && renderEmptyHints();
     } else {
-      // v0.24.25: 要約タブのボタンは普通の要約に戻した。目次付きで作り直すのは
-      // リアルタイム要約タブの「最初から要約し直す」
+      // v0.24.143: 押すと聞く。もう要約があれば作り直すか（やっさんの指定）。名前のとおり、要約とタイトルを作る
       // v0.24.27: 印は generateSummary がタブごとに付け外しする（ここで付けるとタブをまたぐ）
+      snapshotActiveToSession();
+      const session = getActiveSession();
+      const has = !!(session && String(session.summary || '').replace(/<[^>]*>/g, '').trim());
+      const ok = await confirmDialog(has
+        ? { title: '要約とタイトルを作り直しますか？', message: 'いまの要約は置き換わります。', ok: '作り直す' }
+        : { title: '要約とタイトルを作りますか？', message: '', ok: '作る' });
+      if (!ok) return;
       await generateSummary({ silent: false });
+      await autoGenerateTitle({ sessionId: state.activeId, force: true });
     }
   });
 }
@@ -11253,13 +11296,29 @@ if (els.liveSummary) {
     if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
-// v0.24.25: 目次付きで最初から要約し直す（やっさん「最後、改めて要約しなおすこともできる」）
-if (els.btnLiveRedo) {
-  els.btnLiveRedo.addEventListener('click', async () => {
-    if (!liveSummaryActive()) {
-      statusNotice('error', 'ライブ要約は Claude 連携がオンのときだけ使えます', { ms: 4000 });
+// v0.24.143: ライブ要約のタブのトグル（やっさんの指定）。つまみ＝このタブのオン・オフ、名前＝押すと聞いて、目次付きで最初から作る（作り直す）。
+// 前の［最初から要約し直す］（v0.24.25）の働きは、名前を押したときに入れた
+{
+  const combo = document.getElementById('btn-live-combo');
+  if (combo) combo.addEventListener('click', async (e) => {
+    const role = e.target.closest('[data-role]')?.dataset.role;
+    const session = getActiveSession();
+    if (!session) return;
+    if (role === 'toggle') {
+      const on = !tabOpt(session, 'liveSummary');
+      setTabOpt(session, 'liveSummary', on);
+      applyAiButtonState();
+      // 録音中のタブでオンにしたら、その場から間隔ごとの更新を始める（オフなら次の回から止まる。liveSummaryTick が見る）
+      if (on && state.isRecording && state.recordingSessionId === session.id && !state.liveSummaryTimer) startLiveSummaryTimer();
       return;
     }
+    if (!postEngineNow()) { statusNotice('error', 'ライブ要約には、AI 設定で Gemini API か Claude Code をオンにしてください', { ms: 4000 }); return; }
+    snapshotActiveToSession();
+    const has = !!String(session.liveSummary || '').replace(/<[^>]*>/g, '').trim();
+    const ok = await confirmDialog(has
+      ? { title: 'ライブ要約を作り直しますか？', message: '講義全体を見て、目次付きで最初から作ります。いまのライブ要約は置き換わります。', ok: '作り直す' }
+      : { title: 'ライブ要約を作りますか？', message: '講義全体を見て、目次付きで作ります。', ok: '作る' });
+    if (!ok) return;
     // 押せなくするのは runLiveSummary がタブごとにやる (v0.24.27)
     await runLiveSummary({ sessionId: state.activeId, fresh: true, final: !state.isRecording, manual: true });
   });
@@ -11996,7 +12055,7 @@ els.memo.addEventListener('paste', (e) => {
 });
 
 els.confirmed.addEventListener('paste', () => {
-  if (!state.settings.aiEnabled || !geminiKey()) return;
+  if (!tabOpt(state.activeId, 'liveRefine') || !geminiKey()) return;   // v0.24.143: タブごと
   setTimeout(() => { refineUnstructuredInTranscript({ showFeedback: false }); }, 150);
 });
 

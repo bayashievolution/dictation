@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.142" />
+  <link rel="stylesheet" href="style.css?v=0.24.143" />
 </head>
 <body>
   <div id="app">
@@ -100,9 +100,9 @@
     <main id="main-area">
       <div id="pane-transcript" class="pane active">
         <div class="pane-header">
-          <button id="btn-refine-transcript" class="toggle-switch toggle-with-action" title="ノブ=録音中の自動整形ON/OFF／本体の『文字起こし整形』クリック=トグル状態に関わらず上から下まで全体を文脈込みで整形＋見出し付け">
+          <button id="btn-refine-transcript" class="toggle-switch toggle-with-action" title="つまみ＝このタブのライブ整形のオン・オフ／名前＝全体を整形し直して見出しを付ける">
             <span class="toggle-track" data-role="toggle"><span class="toggle-knob"></span></span>
-            <span class="toggle-label" data-role="action"><span data-icon="sparkles"></span>文字起こし整形</span>
+            <span class="toggle-label" data-role="action"><span data-icon="sparkles"></span>ライブ整形</span>
           </button>
           <!-- v0.21.0: 保管した録音をまとめて投げ直し、話者付きで作り直す -->
           <button id="btn-diarize" class="pane-btn pane-btn-icon" title="保管した録音をまとめて投げ直し、話者付きで作り直す（録音の保持がオンのときだけ）">
@@ -205,9 +205,9 @@
 
       <div id="pane-summary" class="pane">
         <div class="pane-header">
-          <button id="btn-summary-combo" class="toggle-switch toggle-with-action" title="ON=録音停止時に自動生成／OFF=生成しない／本体クリックでいつでも今すぐ生成">
+          <button id="btn-summary-combo" class="toggle-switch toggle-with-action" title="つまみ＝このタブで録音を止めたら要約・タイトルを作るか／名前＝いま作る（作り直す）">
             <span class="toggle-track" data-role="toggle"><span class="toggle-knob"></span></span>
-            <span class="toggle-label" data-role="action"><span data-icon="sparkles"></span>要約を生成</span>
+            <span class="toggle-label" data-role="action"><span data-icon="sparkles"></span>要約・タイトル生成</span>
           </button>
           <select id="summary-detail-select" class="pane-select" title="要約の詳しさ">
             <option value="low">詳細</option>
@@ -243,8 +243,10 @@
       <!-- v0.24.25: リアルタイム要約は要約と別のタブ。設定でオンのときだけタブが出る -->
       <div id="pane-live" class="pane">
         <div class="pane-header">
-          <button id="btn-live-redo" class="pane-btn" title="講義全体を見て、目次付きで最初から要約し直す（Claude）">
-            <span data-icon="sparkles"></span>最初から要約し直す
+          <!-- v0.24.143: ライブ要約のトグル（やっさんの指定）。前の［最初から要約し直す］は、名前を押したときの働きに入れた -->
+          <button id="btn-live-combo" class="toggle-switch toggle-with-action" title="つまみ＝このタブのライブ要約のオン・オフ／名前＝目次付きで最初から作る（作り直す）">
+            <span class="toggle-track" data-role="toggle"><span class="toggle-knob"></span></span>
+            <span class="toggle-label" data-role="action"><span data-icon="sparkles"></span>ライブ要約</span>
           </button>
           <button class="pane-btn pane-btn-icon" data-pane-undo="pane-live" disabled title="ライブ要約の変更を戻す（Ctrl+Z）">
             <span data-icon="undo"></span>
@@ -1226,20 +1228,20 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.142"></script>
-  <script src="motion.js?v=0.24.142"></script>
-  <script src="confirm-fx.js?v=0.24.142"></script>
-  <script src="usage.js?v=0.24.142"></script>
-  <script src="gemini.js?v=0.24.142"></script>
-  <script src="groq.js?v=0.24.142"></script>
-  <script src="notion.js?v=0.24.142"></script>
-  <script src="audio-store.js?v=0.24.142"></script>
-  <script src="claude-bridge.js?v=0.24.142"></script>
-  <script src="claude-installer.js?v=0.24.142"></script>
-  <script src="live-summary.js?v=0.24.142"></script>
-  <script src="image-store.js?v=0.24.142"></script>
-  <script src="gemini-files.js?v=0.24.142"></script>
-  <script src="term-dicts.js?v=0.24.142"></script>
-  <script src="app.js?v=0.24.142"></script>
+  <script src="icons.js?v=0.24.143"></script>
+  <script src="motion.js?v=0.24.143"></script>
+  <script src="confirm-fx.js?v=0.24.143"></script>
+  <script src="usage.js?v=0.24.143"></script>
+  <script src="gemini.js?v=0.24.143"></script>
+  <script src="groq.js?v=0.24.143"></script>
+  <script src="notion.js?v=0.24.143"></script>
+  <script src="audio-store.js?v=0.24.143"></script>
+  <script src="claude-bridge.js?v=0.24.143"></script>
+  <script src="claude-installer.js?v=0.24.143"></script>
+  <script src="live-summary.js?v=0.24.143"></script>
+  <script src="image-store.js?v=0.24.143"></script>
+  <script src="gemini-files.js?v=0.24.143"></script>
+  <script src="term-dicts.js?v=0.24.143"></script>
+  <script src="app.js?v=0.24.143"></script>
 </body>
 </html>

@@ -180,14 +180,14 @@ const eq = (label, got, want) => {
   eq('整形した字は確定＝下線なし', await deco(), 'none');
 
   console.log('\n■ 本当の道（ライブ整形オフ）: Groq の字が確定');
-  await page.evaluate(() => { state.settings.aiEnabled = false; els.confirmed.innerHTML = '';
+  await page.evaluate(() => { state.sessions.forEach((x) => { delete x.opts; }); state.settings.aiEnabled = false; els.confirmed.innerHTML = '';
     window.__p = sendAudioChunkToGemini(new Blob(['x'.repeat(3000)], { type: 'audio/webm' }), 'えーと今日は', { startsAtSilence: true, endsAtSilence: true, durationMs: 12000 }); });
   eq('区切った直後は処理＝下線', await deco(), 'underline');
   await page.evaluate(() => window.__p);
   eq('Groq の字は確定＝下線なし（ph-proc が外れる）', [await deco(), await page.evaluate(() => document.querySelector('#confirmed .paragraph').classList.contains('ph-proc'))], ['none', false]);
 
   console.log('\n■ 本当の道（Web Speech を並走させない・整形オン）: 「（文字起こし中…）」は過程の見た目なし、Groq の字は下書き、整形した字は確定');
-  await page.evaluate(() => { state.settings.aiEnabled = true; state.settings.draftStyle = 'italic'; applyStageStyles(); els.confirmed.innerHTML = '';
+  await page.evaluate(() => { state.sessions.forEach((x) => { delete x.opts; }); state.settings.aiEnabled = true; state.settings.draftStyle = 'italic'; applyStageStyles(); els.confirmed.innerHTML = '';
     window.__p = sendAudioChunkToGemini(new Blob(['x'.repeat(3000)], { type: 'audio/webm' }), '', { startsAtSilence: true, endsAtSilence: true, durationMs: 12000 }); });
   eq('（文字起こし中…）には過程の見た目を付けない', await page.evaluate(() => [...document.querySelector('#confirmed .paragraph').classList].filter((c) => c.startsWith('ph-'))), []);
   await page.waitForFunction(() => document.querySelector('#confirmed .paragraph.heard'), null, { timeout: 4000 }).catch(() => {});
@@ -198,7 +198,7 @@ const eq = (label, got, want) => {
   eq('整形した字は確定（ふつう）', await look(), ['', 'normal', 'none']);
 
   console.log('\n■ 本当の道（Web Speech を並走させない・整形オフ）: Groq の字が下書き＝確定。下書きの演出のあと確定の演出');
-  await page.evaluate(() => { state.settings.aiEnabled = false; state.settings.draftEffect = 'fade'; state.settings.confirmEffect = 'type'; els.confirmed.innerHTML = '';
+  await page.evaluate(() => { state.sessions.forEach((x) => { delete x.opts; }); state.settings.aiEnabled = false; state.settings.draftEffect = 'fade'; state.settings.confirmEffect = 'type'; els.confirmed.innerHTML = '';
     window.__p = sendAudioChunkToGemini(new Blob(['x'.repeat(3000)], { type: 'audio/webm' }), '', { startsAtSilence: true, endsAtSilence: true, durationMs: 12000 }); });
   await page.evaluate(() => window.__p);
   eq('出た直後は下書き（イタリック）', await look(), ['ph-draft', 'italic', 'none']);
@@ -209,9 +209,9 @@ const eq = (label, got, want) => {
   await page.evaluate(() => { state.settings.draftStyle = 'underline'; applyStageStyles(); });
 
   console.log('\n■ 本当の道（Web Speech だけ）: 整形が続かなければ確定、続くなら処理');
-  await page.evaluate(() => { state.settings.inputMode = 'web-speech'; state.settings.aiEnabled = false; els.confirmed.innerHTML = ''; appendRawChunk('今日は晴れです'); });
+  await page.evaluate(() => { state.settings.inputMode = 'web-speech'; state.sessions.forEach((x) => { delete x.opts; }); state.settings.aiEnabled = false; els.confirmed.innerHTML = ''; appendRawChunk('今日は晴れです'); });
   eq('整形オフ: 確定した段落は確定＝下線なし', await deco(), 'none');
-  await page.evaluate(() => { state.settings.aiEnabled = true; els.confirmed.innerHTML = ''; appendRawChunk('今日は晴れですね本当にいい天気です'); });
+  await page.evaluate(() => { state.sessions.forEach((x) => { delete x.opts; }); state.settings.aiEnabled = true; els.confirmed.innerHTML = ''; appendRawChunk('今日は晴れですね本当にいい天気です'); });
   eq('整形オン: 確定した段落は処理＝下線', await deco(), 'underline');
   await page.waitForTimeout(1500);
   eq('整形した字は確定＝下線なし', await deco(), 'none');

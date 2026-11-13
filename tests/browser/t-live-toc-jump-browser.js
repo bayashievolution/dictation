@@ -45,6 +45,7 @@ async function open(browser, settings) {
   await page.goto(URL);
   await page.evaluate((s) => localStorage.setItem('dictation:settings', JSON.stringify(s)), settings);
   await page.reload();
+  await page.evaluate(() => state.sessions.forEach((x) => { delete x.opts; }));   // v0.24.143: 設定の値に従わせる（タブのオン・オフは t-tab-opts-browser.js）
   await page.waitForTimeout(800);
   return { ctx, page, seen };
 }
@@ -119,6 +120,7 @@ const fill = (page) => page.evaluate(() => {
       persistSessions();
     });
     await page.reload();
+    await page.evaluate(() => state.sessions.forEach((x) => { delete x.opts; }));   // v0.24.143: 設定の値に従わせる（タブのオン・オフは t-tab-opts-browser.js）
     await page.waitForTimeout(800);
     eq('ボタンが付く', await page.evaluate(() => document.querySelectorAll('#live-summary .ls-goto').length), 3);
     await ctx.close();
