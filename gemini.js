@@ -130,6 +130,23 @@ function buildContextBlock(ctx) {
  */
 const NO_SPEAKER_LABEL_RULE = '- 誰が話したかは書かない。行や段落の頭に名前・「話者A」・「先生」「生徒」などのラベルを付けない（直前の文脈に付いていても、まねしない）。音声の中で呼ばれた名前は本文にそのまま書く';
 
+/**
+ * 同じ部分の別の聞き取り（Web Speech）を渡すブロック (v0.24.144)
+ * 中身が無い・整形の元と全く同じなら、何も足さない（同じものを 2 回読ませても意味がない）
+ */
+function buildAltHearingBlock(altText, mainText) {
+  const alt = String(altText || '').trim();
+  if (!alt || alt.replace(/\s+/g, '') === String(mainText || '').replace(/\s+/g, '')) return [];
+  return [
+    '【同じ部分の別の聞き取り（Web Speech・精度は低め）】',
+    alt,
+    '- 整形の元は【新しい生チャンク】。別の聞き取りは、聞き違いを確かめるためだけに使う',
+    '- 2 つで語が違い、別の聞き取りのほうが文脈に合うときだけ、その語に置き換えてよい',
+    '- 別の聞き取りにしか無い文・語句は足さない（区切りの位置がずれているため）',
+    '',
+  ];
+}
+
 /** 「聞こえていないことを書かない」を毎回はっきり伝える */
 function buildNoInventionRule({ source = '音声' } = {}) {
   // source: 「何に無い内容を足すな」の「何」。文字起こしの経路は音声そのもの。
@@ -526,6 +543,10 @@ async function refineWithGemini({
   apiKey, context, newChunk, sessionContext, joinFragments = false, maxOutputTokens = 2048,
   // v0.24.54 ①: ライブ要約の目次の見出し。見出し追加のときに言葉をそろえる（やっさん採用の案①）
   headingHints = [],
+  // v0.24.144: 同じ部分を Web Speech が聞き取った字（やっさんの案「Web Speech のものも一緒に送ると精度が高まるかな」）。
+  // 聞き取りの方式が違うと間違え方も違うので、聞き違いの確かめに使う。ただし Web Speech は遠い声に弱く、区切りの位置もずれるので、
+  // 整形の元はあくまで Groq の字。片方にしか無い文を足させない（buildAltHearingBlock）
+  altText = '',
   // v0.24.52: 録音中の整形も、連携がオンなら Claude に回す（'live-refine'）。
   // 以前は 8〜10 秒かかるので回していなかったが、effort low とセッションの使い回しで縮めた。
   // 見出し追加は 'live-heading'、全体整形は 'whole-refine' を渡してくる
@@ -577,8 +598,10 @@ async function refineWithGemini({
     '',
   ] : [];
 
+  const altBlock = buildAltHearingBlock(altText, newChunk);
   const userPrompt = [
     ...(ctxBlock ? [ctxBlock, ''] : []),
+    ...altBlock,
     '【守ること】',
     NO_SPEAKER_LABEL_RULE,
     '',

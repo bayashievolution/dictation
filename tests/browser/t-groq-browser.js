@@ -205,6 +205,18 @@ async function sendOne(page) {
     await ctx.close();
   }
 
+  console.log('\n■ Web Speech の字も整形に渡す（v0.24.144・やっさんの案）');
+  for (const on of [true, false]) {
+    const { ctx, page } = await open(browser, { ...base, aiEnabled: true, refineWithWebSpeech: on });
+    const sent = [];
+    await page.route('**/generativelanguage.googleapis.com/**', async (r) => { sent.push(r.request().postData() || ''); await r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '整形した文です。' }] }, finishReason: 'STOP' }] }) }); });
+    await page.evaluate(() => state.sessions.forEach((x) => { delete x.opts; }));
+    await page.evaluate(() => sendAudioChunkToGemini(new Blob(['x'.repeat(2000)], { type: 'audio/webm' }), 'ウェブスピーチが聞いた文です今日は', { startsAtSilence: true, endsAtSilence: true, durationMs: 15000 }));
+    await page.waitForTimeout(300);
+    eq(on ? 'オン: 整形に Web Speech の字も渡す' : 'オフ: 渡さない（前と同じ）', sent.some((b) => b.includes('ウェブスピーチが聞いた文')), on);
+    await ctx.close();
+  }
+
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');
   process.exit(fail ? 1 : 0);

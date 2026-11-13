@@ -115,6 +115,8 @@ const DEFAULT_SETTINGS = {
   //     下書き＝Web Speech の下書きの行／確定＝最後の処理（整形・整形が無ければ AI の聞き取り・AI が無ければ Web Speech の確定）／処理＝そのあいだ全部
   //   キー: 確定のエフェクトは confirmEffect をそのまま使う（v0.24.119 からの保存の値を生かす）。処理は procEffect / procStyle、確定のスタイルは finalStyle
   //   v0.24.128 の 4 段階（commit* / heard* / refineStyle）は、読み込むときに引き継ぐ（loadSettings）
+  // v0.24.144: AI で聞き取るとき、同じ部分の Web Speech の字も整形に渡す（やっさんの案・試し。はじめはオフ）
+  refineWithWebSpeech: false,
   draftEffect: 'glow',   // v0.24.141: はじめの値をグローに（やっさんの指定）
   draftStyle: 'underline',
   procEffect: 'diff',
@@ -616,6 +618,7 @@ const els = {
   inputSilenceSec: document.getElementById('input-silence-sec'),
   inputMidConsolidateSec: document.getElementById('input-mid-consolidate-sec'),   // v0.24.51
   inputAiEnabled: document.getElementById('input-ai-enabled'),
+  inputRefineWithWs: document.getElementById('input-refine-with-ws'),
   inputAutoStop: document.getElementById('input-auto-stop'),
   inputAutoStopSec: document.getElementById('input-auto-stop-sec'),
   inputAutoSummarize: document.getElementById('input-auto-summarize'),
@@ -4732,6 +4735,8 @@ async function transcribeChunkWithGroq(blob, targetEl, edges, provisionalText = 
       sessionContext,
       context: getContextForGemini(),
       newChunk: raw,
+      // v0.24.144: 設定がオンなら、同じ部分の Web Speech の字も渡す（聞き違いの確かめに）
+      altText: state.settings.refineWithWebSpeech ? provisionalText : '',
     });
     return { text: (refined && refined.trim()) ? refined : raw, engine: 'Groq' };
   } catch (e) {
@@ -4789,6 +4794,7 @@ function applyAiSettingsVisibility(animated = true) {
   // v0.24.132: ライブ整形がオフなら「ライブ整形のタイミング」「見出し追加のタイミング」、ライブ要約がオフなら「ライブ要約の間隔」を隠す（やっさんの指定）
   revealSettingRow(document.getElementById('live-refine-sec-field'), on(els.inputAiEnabled), animated);
   revealSettingRow(document.getElementById('mid-consolidate-field'), on(els.inputAiEnabled), animated);
+  revealSettingRow(document.getElementById('refine-with-ws-field'), on(els.inputAiEnabled), animated);   // v0.24.144
   revealSettingRow(document.getElementById('live-summary-min-field'), on(els.inputLiveSummary), animated);
 }
 
@@ -8710,6 +8716,7 @@ function openSettings() {
   if (els.inputClaudeFallback) els.inputClaudeFallback.checked = !!state.settings.claudeFallbackGemini;   // v0.24.58
   if (els.inputLiveSummaryMin) els.inputLiveSummaryMin.value = clampLiveSummaryMinutes(state.settings.liveSummaryMin);
   els.inputAiEnabled.checked = state.settings.aiEnabled;
+  if (els.inputRefineWithWs) els.inputRefineWithWs.checked = !!state.settings.refineWithWebSpeech;   // v0.24.144
   els.inputAutoStop.checked = state.settings.autoStopEnabled;
   els.inputAutoStopSec.value = state.settings.autoStopSec;
   els.inputAutoSummarize.checked = state.settings.autoSummarize;
@@ -8823,6 +8830,7 @@ function saveSettingsFromForm() {
   if (els.inputLiveSummaryMin) state.settings.liveSummaryMin = clampLiveSummaryMinutes(els.inputLiveSummaryMin.value);
   applyLiveSummaryTab();   // v0.24.25: オン/オフでタブを出し入れする
   state.settings.aiEnabled = els.inputAiEnabled.checked;
+  if (els.inputRefineWithWs) state.settings.refineWithWebSpeech = els.inputRefineWithWs.checked;   // v0.24.144
   state.settings.autoStopEnabled = els.inputAutoStop.checked;
   state.settings.autoStopSec = Math.max(30, Math.min(600, Number(els.inputAutoStopSec.value) || 120));
   state.settings.autoSummarize = els.inputAutoSummarize.checked;
@@ -12553,6 +12561,7 @@ if (els.inputClaudeCode) {
     setChk(els.inputLiveSummary, d.liveSummary);
     setVal(els.inputLiveSummaryMin, d.liveSummaryMin);
     setChk(els.inputAutoSummarize, d.autoSummarize);
+    setChk(els.inputRefineWithWs, d.refineWithWebSpeech);   // v0.24.144
     applyAiSettingsVisibility(true);   // v0.24.132: 要約の詳しさの出し入れも戻す
     const det = { low: els.summaryDetailLow, medium: els.summaryDetailMedium, high: els.summaryDetailHigh }[d.summaryDetail || 'medium'];
     if (det) det.checked = true;

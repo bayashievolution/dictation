@@ -3746,3 +3746,9 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 録音中・止めたときの判断は、録音しているタブのオン・オフで（liveRefineReady・webSpeechFinalWillBeRefined・止めたあとの要約・liveSummaryActive）。止めたあとは recordingSessionId が空なので、止めたタブを渡す
   - ライブ要約のタブは、設定かこのタブのどちらかでオンなら出す（タブのトグルでオンにできるように）
   - テスト: `tests/browser/t-tab-opts-browser.js`。前からのテスト 4 本は、途中で設定の値を変えて確かめていたので、タブのオン・オフを消して設定に従わせるように直した
+- 2026-11-13 (v0.24.144): **整形に、同じ部分の Web Speech の字も渡せるように（試し・はじめはオフ）**（やっさんの案「Web Speech のものも一緒に送ると精度が高まるかな」）
+  - 設定 → 詳細設定 → AI の動き:「Web Speech の字も整形に渡す」（ライブ整形がオフなら隠す）。AI で聞き取る（Groq）とき、整形（Claude / Gemini）に Groq の字と一緒に渡す
+  - ねらい: 聞き取りの方式が違うと間違え方も違う。Groq の聞き違いを Web Speech が正しく拾っていれば直せる
+  - 気をつけたこと: Web Speech は遠い声に弱く、区切りの位置もずれる。整形の元は Groq の字で、Web Speech は聞き違いの確かめだけ、片方にしか無い文・語句は足さない、と添える（buildAltHearingBlock）。空・同じ字なら何も足さない
+  - 比べかた: 保管している録音には Web Speech の字が残っていないので、比較ページで後から比べることはできない（最初に「比較ページで比べられる」と言ったのは見込み違い）
+  - テスト: `tests/t-alt-hearing.js`（v0.24.143 に当てると 4 件落ちる）、`tests/browser/t-groq-browser.js`（オン・オフで整形に渡るか）
