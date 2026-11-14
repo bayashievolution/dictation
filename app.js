@@ -857,6 +857,8 @@ function endStatusTask(key, { restore = true } = {}) {
 }
 
 function restoreStatus() {
+  // v0.24.145: Claude の返事が遅い・試し直している・スタンバイ後なら、そちらを出す（paintClaudeWatch）
+  if (typeof claudeWatchPick === 'function' && claudeWatchPick()) { cwShownKey = ''; paintClaudeWatch(); return; }
   const task = statusTasks[statusTasks.length - 1];
   if (task) { setStatus('listening', task.label); return; }
   setStatus(state.isRecording ? 'listening' : 'idle',
@@ -982,6 +984,13 @@ function installStatusIsland() {
       schedule();
     },
     relayout: schedule,
+    /** v0.24.145: 字の出し入れの動きをせずに入れ替える（待っている時間が 1 秒進むとき。見本で「スクロールしてしまう」と言われた） */
+    setQuiet(label) {
+      const t = String(label == null ? '' : label);
+      shownText = t;
+      text.textContent = t;
+      schedule();
+    },
   };
   // クラスの付け外し（has-detail で右に › が付く等）で大きさが変わることもあるので見張る
   new MutationObserver(schedule).observe(box, { attributes: true, attributeFilter: ['class'] });
@@ -997,6 +1006,88 @@ function installStatusIsland() {
     Motion.animate(text, { opacity: 1 }, { spring: M.contentIn }).then((d) => { if (d) Motion.clear(text); });
   });
 }
+
+/* ───────── Claude の返事が遅い・試し直している・スタンバイ後 (v0.24.145) ─────────
+ *
+ * やっさん（2026-11-14）「正常動作の時は特に出さなくていいけど、リトライしてるとか、そういうときは右上の表示で分かるように」。
+ * 見本（https://claude.ai/artifact/WiLp7kmj4F1n8V942Ss73a）で OK をもらった形:
+ *   いつもの 2 倍を過ぎた → オレンジ・砂時計「Claude の返事を待っています 3:20」（時間は 1 秒ずつ。字の出し入れの動きはしない）
+ *   試し直している       → オレンジ・注意「要約を試し直しています（2/3 回目）」
+ *   スタンバイから戻った → オレンジ・注意「スタンバイ後、要約をやり直しています」
+ *   押すと、くわしく（待つ上限まであと何分か・あと何回試し直すか）。あきらめたときは今までどおり赤のお知らせ
+ * 呼び出しの一覧と「いつも」の長さは claude-watch.js。お知らせ（statusNotice）を出している最中は、それが引っ込むまで待つ
+ */
+const CLAUDE_FEATURE_NAME = {
+  summary: '要約', title: 'タイトル', 'whole-refine': '整形', 'live-refine': '整形', 'live-heading': '見出し追加',
+  chat: '質問の答え', 'memo-refine': 'メモの整形', 'live-summary': 'ライブ要約', 'context-extract': '文脈の読み取り',
+};
+let cwShownKey = '';
+let cwTimer = 0;
+const cwMmss = (sec) => { const s = Math.max(0, Math.floor(sec)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+/** 知らせるべき呼び出し（あとから始まったもの）と、その種類 */
+function claudeWatchPick() {
+  if (typeof claudeWatchCalls !== 'function') return null;
+  const now = Date.now();
+  let pick = null;
+  for (const c of claudeWatchCalls()) {
+    const el = (now - c.startedAt) / 1000;
+    let kind = null;
+    if (c.mode === 'wake') kind = 'wake';
+    else if (c.mode === 'retry') kind = 'retry';
+    else if (el > Math.max(20, 2 * claudeWatchTypicalSec(c.feature))) kind = 'wait';
+    if (kind) pick = { c, kind, el };
+  }
+  return pick;
+}
+function claudeWatchText({ c, kind, el }) {
+  const name = CLAUDE_FEATURE_NAME[c.feature] || '処理';
+  const leftSec = c.timeoutMs ? c.timeoutMs / 1000 - el : 0;
+  const limit = c.timeoutMs ? `待つ上限：${Math.round(c.timeoutMs / 60000)} 分（あと ${cwMmss(leftSec)}）\n` : '';
+  const left = Math.max(0, c.retries - c.attempt);
+  const then = left > 0 ? `試し直します（あと ${left} 回）` : 'あきらめて、お知らせします';
+  if (kind === 'wake') {
+    return { label: `スタンバイ後、${name}をやり直しています`,
+      detail: `スタンバイから戻ったので、${name}をやり直しています\nPC がスタンバイになっているあいだに、Claude の処理が止まったとみられます。\n上限まで待たずに、最初からやり直しています。` };
+  }
+  if (kind === 'retry') {
+    return { label: `${name}を試し直しています（${c.attempt}/${c.retries} 回目）`,
+      detail: `${name}を試し直しています（${c.attempt}/${c.retries} 回目）\n前の回は ${Math.round(c.prevWaitMs / 60000)} 分待っても Claude から返事がありませんでした。\n${limit}このあとも返事が無ければ、${then}。` };
+  }
+  return { label: `Claude の返事を待っています ${cwMmss(el)}`,
+    detail: `Claude の返事を待っています（${cwMmss(el)}・${name}）\nいつもは ${Math.round(claudeWatchTypicalSec(c.feature))} 秒ほどで終わる処理です。\n${limit}上限を過ぎても返事が無ければ、${then}。` };
+}
+function paintClaudeWatch() {
+  if (!els.status) return;
+  const p = claudeWatchPick();
+  if (!p) {
+    if (cwShownKey) {
+      cwShownKey = '';
+      els.status.classList.remove('has-detail', 'cw-wait', 'cw-retry');
+      if (!statusNoticeTimer) { statusNoticeDetail = ''; closeStatusDetail(); restoreStatus(); }
+    }
+    return;
+  }
+  if (statusNoticeTimer) return;   // お知らせを出している最中は、引っ込むまで待つ（dismissStatusNotice → restoreStatus がここへ戻す）
+  const { label, detail } = claudeWatchText(p);
+  statusNoticeDetail = detail;
+  const key = `${p.kind}:${p.c.id}`;
+  if (key !== cwShownKey) {
+    cwShownKey = key;
+    setStatus('caution', label, label + '（押すと詳細）');
+    els.status.classList.add('has-detail', p.kind === 'wait' ? 'cw-wait' : 'cw-retry');
+  } else if (statusIsland) {
+    statusIsland.setQuiet(label);   // 時間が進むだけ。字の出し入れの動きはしない
+    els.status.title = label + '（押すと詳細）';
+  } else {
+    els.status.textContent = label;
+  }
+}
+window.onClaudeWatchChange = () => {
+  const busy = typeof claudeWatchCalls === 'function' && claudeWatchCalls().length > 0;
+  if (busy && !cwTimer) cwTimer = setInterval(paintClaudeWatch, 1000);
+  if (!busy && cwTimer) { clearInterval(cwTimer); cwTimer = 0; }
+  paintClaudeWatch();
+};
 
 function setStatus(mode, label, detail) {
   if (statusIsland) statusIsland.prepare(label);   // v0.24.82: class を書き換える前に、いまの字の場所を覚える
@@ -2687,6 +2778,18 @@ function refreshBusyIndicators() {
  * 文面は Claude と同じ（buildLiveSummaryPrompt）。返す形も claudeBridgeRun にそろえる（{ ok, text, seconds, error }）。
  * feature 'live-summary' は Claude の振り分けの対象に入っていないので、_callGemini はそのまま Gemini に送る
  */
+/** ライブ要約を Claude で（v0.24.145: 見張りつき。スタンバイから戻ったら、待たずに 1 回やり直す） */
+async function runLiveSummaryWithClaude(prompt) {
+  const opts = { effort: 'low', timeoutMs: LIVE_SUMMARY_TIMEOUT_MS };
+  if (typeof claudeWatchRun !== 'function') return claudeBridgeRun(prompt, opts);
+  let r = await claudeWatchRun(prompt, opts, { feature: 'live-summary' });
+  if (r.wake) {
+    diagLog.info('スタンバイから戻ったので、ライブ要約を待たずにやり直します');
+    r = await claudeWatchRun(prompt, opts, { feature: 'live-summary', mode: 'wake' });
+  }
+  return r;
+}
+
 async function runLiveSummaryWithGemini(prompt) {
   const t0 = Date.now();
   try {
@@ -2887,7 +2990,7 @@ async function runLiveSummary({ sessionId, final = false, fresh = false, manual 
     // やっさんの手元では 144.8秒かかり、次の回は 180秒で時間切れになっていた
     const r = engine === 'gemini'
       ? await runLiveSummaryWithGemini(prompt)
-      : await claudeBridgeRun(prompt, { effort: 'low', timeoutMs: LIVE_SUMMARY_TIMEOUT_MS });
+      : await runLiveSummaryWithClaude(prompt);
     if (!r.ok) throw new Error(r.error || `${who} で処理できませんでした`);
     const norm = normalizeLiveSummary(r.text);
     if (!norm.ok) diagLog.info('ライブ要約: 目次が見つからない形で返ってきました（そのまま表示します）');

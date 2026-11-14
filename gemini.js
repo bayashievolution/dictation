@@ -415,14 +415,29 @@ async function _tryClaudeBridge(body, feature) {
   const baseMs = typeof claudeBridgeTimeoutFor === 'function' ? claudeBridgeTimeoutFor(prompt.length, live) : (live ? 120000 : 180000);
   const tries = strict ? 1 + (typeof CLAUDE_BRIDGE_RETRIES === 'number' ? CLAUDE_BRIDGE_RETRIES : 3) : 1;
   let r;
-  for (let attempt = 0; attempt < tries; attempt++) {
+  // v0.24.145: 見張りつきで呼ぶ（claude-watch.js）。右上に「返事を待っています」「試し直しています」「スタンバイ後、やり直しています」を出すため。
+  // スタンバイから戻ったら返事をあきらめ、すぐやり直す（試し直しの回数には数えない。何度もスタンバイしても 2 回まで）
+  let attempt = 0, wakes = 0, mode = 'run', prevWaitMs = 0;
+  for (;;) {
     // v0.24.58: 試し直すたびに少し長く待つ（時間切れで落ちたなら、同じ長さで待っても同じ結果になりやすい）
     const timeoutMs = typeof claudeBridgeRetryTimeout === 'function' ? claudeBridgeRetryTimeout(baseMs, attempt) : baseMs;
-    r = await claudeBridgeRun(prompt, live ? { effort: 'low', timeoutMs, session: true } : { timeoutMs });
+    const opts = live ? { effort: 'low', timeoutMs, session: true } : { timeoutMs };
+    r = typeof claudeWatchRun === 'function'
+      ? await claudeWatchRun(prompt, opts, { feature, attempt, retries: tries - 1, mode, prevWaitMs })
+      : await claudeBridgeRun(prompt, opts);
+    if (r.wake && wakes < 2) {
+      wakes++;
+      mode = 'wake';
+      if (window.diagLog) window.diagLog.info(`スタンバイから戻ったので、Claude Code の返事を待たずにやり直します（${feature}）`);
+      continue;
+    }
     if (r.ok && r.text) break;
     const more = attempt + 1 < tries && typeof claudeBridgeShouldRetry === 'function' && claudeBridgeShouldRetry(r.error);
     if (!more) break;
     if (window.diagLog) window.diagLog.info(`Claude Code で失敗したので試し直します（${feature} / ${attempt + 1}回目の試し直し・待つのは${Math.round(claudeBridgeRetryTimeout(baseMs, attempt + 1) / 1000)}秒）: ${r.error}`);
+    prevWaitMs = timeoutMs;
+    attempt++;
+    mode = 'retry';
     await _sleep(2000);
   }
   if (r.ok && r.text) {

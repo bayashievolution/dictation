@@ -3841,3 +3841,21 @@ p.settings-lead { margin: -2px 0 8px; }
 
 /* v0.24.142: 録音を止めたら Notion に保存する（の下の欄）。入れ物の上の線と、最初の行の上の線が重なって二重になるので、最初の行の線を外す */
 .settings-acc-box .settings-acc-body #notion-auto-fields .field-conditional-inner > .field:first-child { border-top: none; }
+
+/* v0.24.145: 右上の表示を、名前の上に重ねて伸ばせるように（見本 https://claude.ai/artifact/WiLp7kmj4F1n8V942Ss73a ・やっさん「ばっさんディクテーションの文字の上にまで伸ばしてもいい」）。
+   右端から左へ伸び、マイクの絵の右まで。地は透けない色にする（下の名前が透けて見えないように。色はいつもの色を帯の色に混ぜたもの） */
+#titlebar { position: relative; }
+.titlebar-right { position: absolute; top: 0; bottom: 0; right: 16px; left: 58px; justify-content: flex-end; pointer-events: none; z-index: 5; }
+.titlebar-right > * { pointer-events: auto; }
+.status { max-width: 100%; margin-right: 0; }
+.status.listening { background: color-mix(in srgb, var(--accent) 20%, var(--bg-elevated)); }
+.status.error { background: color-mix(in srgb, var(--danger) 20%, var(--bg-elevated)); }
+/* Claude の返事が遅い・試し直している・スタンバイ後（オレンジ・押すとくわしく）。絵は SUMADO の線の絵（砂時計・注意） */
+.status.caution { background: color-mix(in srgb, var(--caution) 20%, var(--bg-elevated)); color: var(--caution); cursor: pointer; }
+.status.caution .status-text::before {
+  content: ''; display: inline-block; width: 13px; height: 13px; margin-right: 5px; vertical-align: -2px; background: currentColor;
+  -webkit-mask: var(--cw-icon) center / contain no-repeat; mask: var(--cw-icon) center / contain no-repeat;
+}
+.status.caution .status-text { font-variant-numeric: tabular-nums; }
+.status.cw-wait { --cw-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3.5h10M7 20.5h10M8 3.5c0 4 8 5 8 8.5s-8 4.5-8 8.5M16 3.5c0 4-8 5-8 8.5s8 4.5 8 8.5'/%3E%3C/svg%3E"); }
+.status.cw-retry { --cw-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4l9 15.5H3z'/%3E%3Cpath d='M12 10v4.5M12 17h.01'/%3E%3C/svg%3E"); }
