@@ -38,7 +38,7 @@ const reset = (fn) => { calls = []; responder = fn || null; };
     ? { json: { results: [{ id: 'tog1' }] } } : { json: {} });
   await ctx.notionAppendToNote({
     token: 't', pageId: 'PAGE1', pageUrl: 'https://notion.so/x',
-    title: '講義3回目', dateTs: new Date('2026-10-22T13:05:00').getTime(),
+    title: '講義3回目', dateTs: new Date('2026-10-22T13:05:00+09:00').getTime(),   // v0.24.146: 見出しは日本時間で書くので、日本時間で作る
     toggles: [{ label: '文字起こし', blocks: [{ x: 1 }] }],
   });
   // 新しいページを作ってはいけない。追記しに来ただけ

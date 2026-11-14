@@ -7756,6 +7756,8 @@ async function sendQuickChatMessage() {
 /* ───────── Auto title ───────── */
 
 function formatDatePart(ts) {
+  // v0.24.146: 日本時間で（notion.js の jstParts。環境の時刻帯が UTC でも 9 時間ずれないように・カルディから）
+  if (typeof jstParts === 'function') { const p = jstParts(ts); return `${p.month}/${p.day} ${p.hour}:${p.minute}`; }
   const d = new Date(ts);
   const pad = x => String(x).padStart(2, '0');
   return `${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -9233,6 +9235,8 @@ function persistSessions() {
 }
 
 function defaultTitle() {
+  // v0.24.146: 日本時間で（formatDatePart と同じ）
+  if (typeof jstParts === 'function') return formatDatePart(Date.now());
   const n = new Date();
   const pad = x => String(x).padStart(2, '0');
   return `${pad(n.getMonth()+1)}/${pad(n.getDate())} ${pad(n.getHours())}:${pad(n.getMinutes())}`;

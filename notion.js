@@ -176,18 +176,34 @@ async function notionGetSchema(token, dataSourceId) {
 }
 
 /**
- * ミリ秒のタイムスタンプを、ローカルのタイムゾーンを保った ISO 8601 文字列にする。
+ * 日本時間（Asia/Tokyo）の年月日・時分秒 (v0.24.146)
+ *
+ * カルディから（2026-11-14）: 講義ノートの見出し「<名前>(MM/DD HH:MM)（YYYY-MM-DD HH:MM）」の時刻が UTC のまま入っていた
+ * （10:04 に始めた録音が「01:04」）。前は動いている環境の時刻帯（getHours など）で書いていたので、
+ * その環境が UTC だと 9 時間ずれる。やっさんは日本で使うので、環境の時刻帯に関係なく日本時間で書く。
+ * 日本には夏時間が無いので、時差はいつも +09:00
+ * @returns {{year:string, month:string, day:string, hour:string, minute:string, second:string}} どれも 2 桁（年は 4 桁）の文字
+ */
+const JST_TZ = 'Asia/Tokyo';
+const _jstFmt = new Intl.DateTimeFormat('en-CA', {
+  timeZone: JST_TZ, hourCycle: 'h23',
+  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+});
+function jstParts(ts) {
+  const o = {};
+  for (const p of _jstFmt.formatToParts(new Date(ts))) o[p.type] = p.value;
+  return o;
+}
+
+/**
+ * ミリ秒のタイムスタンプを、日本時間の ISO 8601 文字列にする（時差つき）。例: 2026-11-13T12:38:00+09:00
  * toISOString() だと UTC に変換されてしまい、Notion 上で日付が前日にずれることがある。
- * 例: 2026-08-30T14:30:00+09:00
+ * v0.24.146: 前は「動いている環境の時刻帯」で書いていた（瞬間としては正しいが、環境が UTC だと +00:00 で送り、見出しの時刻もずれた）。
+ * 名前は前のまま（呼んでいるところを変えないため）
  */
 function notionLocalIso(ts) {
-  const d = new Date(ts);
-  const pad = n => String(Math.floor(Math.abs(n))).padStart(2, '0');
-  const off = -d.getTimezoneOffset();
-  const sign = off >= 0 ? '+' : '-';
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-    + `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-    + `${sign}${pad(off / 60)}:${pad(off % 60)}`;
+  const p = jstParts(ts);
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}+09:00`;
 }
 
 /* ───────── リッチテキスト / ブロック生成 ───────── */
