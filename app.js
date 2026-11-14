@@ -108,14 +108,38 @@ window.diagLog = diagLog; // gemini.js 等から info() を呼べるように公
 
 const DEFAULT_SETTINGS = {
   apiKey: '',
+  // v0.24.120: Web Speech の下書きの出かた・スタイル（やっさんの指定「文字起こしエフェクト」）。スタイルの既定は前と同じイタリック
+  // v0.24.133: 聞き取り中の表示は「下書き・処理・確定」の 3 つの過程で決める（やっさん「何で処理したかではなく、過程で演出を決めたい」）。
+  //   PC で文字を打つと 下線（下書き）→ 変換（処理）→ Enter（確定）。それをアプリが自動でしていることを見せる。
+  //   どの処理がどの過程に当たるかは、そのときの設定から自動で決める（phaseOfWebSpeechFinal など）:
+  //     下書き＝Web Speech の下書きの行／確定＝最後の処理（整形・整形が無ければ AI の聞き取り・AI が無ければ Web Speech の確定）／処理＝そのあいだ全部
+  //   キー: 確定のエフェクトは confirmEffect をそのまま使う（v0.24.119 からの保存の値を生かす）。処理は procEffect / procStyle、確定のスタイルは finalStyle
+  //   v0.24.128 の 4 段階（commit* / heard* / refineStyle）は、読み込むときに引き継ぐ（loadSettings）
+  // v0.24.144: AI で聞き取るとき、同じ部分の Web Speech の字も整形に渡す（やっさんの案・試し。はじめはオフ）
+  refineWithWebSpeech: false,
+  draftEffect: 'glow',   // v0.24.141: はじめの値をグローに（やっさんの指定）
+  draftStyle: 'underline',
+  procEffect: 'diff',
+  procStyle: 'underline',
+  confirmEffect: 'diff',
+  finalStyle: 'none',
   silenceSec: 3,
+  // v0.24.51: 見出し追加（ミドル整形＝溜まった文字起こしをまとめ直して見出しを付ける）のタイミング（秒）。
+  // 以前は「3段落たまったら、または60秒」で、段落の数の条件はやっさんの指定でなくした
+  midConsolidateSec: 300,
   aiEnabled: true,
   autoStopSec: 120,
   autoStopEnabled: true,
   autoSummarize: true,
+  // v0.24.22: リアルタイム要約（目次付き・Claude 連携のみ）。間隔は分
+  liveSummary: false,
+  liveSummaryMin: 10,
+  // v0.24.58: Claude で失敗したら Gemini に回すか。既定はオフ（料金を増やさないほう。オフなら Claude で3回試し直す）
+  claudeFallbackGemini: false,
   summaryDetail: 'medium',
   appZoom: 100,
-  paneOrder: ['pane-transcript', 'pane-memo', 'pane-summary', 'pane-chat'],
+  // v0.24.26: ライブ要約は既定で要約の左（やっさんの指定）
+  paneOrder: ['pane-transcript', 'pane-memo', 'pane-live', 'pane-summary', 'pane-chat'],
   transcriptFont: 'sans',
   transcriptSize: 15,
   memoFont: 'sans',
@@ -125,9 +149,50 @@ const DEFAULT_SETTINGS = {
   chatFont: 'sans',
   chatSize: 14,
   inputMode: 'web-speech',
+  // v0.24.83: Gemini モードの中で、音声を文字にするところだけ Groq の Whisper（無料）に替えられる。
+  // 録音・区切り・話者判別（Gemini）はそのまま。新しいキーなので前の版に戻しても読めなくなるものは無い
+  // v0.24.92: 既定は無料で済む Groq（使えなければ Gemini に回る。usesGroqTranscribe）。前に保存した値はそのまま
+  transcribeEngine: 'groq',   // gemini / groq
+  // v0.24.92: 使う AI の表の「7 個セット」（ライブ整形・全体整形・メモの整形・タイトル・要約・質問・文脈の抽出）。
+  // 未設定は Claude を先に（無料で済むほう）。選んだほうが使えなければ、もう一方に回る（postEngineNow）
+  postEngine: undefined,   // claude / gemini
+  groqApiKey: '',
+  // v0.24.88: AI 設定のトグル。切ってもキーは消さず「使わない」だけ。未設定（それ以前の設定）はキーがあればオンで始める（loadSettings）
+  geminiEnabled: undefined,
+  groqEnabled: undefined,
   audioDeviceId: '',
   audioChunkSec: 12,
   audioMinChunkBytes: 400, // 旧1200から感度↑。小さい発話（小声・短語）もGeminiへ送る
+  // v0.18.0: 無音位置での区切り。audioChunkSec は「最短」、audioChunkMaxSec は「最長」。
+  // 最短を過ぎたら次の無音の切れ目で切り、最長に達したら無音でなくても切る。
+  audioSilenceCut: true,
+  audioChunkMaxSec: 20,
+  /* v0.19.0: 録音音声の一時保管（話者判別用）
+   *
+   * **既定は保持しない。** 「文字起こしはよいが録音の保存はダメ」という
+   * 同意の場面は普通にあるので、こちらを既定にする。
+   * この設定が制御するのは「端末に残すか」だけで、Gemini モードは live の
+   * 時点ですでに音声を Google に送っている（設定 UI にもそう書く）。 */
+  // v0.20.0: 自作の語彙辞書 [{id, name, terms[]}]。プリセットは term-dicts.js 側
+  termDicts: [],
+  audioKeepRecording: false,
+  sumadoIslandMeter: false,   // v0.24.37: SUMADO の中で録音中、アイランドに声の大きさのメーターを出す（既定はオフ）
+  // v0.21.3: 既定を close にした。repass（話者判別が終わったら消す）はいちばん早く
+  // 消えるが、**同じ録音に2回目をかけられない**。どちらもタブを閉じれば必ず消えるので、
+  // 「できるだけ早く消す」という方針は close でも満たせる。
+  // 値 'repass' はすでに保存されている設定を読めなくしないため据え置き
+  audioRetention: 'close',   // close / repass / 1d / 7d / manual
+  // v0.24.103: 「残す」にした録音（検証用など）。{ sessionId: { title, savedAt } }。どの設定でも、タブを閉じても消さない。
+  // 名前を覚えておくのは、タブを閉じたあとも一覧で何の録音か分かるようにするため
+  audioPinned: {},
+  // v0.24.0: 後処理を利用者自身の Claude Code に回す。既定はオフ
+  //（Gemini は置き換えない。持っている人だけが使う足し算の機能）
+  useClaudeBridge: false,   // v0.24.39 から画面の名前は「一部を Claude Code で処理する」（キーは据え置き）
+  // v0.24.39: Claude Code 連携そのものを使うか（ライブ要約と、上の振り分けの前提）。
+  // 未設定（それ以前の設定）は loadSettings で useClaudeBridge / liveSummary から引き継ぐ
+  claudeCode: undefined,
+  // 音声認識用途では 128kbps は過剰。64kbps なら 90分で約43MB
+  audioBitrate: 64000,
   // v0.13.24: 旧 webspeechInterimDebounceMs / webspeechInterimOpacity (v0.13.9) は撤去。
   // 字幕ウィンドウ側の cap-para-interim を v0.13.17 で撤去済み・UI も v0.13.23 で
   // 削除済み。設定値だけ残しても読み手なしで意味ない。
@@ -156,12 +221,30 @@ const DEFAULT_SETTINGS = {
   // notionLastDataSourceId / Title は「前回の保存先」を覚えておくためのもの。
   // 保存先は毎回聞くが、前回の場所が最初から選ばれた状態で出る（やっさん指示）。
   notionToken: '',
+  // v0.24.50: Notion 連携を使うか。未設定（それ以前の設定）は loadSettings でトークンの有無から決める
+  notionEnabled: undefined,
+  // v0.24.142: 録音を止めたら Notion に自動で保存する（やっさんの指定 2026-11-13）。
+  //   notionAutoTarget: 'last'＝前回の保存先（手で保存したときの保存先に合わせて変わる・いつも新しいノート）／'fixed'＝設定で決めた保存先（notionAutoDest）
+  //   notionAutoDest: 保存先の小窓（openNotionPicker）が返す形のまま { id, title, titleProp, dateProp, pageId, pageUrl, pageTitle }。pageId があれば既存のノートに追記
+  //   v0.21.4 で「自動で閉じる」を設定として覚えない、と決めていた（聞かれずにタブが消えるため）。
+  //   今回はやっさんが設定として明示的に求めたので、自動保存のときだけの設定として持つ（手で保存するときの小窓は今までどおり毎回オフから）
+  notionAutoSave: false,
+  notionAutoTarget: 'last',
+  notionAutoDest: null,
+  notionAutoCloseTab: false,
+  notionAutoKeepAudio: false,
   notionLastDataSourceId: '',
   notionLastDataSourceTitle: '',
   // v0.15.0: 録音日時を入れる日付プロパティ名。'' なら使わない（タイトルに日時が残る）
   notionLastDatePropName: '',
   // v0.15.0: 保存できたタブを自動で閉じる。進捗ダイアログのチェックと連動して記憶する
-  notionAutoClose: false,
+  // v0.16.0: 文字起こしに渡す文脈の既定値。新しいタブはこれを引き継いで始まる
+  // （同じ講義を何度も録るので、毎回入力し直さずに済ませるため）
+  defaultContextField: '',
+  defaultContextSpeakers: '',
+  defaultContextTerms: '',
+  // v0.17.0: Gemini モードでも Web Speech を並走させ、確定までの間を未確定表示で埋める
+  geminiLiveDisplay: true,
 };
 // v0.13.24: WEB_SPEECH_DEFAULTS（v0.13.9 「Web Speech 設定をデフォルトに戻す」
 // ボタン用のリセット値）は UI 撤去済み（v0.13.23）に伴い削除。
@@ -177,8 +260,52 @@ const PANE_META = {
   'pane-transcript': { label: '文字起こし', icon: 'mic' },
   'pane-memo':       { label: 'メモ',       icon: 'pencil' },
   'pane-summary':    { label: '要約',       icon: 'file-text' },
+  // v0.24.25: 設定でリアルタイム要約がオンのときだけタブを出す（paneVisible）
+  // 画面の名前は「ライブ要約」（v0.24.26 で「ライブ要約」に縮めたが、やっさん「リツイートみたい」で v0.24.28 に変更）。
+  // 中の名前（pane-live / liveSummary / 設定の liveSummary）は保存データに入っているので変えない
+  'pane-live':       { label: 'ライブ要約', icon: 'list' },
   'pane-chat':       { label: '質問',       icon: 'message-circle' },
 };
+
+/**
+ * そのタブを今出すか (v0.24.25)
+ *
+ * やっさん「リアルタイム要約と要約それぞれの良さがあると思うから、リアルタイム要約を
+ * オンにしたらタブを表示して、オフにしたら非表示にして、それぞれ分けてほしい」。
+ * 隠すだけで中身は消さない（オンに戻せば見える）。保存・コピー・Notion にも、
+ * 出ているタブだけを載せる（隠れているものが知らないうちに送られないように）。
+ */
+/* ───────── タブごとのオン・オフ (v0.24.143) ─────────
+ *
+ * やっさんの指定（2026-11-13）: ライブ整形・要約・タイトル生成・ライブ要約のトグルを、タブの上にも置く。
+ * タブのトグルは設定のトグルと同じ働きだが、**タブごとに決められる**。設定は「新しいタブの初めの値」（設定を変えても、前からあるタブはそのまま）。
+ * 中のキー: session.opts = { liveRefine, autoSummary, liveSummary }（設定の aiEnabled / autoSummarize / liveSummary に当たる）。
+ * opts を持っていない前の版のタブは、設定の値で動く（読み込むときに埋めない。前の版と同じ動きのまま）
+ */
+const TAB_OPT_SETTING = { liveRefine: 'aiEnabled', autoSummary: 'autoSummarize', liveSummary: 'liveSummary' };
+function tabOpt(sessionOrId, key) {
+  const s = typeof sessionOrId === 'string' ? state.sessions.find((x) => x.id === sessionOrId) : sessionOrId;
+  const v = s && s.opts ? s.opts[key] : undefined;
+  return v === undefined ? !!state.settings[TAB_OPT_SETTING[key]] : !!v;
+}
+function setTabOpt(session, key, on) {
+  if (!session) return;
+  session.opts = { ...(session.opts || {}), [key]: !!on };
+  persistSessions();
+}
+/** いま働いているタブ（録音中なら録音しているタブ） */
+function workingSessionId() { return state.recordingSessionId || state.activeId; }
+
+function paneVisible(id) {
+  // v0.24.39: 「Claude Code」がオフならライブ要約は動かないので、タブも出さない
+  // v0.24.93: ライブ要約は 7 個セットと同じ AI で作る（Gemini でも作れるようにした・やっさん「Gemini API は全てできるように」）
+  // v0.24.143: 設定かこのタブのどちらかでオンなら出す（タブのトグルでオンにできるように）
+  if (id === 'pane-live') return !!((state.settings.liveSummary || tabOpt(state.activeId, 'liveSummary')) && postEngineNow());
+  return true;
+}
+function visiblePaneOrder() {
+  return (state.settings.paneOrder || []).filter(paneVisible);
+}
 
 const FONT_FAMILIES = {
   sans:            "'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Yu Gothic UI', sans-serif",
@@ -259,11 +386,22 @@ const state = {
   audioChunks: [],
   audioChunkTimer: null,
   audioInFlightCount: 0,
+  // v0.18.0: 無音位置で切るための状態
+  silenceDetector: null,      // { silentMs(), db(), close() }
+  liveLastActivityAt: 0,      // Web Speech が最後に「音声あり」を示した時刻 (v0.18.4)
+  chunkStartedAt: 0,          // 今のチャンクを開始した時刻
+  chunkStartedAtSilence: true,// 今のチャンクの「頭」が無音の切れ目だったか（録音開始直後は真）
+  pendingChunkEdges: null,    // onstop に渡す { startsAtSilence, endsAtSilence }
+  finalChunkPending: false,   // 停止時、最後のチャンクがまだ送り出されていない (v0.18.6)
+  audioSeq: 0,                // 区間の中でのかけらの通し番号 (v0.19.0 / v0.21.0)
+  audioSeg: 0,                // 区間番号（約10分ごと） (v0.21.0)
+  archiveRecorder: null,      // 話者判別用の録音機（live とは別） (v0.21.0)
+  archiveSegStartedAt: 0,     // いまの区間を始めた時刻 (v0.21.0)
 
   sessions: [],
   activeId: null,
   activePane: 'pane-transcript',
-  isSummarizing: false,
+  isSummarizing: false,   // v0.24.27 から使っていない（タブごとの state.busy に置き換え）
 
   // バックグラウンド録音: recordingSessionId は録音対象セッション。
   // activeId !== recordingSessionId の間は、文字起こしは bgTranscriptEl (detached) に流れる。
@@ -309,11 +447,66 @@ function getWriteContainer() {
 }
 
 /** BG コンテナの innerHTML を録音対象セッションのデータへ書き戻す */
+/**
+ * 画面の HTML を、保存してよい形にする (v0.24.70)
+ * ばねで動いている途中の段落には一時的な transform / opacity が付いている。そのまま保存すると、
+ * 開き直したときにずれたまま・薄いままになる（v0.24.60〜69 で起きていた。motion.js の stripMotionStyles を参照）
+ */
+function savableHtml(html) {
+  // v0.24.119: 確定の演出の途中なら、1 文字ずつの包みも外す（薄いまま保存されないように。confirm-fx.js）
+  if (window.ConfirmFx) html = ConfirmFx.stripFxSpans(html);
+  // v0.24.133: 過程の印（下書き・処理）も外す。演出の途中で保存されると、開き直したときに下書き・処理の見た目のまま残る
+  if (html && html.indexOf(' ph-') >= 0) html = html.replace(/ ph-(?:draft|proc)(?=[\s"])/g, '');
+  return window.Motion && Motion.stripMotionStyles ? Motion.stripMotionStyles(html) : html;
+}
+
+/**
+ * 仮の段落を AI の字に差し替えて、エフェクトをかける (v0.24.119)
+ * v0.24.133: どの過程のエフェクトか（phaseFxMode）を呼ぶ側が渡す
+ * 高さの変化は今までどおり transcriptMorph。字の見せ方を confirm-fx.js が足す。
+ * 画面に見えていないとき（ほかのタブ・ほかのセッションに書いているとき）は演出しない
+ */
+/**
+ * 過程（下書き・処理・確定）の割り当て (v0.24.133)
+ * 「最後の処理が確定、そのあいだが処理」。そのときの設定で決める（録音の途中で設定を変えても、次のかたまりから合う）
+ *   - AI で聞き取る: Web Speech の字の段落は必ず処理（あとで AI の字に入れ替わる）。AI の字は、整形が続くなら処理、続かなければ確定
+ *   - Web Speech だけ: 確定した段落は、整形が続くなら処理、続かなければ確定
+ * 段落に ph-proc を付けたものが処理（style.css）。付いていない段落は確定の見た目
+ *
+ * Web Speech を並走させないとき（AI で聞き取る）は下書きの行が無いので、**最初に出る AI の字が下書き**（ph-draft）（やっさんの指定）:
+ *   - 整形が続く: Groq の字＝下書き → 整形した字＝確定
+ *   - 続かない（整形オフ・Gemini で聞き取る）: AI の字が下書きでもあり確定でもある。**下書きの演出のあと、続けて確定の演出**（「下書き＝確定でも演出はする」）
+ */
+function webSpeechFinalWillBeRefined() {
+  // appendRawChunk が flushPendingToGemini を呼ぶ条件と同じ
+  return state.settings.inputMode === 'web-speech' && tabOpt(workingSessionId(), 'liveRefine') && !!geminiKey();   // v0.24.143: タブごと
+}
+function phaseFxMode(phase) {
+  if (phase === 'draft') return state.settings.draftEffect || 'none';
+  return (phase === 'proc' ? state.settings.procEffect : state.settings.confirmEffect) || 'none';
+}
+
+/** 画面に見えている段落にだけ、過程のエフェクトをかける (v0.24.128) */
+function playStageFx(el, oldText, mode) {
+  const visible = state.activePane === 'pane-transcript' && els.confirmed.contains(el) && el.offsetParent;
+  if (window.ConfirmFx && visible) ConfirmFx.playConfirmFx(el, oldText, mode || 'none');
+}
+
+function confirmSwap(targetEl, apply, mode = state.settings.confirmEffect || 'none') {
+  const placeholder = !targetEl.classList.contains('provisional') && targetEl.classList.contains('refining')
+    && !targetEl.querySelector('.fxc') && /^（文字起こし中…）$/.test(targetEl.textContent.trim());
+  const oldText = placeholder ? '' : targetEl.textContent;
+  transcriptMorph(apply);
+  const visible = state.activePane === 'pane-transcript' && els.confirmed.contains(targetEl) && targetEl.offsetParent;
+  // v0.24.133: 終わりを待てるように返す（下書きと確定が同じ字のとき、下書きの演出のあとに確定の演出を続ける）
+  return (window.ConfirmFx && visible) ? ConfirmFx.playConfirmFx(targetEl, oldText, mode) : Promise.resolve();
+}
+
 function syncBgToSession() {
   if (!state.bgTranscriptEl) return;
   const s = state.sessions.find(x => x.id === state.recordingSessionId);
   if (!s) return;
-  s.transcript = state.bgTranscriptEl.innerHTML;
+  s.transcript = savableHtml(state.bgTranscriptEl.innerHTML);
   s.updatedAt = Date.now();
 }
 
@@ -341,8 +534,13 @@ const els = {
   paneTranscript: document.getElementById('pane-transcript'),
   paneMemo: document.getElementById('pane-memo'),
   paneSummary: document.getElementById('pane-summary'),
+  paneLive: document.getElementById('pane-live'),                       // v0.24.25
+  liveSummary: document.getElementById('live-summary'),                 // v0.24.25
+  liveSummaryEmpty: document.getElementById('live-summary-empty'),      // v0.24.25
+  btnLiveRedo: document.getElementById('btn-live-combo'),               // v0.24.25（v0.24.143 からライブ要約のトグル。作っているあいだは押せなくする）
   paneChat: document.getElementById('pane-chat'),
   paneTranscriptBody: document.querySelector('#pane-transcript .pane-body'),
+  paneMemoBody: document.querySelector('#pane-memo .pane-body'),   // v0.22.1
   chatBody: document.querySelector('#pane-chat .pane-body'),
   chatMessages: document.getElementById('chat-messages'),
   chatEmpty: document.getElementById('chat-empty'),
@@ -365,6 +563,7 @@ const els = {
   summaryDetailSelect: document.getElementById('summary-detail-select'),
   btnSummaryCombo: document.getElementById('btn-summary-combo'),
   btnRefineTranscript: document.getElementById('btn-refine-transcript'),
+  btnDiarize: document.getElementById('btn-diarize'),   // v0.21.0
   emptyHint: document.getElementById('empty-hint'),
   settingsModal: document.getElementById('settings-modal'),
   btnNotionUpload: document.getElementById('btn-notion-upload'),
@@ -378,17 +577,37 @@ const els = {
   notionProgressBody: document.getElementById('notion-progress-body'),
   notionProgressList: document.getElementById('notion-progress-list'),
   notionPickerDate: document.getElementById('notion-picker-date'),
+  notionPickerDateRow: document.getElementById('notion-picker-date-row'),   // v0.23.0
+  notionPickerNote: document.getElementById('notion-picker-note'),          // v0.23.0
+  notionPickerNoteHint: document.getElementById('notion-picker-note-hint'), // v0.23.0
   notionProgressFooter: document.getElementById('notion-progress-footer'),
   btnNotionCancel: document.getElementById('btn-notion-cancel'),
   notionAutoClose: document.getElementById('notion-auto-close'),
   notionAutoCloseRow: document.getElementById('notion-auto-close-row'),
   btnNotionCloseTabs: document.getElementById('btn-notion-close-tabs'),
   btnNotionKeepTabs: document.getElementById('btn-notion-keep-tabs'),
+  btnContext: document.getElementById('btn-context'),
+  contextModal: document.getElementById('context-modal'),
+  inputContextField: document.getElementById('input-context-field'),
+  inputContextSpeakers: document.getElementById('input-context-speakers'),
+  inputContextTerms: document.getElementById('input-context-terms'),
+  inputContextDefault: document.getElementById('input-context-default'),
+  btnContextFromMemo: document.getElementById('btn-context-from-memo'),
+  contextMemoResult: document.getElementById('context-memo-result'),
+  btnContextSave: document.getElementById('btn-context-save'),
+  autoContextBox: document.getElementById('auto-context-box'),
+  btnContextAdoptAuto: document.getElementById('btn-context-adopt-auto'),
   notionSettingsGroup: document.getElementById('notion-settings-group'),
   inputNotionToken: document.getElementById('input-notion-token'),
-  btnNotionTest: document.getElementById('btn-notion-test'),
+  btnNotionTest: document.getElementById('btn-notion-test'),   // v0.24.50 で画面から外した（無ければ何もしない）
+  inputNotionEnabled: document.getElementById('input-notion-enabled'),   // v0.24.50
   notionTestResult: document.getElementById('notion-test-result'),
   notionLastTarget: document.getElementById('notion-last-target'),
+  inputNotionAutoSave: document.getElementById('input-notion-auto-save'),
+  inputNotionAutoTarget: document.getElementById('input-notion-auto-target'),
+  btnNotionAutoPick: document.getElementById('btn-notion-auto-pick'),
+  inputNotionAutoClose: document.getElementById('input-notion-auto-close'),
+  inputNotionAutoKeepAudio: document.getElementById('input-notion-auto-keep-audio'),
   btnNotionForget: document.getElementById('btn-notion-forget'),
   silenceDialog: document.getElementById('silence-dialog'),
   silenceCountdown: document.getElementById('silence-countdown'),
@@ -397,7 +616,9 @@ const els = {
   btnSilenceContinue: document.getElementById('btn-silence-continue'),
   inputApiKey: document.getElementById('input-api-key'),
   inputSilenceSec: document.getElementById('input-silence-sec'),
+  inputMidConsolidateSec: document.getElementById('input-mid-consolidate-sec'),   // v0.24.51
   inputAiEnabled: document.getElementById('input-ai-enabled'),
+  inputRefineWithWs: document.getElementById('input-refine-with-ws'),
   inputAutoStop: document.getElementById('input-auto-stop'),
   inputAutoStopSec: document.getElementById('input-auto-stop-sec'),
   inputAutoSummarize: document.getElementById('input-auto-summarize'),
@@ -406,16 +627,55 @@ const els = {
   summaryDetailHigh: document.getElementById('summary-detail-high'),
   modeWebSpeech: document.getElementById('mode-webspeech'),
   modeGemini: document.getElementById('mode-gemini'),
+  aiTableBody: document.getElementById('ai-table-body'),   // v0.24.92
+  inputGroqKey: document.getElementById('input-groq-key'),
+  inputGeminiEnabled: document.getElementById('input-gemini-enabled'),   // v0.24.88
+  inputGroqEnabled: document.getElementById('input-groq-enabled'),
   inputAudioDevice: document.getElementById('input-audio-device'),
   inputChunkSec: document.getElementById('input-chunk-sec'),
+  inputSilenceCut: document.getElementById('input-silence-cut'),
+  inputChunkMaxSec: document.getElementById('input-chunk-max-sec'),
+  inputAudioBitrate: document.getElementById('input-audio-bitrate'),
+  inputKeepRecording: document.getElementById('input-keep-recording'),
+  inputSumadoMeter: document.getElementById('input-sumado-meter'),
+  inputAudioRetention: document.getElementById('input-audio-retention'),
+  inputClaudeBridge: document.getElementById('input-claude-bridge'),          // v0.24.0（v0.24.39 から「一部を Claude Code で処理する」）
+  inputClaudeCode: document.getElementById('input-claude-code'),              // v0.24.39: 連携を使う
+  claudeRouteNote: document.getElementById('claude-route-note'),              // v0.24.39
+  claudeBridgeStatus: document.getElementById('claude-bridge-status'),        // v0.24.0
+  btnClaudeBridgeTest: document.getElementById('btn-claude-bridge-test'),     // v0.24.0
+  btnSaveBridgeFiles: document.getElementById('btn-save-bridge-files'),      // v0.24.12
+  btnClaudeInstall: document.getElementById('btn-claude-install'),           // v0.24.21
+  inputLiveSummary: document.getElementById('input-live-summary'),           // v0.24.22
+  inputClaudeFallback: document.getElementById('input-claude-fallback'),     // v0.24.58
+  claudeFallbackRow: document.getElementById('claude-fallback-row'),         // v0.24.58
+  inputLiveSummaryMin: document.getElementById('input-live-summary-min'),    // v0.24.22
+  liveSummaryNote: document.getElementById('live-summary-note'),             // v0.24.22
+  audioUsageText: document.getElementById('audio-usage-text'),
+  btnClearAudio: document.getElementById('btn-clear-audio'),
+  inputGeminiLiveDisplay: document.getElementById('input-gemini-live-display'),
   inputMinChunkBytes: document.getElementById('input-min-chunk-bytes'),
   // v0.13.24: 旧 v0.13.9 interim 設定 UI（input-webspeech-interim-debounce /
   // input-webspeech-interim-opacity / btn-webspeech-defaults）への els 参照は削除。
   // HTML から削除済み（v0.13.23）+ 機能本体撤去（v0.13.24）に伴い不要。
   inputWsCommitSec: document.getElementById('input-webspeech-commit-sec'),
+  inputConfirmFx: document.getElementById('input-confirm-fx'),
+  inputDraftFx: document.getElementById('input-draft-fx'),
+  inputDraftStyle: document.getElementById('input-draft-style'),
+  inputProcFx: document.getElementById('input-proc-fx'),
+  inputProcStyle: document.getElementById('input-proc-style'),
+  inputFinalStyle: document.getElementById('input-final-style'),
   inputWsSliceChars: document.getElementById('input-webspeech-slice-chars'),
   inputWsSilenceStopSec: document.getElementById('input-webspeech-silence-stop-sec'),
   zoomBar: document.getElementById('zoom-bar'),
+  dictBar: document.getElementById('dict-bar'),
+  dictToggle: document.getElementById('dict-toggle'),
+  dictLabel: document.getElementById('dict-label'),
+  dictMenu: document.getElementById('dict-menu'),
+  dictMenuList: document.getElementById('dict-menu-list'),
+  dictMenuAuto: document.getElementById('dict-menu-auto'),
+  dictMenuClose: document.getElementById('dict-menu-close'),
+  dictMenuDetail: document.getElementById('dict-menu-detail'),
   zoomRange: document.getElementById('zoom-range'),
   zoomPercent: document.getElementById('zoom-percent'),
   zoomMinus: document.getElementById('zoom-minus'),
@@ -438,13 +698,44 @@ const els = {
 function loadSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) state.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // v0.24.133: v0.24.128 の 4 段階の設定を、3 つの過程に引き継ぐ（処理＝WebSpeech確定・確定のスタイル＝AI整形のスタイル）
+      if (saved.procEffect === undefined && saved.commitEffect !== undefined) saved.procEffect = saved.commitEffect;
+      if (saved.procStyle === undefined && saved.commitStyle !== undefined) saved.procStyle = saved.commitStyle;
+      if (saved.finalStyle === undefined && saved.refineStyle !== undefined) saved.finalStyle = saved.refineStyle;
+      for (const k of ['commitEffect', 'commitStyle', 'heardEffect', 'heardStyle', 'refineStyle']) delete saved[k];
+      state.settings = { ...DEFAULT_SETTINGS, ...saved };
+    }
   } catch (e) {
     console.warn('loadSettings failed', e);
   }
   // Migration: add pane-chat to paneOrder if missing
   if (Array.isArray(state.settings.paneOrder) && !state.settings.paneOrder.includes('pane-chat')) {
     state.settings.paneOrder.push('pane-chat');
+  }
+  // v0.24.50: 「Notion 連携」トグルを足した。トークンを入れていた人はオンのまま始める
+  if (state.settings.notionEnabled === undefined) state.settings.notionEnabled = !!state.settings.notionToken;
+  // v0.24.83: 比較ページ（stt-compare.html）で入れた Groq のキーを引き継ぐ。同じ拡張の中なので同じ場所に保存されている。
+  // 引き継ぐだけで、聞き取りを Groq に切り替えはしない（それはやっさんが設定で選ぶ）
+  if (!state.settings.groqApiKey) {
+    try {
+      const k = (JSON.parse(localStorage.getItem('dictation:sttCompare') || '{}') || {})['groq-key'];
+      if (k) state.settings.groqApiKey = String(k).trim();
+    } catch (_) {}
+  }
+  // v0.24.88: AI 設定のトグルを足した。キーを入れていたものはオンで始める（オフから始めると、黙って止まる）
+  if (state.settings.geminiEnabled === undefined) state.settings.geminiEnabled = !!state.settings.apiKey;
+  if (state.settings.groqEnabled === undefined) state.settings.groqEnabled = !!state.settings.groqApiKey;
+  // v0.24.39: 「Claude Code」（連携を使う）を足した。前の設定で Claude に任せるかライブ要約を
+  // オンにしていた人は、オンのまま始める（オフから始めると、どちらも黙って止まる）
+  if (state.settings.claudeCode === undefined) {
+    state.settings.claudeCode = !!(state.settings.useClaudeBridge || state.settings.liveSummary);
+  }
+  // v0.24.25: ライブ要約のタブ。保存済みの並びに無ければ、要約のすぐ左に入れる（v0.24.26 で左に）
+  if (Array.isArray(state.settings.paneOrder) && !state.settings.paneOrder.includes('pane-live')) {
+    const i = state.settings.paneOrder.indexOf('pane-summary');
+    state.settings.paneOrder.splice(i >= 0 ? i : state.settings.paneOrder.length, 0, 'pane-live');
   }
   applyAiButtonState();
 }
@@ -458,41 +749,605 @@ function saveSettings() {
 }
 
 function applyAiButtonState() {
+  // v0.24.143: タブのトグルは、いま開いているタブのオン・オフ
   if (els.btnRefineTranscript) {
-    const on = !!state.settings.aiEnabled;
+    const on = tabOpt(state.activeId, 'liveRefine');
     els.btnRefineTranscript.classList.toggle('on', on);
     els.btnRefineTranscript.setAttribute('aria-pressed', on ? 'true' : 'false');
-    els.btnRefineTranscript.classList.toggle('needs-key', on && !state.settings.apiKey);
+    els.btnRefineTranscript.classList.toggle('needs-key', on && !geminiKey());
   }
   if (els.btnSummaryCombo) {
-    const on = !!state.settings.autoSummarize;
+    const on = tabOpt(state.activeId, 'autoSummary');
     els.btnSummaryCombo.classList.toggle('on', on);
     els.btnSummaryCombo.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  const live = document.getElementById('btn-live-combo');
+  if (live) {
+    const on = tabOpt(state.activeId, 'liveSummary');
+    live.classList.toggle('on', on);
+    live.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
 }
 
 /* ───────── UI helpers ───────── */
-function setStatus(mode, label) {
-  els.status.className = `status ${mode}`;
-  els.status.textContent = label;
-  els.status.title = label;
+
+/**
+ * 録音中に右上へ出す文言 (v0.24.1)
+ *
+ * Gemini モードでは「録音中」ではなく **「聞き取り中」** と出す（やっさん指摘）。
+ *
+ * 狙いは **AI が裏で動いていること ──「AI の耳」で聞いていること ── を
+ * 言葉に出すこと**。「録音中」はただ機械が回っているように見えるが、
+ * Gemini モードでは音がそのまま AI に渡って聞き取られている。
+ *
+ * Web Speech モードはブラウザ内蔵の認識なので「録音中」のまま。
+ * 裏で AI が聞いているかどうかが、2つの文言の違いになっている。
+ *
+ * 文言を1か所にまとめてあるのは、状態を戻す処理が画面のあちこちに
+ * 散らばっているため。直接書くと、片方だけ直って食い違っていく。
+ */
+function recordingLabel() {
+  // v0.24.1 の意図: 「録音中」だと機械が回っているだけに見える。
+  // 裏で AI が「耳」で聞いていることを言葉に出したかった（やっさん）。
+  //
+  // v0.24.6: そのとき `(Gemini)` まで消してしまっていたが、
+  // これは**どちらのモードで動いているかの印**なので残す。
+  // 変えるべきだったのは前半だけ（やっさん指摘）。
+  // v0.24.83: 聞き取りを Groq にしたときは (Groq)。どちらが聞いているかの印なので、ここも正直に
+  if (state.settings.inputMode !== 'gemini-audio') return '録音中';
+  return usesGroqTranscribe() ? '聞き取り中 (Groq)' : '聞き取り中 (Gemini)';
 }
+
+/** 音声を文字にするのを Groq に任せるか (v0.24.83)。キーが無ければ Gemini のまま */
+function usesGroqTranscribe() {
+  if (state.settings.groqEnabled === false || !state.settings.groqApiKey) return false;
+  // v0.24.92: 表で Gemini を選んでいても、Gemini が使えなければ Groq に回る（選んでいた AI を切ったら、もう一方へ）
+  return (state.settings.transcribeEngine || 'groq') === 'groq' || !geminiKey();
+}
+
+/**
+ * 7 個セットを、いまどちらが受け持つか (v0.24.92)
+ * 表で選んだほう（未設定なら無料で済む Claude）が使えればそれ、使えなければもう一方、どちらも無ければ null
+ */
+function postEngineNow() {
+  const avail = { claude: !!state.settings.claudeCode, gemini: !!geminiKey() };
+  return pickAvailable(state.settings.postEngine || 'claude', avail, ['claude', 'gemini']);
+}
+
+/** 選んだものが使えればそれ、使えなければ order の順で最初に使えるもの (v0.24.92) */
+function pickAvailable(pref, avail, order) {
+  if (pref && avail[pref]) return pref;
+  return order.find((a) => avail[a]) || null;
+}
+
+/**
+ * 使ってよい Gemini のキー (v0.24.88)
+ * AI 設定で Gemini API を切ったときは、キーが残っていても無いものとして扱う（切ったのに料金がかかるのがいちばん困る）。
+ * 呼び出し側はこれまで state.settings.apiKey を見ていたので、全部ここを通すように置き換えた（設定の欄の読み書きだけは生の値）
+ */
+function geminiKey() {
+  return state.settings.geminiEnabled === false ? '' : (state.settings.apiKey || '');
+}
+
+/** 録音の状態に応じて右上を戻す。エラー表示などのあとに使う */
+/**
+ * 時間のかかる処理が走っている間の表示（「要約生成中（Claude）」など）(v0.24.56)
+ *
+ * やっさん報告「要約を生成中の表示が、設定を開いて閉じたら待機中になっていたけど、まだ要約中だった」。
+ * 状態の戻し先（restoreStatus）が「録音中か・停止か」しか見ておらず、**ほかのお知らせが引っ込むたびに
+ * 「停止」に戻していた**。録音を止めるとライブ要約の最終版 → 要約の順に回るので、
+ * ライブ要約の「更新しました」（2.5秒で引っ込む）が要約の最中に「停止」へ戻していた（実機と同じ流れで再現）。
+ * 設定の開け閉めはそれと重なっただけと見ている（設定を開け閉めするだけでは戻らないことを確かめた）。
+ *
+ * 走っている処理をここに登録しておき、戻すときはまずそれを出す。
+ * 複数あれば、あとから始まったほう。
+ */
+const statusTasks = [];
+function beginStatusTask(key, label) {
+  const i = statusTasks.findIndex((t) => t.key === key);
+  if (i >= 0) statusTasks.splice(i, 1);
+  statusTasks.push({ key, label });
+  // お知らせを出している最中なら上書きしない（引っ込んだときにこれが出る）
+  if (!statusNoticeTimer) setStatus('listening', label);
+}
+function endStatusTask(key, { restore = true } = {}) {
+  const i = statusTasks.findIndex((t) => t.key === key);
+  if (i >= 0) statusTasks.splice(i, 1);
+  if (restore && !statusNoticeTimer) restoreStatus();
+}
+
+function restoreStatus() {
+  // v0.24.145: Claude の返事が遅い・試し直している・スタンバイ後なら、そちらを出す（paintClaudeWatch）
+  if (typeof claudeWatchPick === 'function' && claudeWatchPick()) { cwShownKey = ''; paintClaudeWatch(); return; }
+  const task = statusTasks[statusTasks.length - 1];
+  if (task) { setStatus('listening', task.label); return; }
+  setStatus(state.isRecording ? 'listening' : 'idle',
+            state.isRecording ? recordingLabel() : '停止');
+}
+
+/* ───────── 状態の札を、SUMADO のダイナミックアイランドのように動かす（v0.24.69）─────────
+ *
+ * TODO「動きを SUMADO の仕様書に合わせる」の 13。やっさん「状態の札（待機中・録音中）を、SUMADO のダイナミックアイランドの
+ * ように動かす」。v0.24.7 で札の動きを外したのは「ダイナミックアイランドがうまく表現できなかったから」。
+ * 手本は SUMADO の「にゅっと出る・しまう」型（仕様書 2.3。js/island.js の render と kit/motion.js の createMorph）:
+ *   - 立ち上がったとき: 点 → 縦に伸びる → 横に広がる。中身（字）は形ができてからふわっと
+ *   - 字が変わるとき（待機中 → 録音中 → 要約生成中…）: いまの字が先にさっと消え、形は横が先・縦が遅れて新しい大きさへ、
+ *     新しい字は形がある程度できてからふわっと
+ * 見た目（色・字・札の形）はディクテーションのまま。角の丸さはもとの札と同じ（カプセル）。
+ *
+ * ■ 字はすぐ入れ替える
+ * els.status.textContent は「いま出しているお知らせと同じか」の判定や、テストが読んでいる。字を遅らせて入れると、
+ * その間は古い字を読んでしまう。なので本物の字はすぐ新しくし（濃さ 0 から出す）、消えていく古い字は札の外に写しを置いて薄くする。
+ */
+let statusIsland = null;
+
+function installStatusIsland() {
+  if (!els.status) return;
+  els.status.classList.remove('island-pending');   // 動かせないときも、隠したままにしない
+  if (!window.Motion || !Motion.createMorph || statusIsland) return;
+  const box = els.status;
+  const M = Motion.MOTION.morph;
+  const text = document.createElement('span');
+  text.className = 'status-text';
+  text.textContent = box.textContent;
+  box.textContent = '';
+  box.appendChild(text);
+  box.classList.add('island');
+  const morph = Motion.createMorph(box, { radiusMax: 999 });
+  const timers = [];
+  const later = (ms, fn) => timers.push(setTimeout(fn, ms));
+  const clearTimers = () => { while (timers.length) clearTimeout(timers.pop()); };
+  /** いまの字・クラスのときの本来の大きさ */
+  const natural = () => {
+    const keepW = box.style.width, keepH = box.style.height;
+    box.style.width = ''; box.style.height = '';
+    const r = box.getBoundingClientRect();
+    box.style.width = keepW; box.style.height = keepH;
+    // v0.24.76: 画面の拡大率で割る（割らないと 90% のとき 1 割狭くなり、左右の余白が消えて字が切れた）。
+    // 小数の切り捨てで「…」にならないよう、少しだけ広めに
+    const z = Motion.zoom();
+    return { w: Math.ceil(r.width / z * 2) / 2, h: Math.ceil(r.height / z * 2) / 2 };
+  };
+  let shownText = text.textContent;
+  let pending = false;
+  let changed = false;
+  let oldText = '';
+  let oldRect = null;   // 古い字があった場所（字を入れ替える前に測る）
+  // 古い字の濃さ（::before なのでスクリプトで直接動かせない。見えない要素をばねで動かし、CSS の変数に写す）
+  const oldDriver = document.createElement('span');
+  Motion.onFrame(oldDriver, ({ x }) => { box.style.setProperty('--old-o', String(Math.max(0, Math.min(1, x)))); });
+  // 字・クラスの変化は同じ処理の中で続けて起きる（setStatus のあとに has-detail を付ける等）。まとめて 1 回動かす
+  const schedule = () => {
+    if (pending) return;
+    pending = true;
+    queueMicrotask(() => {
+      pending = false;
+      const { w, h } = natural();
+      if (!changed) { morph.to(w, h); return; }
+      changed = false;
+      captured = false;
+      clearTimers();
+      // 1. いまの字は、先にさっと消す
+      // v0.24.82: 古い字は札の ::before（content: attr(data-old-text)）に出す。札の中なので、札が縮むと札の形で切れる
+      // （SUMADO のアイランドも中身は形の中にある）。textContent にも混ざらない。
+      // 前は札の外に写しを置いていて、(1) 字を入れ替えたあとに場所を測っていたので、新しい短い字の場所に置かれて右にずれ、
+      // (2) 右上の欄の左の端から置いていたので、札が縮むと欄と一緒に右へ流れ、枠から飛び出していた
+      // （やっさん報告「文字が枠を飛び出して右にすっ飛んでいく」）
+      if (oldText) {
+        const r = oldRect || text.getBoundingClientRect();
+        const br = box.getBoundingClientRect();
+        const z = Motion.zoom();
+        box.dataset.oldText = oldText;
+        box.style.setProperty('--old-right', `${(br.right - r.right) / z}px`);
+        Motion.set(oldDriver, { x: 1 });
+        Motion.animate(oldDriver, { x: 0 }, { spring: M.contentOut }).then((d) => {
+          if (!d) return;
+          delete box.dataset.oldText;
+          box.style.removeProperty('--old-o');
+          box.style.removeProperty('--old-right');
+          box.style.removeProperty('--old-pad-right');
+        });
+      }
+      // 2. 形は、字をしまってから新しい大きさへ（伸びるなら横が先・縦が遅れて、縮むなら一瞬行き過ぎて）
+      later(M.shapeAfterOut, () => morph.to(w, h));
+      // 3. 新しい字は、形がある程度できてからふわっと
+      Motion.set(text, { opacity: 0 });
+      later(M.shapeAfterOut + M.contentInDelay, () => {
+        Motion.animate(text, { opacity: 1 }, { spring: M.contentIn }).then((d) => { if (d) Motion.clear(text); });
+      });
+    });
+  };
+  // 古い字と、その場所・右の余白を覚える。class を書き換える前に呼ぶ（setStatus は class を書き直してから字を入れるので、
+  // 字を入れるときに測ると、› が外れたあとの余白・場所になってしまう）
+  let captured = false;
+  const capture = () => {
+    if (captured) return;
+    captured = true;
+    oldText = shownText;
+    oldRect = text.getBoundingClientRect();
+    // 右の余白は、› が付いているとき（has-detail）は広い。古い字の余白のまま消す
+    box.style.setProperty('--old-pad-right', getComputedStyle(text).paddingRight);
+  };
+  statusIsland = {
+    /** これから字を label に変えるなら、いまの字を覚えておく（setStatus が class を書き換える前に呼ぶ） */
+    prepare(label) {
+      if (String(label == null ? '' : label) !== shownText && !changed) capture();
+    },
+    setText(label) {
+      const t = String(label == null ? '' : label);
+      if (t !== shownText) {
+        if (!changed) capture();
+        changed = true;
+        shownText = t;
+        text.textContent = t;
+      }
+      schedule();
+    },
+    relayout: schedule,
+    /** v0.24.145: 字の出し入れの動きをせずに入れ替える（待っている時間が 1 秒進むとき。見本で「スクロールしてしまう」と言われた） */
+    setQuiet(label) {
+      const t = String(label == null ? '' : label);
+      shownText = t;
+      text.textContent = t;
+      schedule();
+    },
+  };
+  // クラスの付け外し（has-detail で右に › が付く等）で大きさが変わることもあるので見張る
+  new MutationObserver(schedule).observe(box, { attributes: true, attributeFilter: ['class'] });
+  window.addEventListener('resize', schedule);
+  // 立ち上がったとき: 点 → 縦に伸びる → 横に広がる。字は形ができてから
+  const { w, h } = natural();
+  morph.jump(M.dot, M.dot);
+  Motion.set(box, { opacity: 0 });
+  Motion.animate(box, { opacity: 1 }, { spring: M.appear }).then((d) => { if (d) { box.style.opacity = ''; } });
+  morph.rise(w, h);
+  Motion.set(text, { opacity: 0 });
+  later(M.riseHold + M.riseGap + M.contentInDelay, () => {
+    Motion.animate(text, { opacity: 1 }, { spring: M.contentIn }).then((d) => { if (d) Motion.clear(text); });
+  });
+}
+
+/* ───────── Claude の返事が遅い・試し直している・スタンバイ後 (v0.24.145) ─────────
+ *
+ * やっさん（2026-11-14）「正常動作の時は特に出さなくていいけど、リトライしてるとか、そういうときは右上の表示で分かるように」。
+ * 見本（https://claude.ai/artifact/WiLp7kmj4F1n8V942Ss73a）で OK をもらった形:
+ *   いつもの 2 倍を過ぎた → オレンジ・砂時計「Claude の返事を待っています 3:20」（時間は 1 秒ずつ。字の出し入れの動きはしない）
+ *   試し直している       → オレンジ・注意「要約を試し直しています（2/3 回目）」
+ *   スタンバイから戻った → オレンジ・注意「スタンバイ後、要約をやり直しています」
+ *   押すと、くわしく（待つ上限まであと何分か・あと何回試し直すか）。あきらめたときは今までどおり赤のお知らせ
+ * 呼び出しの一覧と「いつも」の長さは claude-watch.js。お知らせ（statusNotice）を出している最中は、それが引っ込むまで待つ
+ */
+const CLAUDE_FEATURE_NAME = {
+  summary: '要約', title: 'タイトル', 'whole-refine': '整形', 'live-refine': '整形', 'live-heading': '見出し追加',
+  chat: '質問の答え', 'memo-refine': 'メモの整形', 'live-summary': 'ライブ要約', 'context-extract': '文脈の読み取り',
+};
+let cwShownKey = '';
+let cwTimer = 0;
+const cwMmss = (sec) => { const s = Math.max(0, Math.floor(sec)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+/** 知らせるべき呼び出し（あとから始まったもの）と、その種類 */
+function claudeWatchPick() {
+  if (typeof claudeWatchCalls !== 'function') return null;
+  const now = Date.now();
+  let pick = null;
+  for (const c of claudeWatchCalls()) {
+    const el = (now - c.startedAt) / 1000;
+    let kind = null;
+    if (c.mode === 'wake') kind = 'wake';
+    else if (c.mode === 'retry') kind = 'retry';
+    else if (el > Math.max(20, 2 * claudeWatchTypicalSec(c.feature))) kind = 'wait';
+    if (kind) pick = { c, kind, el };
+  }
+  return pick;
+}
+function claudeWatchText({ c, kind, el }) {
+  const name = CLAUDE_FEATURE_NAME[c.feature] || '処理';
+  const leftSec = c.timeoutMs ? c.timeoutMs / 1000 - el : 0;
+  const limit = c.timeoutMs ? `待つ上限：${Math.round(c.timeoutMs / 60000)} 分（あと ${cwMmss(leftSec)}）\n` : '';
+  const left = Math.max(0, c.retries - c.attempt);
+  const then = left > 0 ? `試し直します（あと ${left} 回）` : 'あきらめて、お知らせします';
+  if (kind === 'wake') {
+    return { label: `スタンバイ後、${name}をやり直しています`,
+      detail: `スタンバイから戻ったので、${name}をやり直しています\nPC がスタンバイになっているあいだに、Claude の処理が止まったとみられます。\n上限まで待たずに、最初からやり直しています。` };
+  }
+  if (kind === 'retry') {
+    return { label: `${name}を試し直しています（${c.attempt}/${c.retries} 回目）`,
+      detail: `${name}を試し直しています（${c.attempt}/${c.retries} 回目）\n前の回は ${Math.round(c.prevWaitMs / 60000)} 分待っても Claude から返事がありませんでした。\n${limit}このあとも返事が無ければ、${then}。` };
+  }
+  return { label: `Claude の返事を待っています ${cwMmss(el)}`,
+    detail: `Claude の返事を待っています（${cwMmss(el)}・${name}）\nいつもは ${Math.round(claudeWatchTypicalSec(c.feature))} 秒ほどで終わる処理です。\n${limit}上限を過ぎても返事が無ければ、${then}。` };
+}
+function paintClaudeWatch() {
+  if (!els.status) return;
+  const p = claudeWatchPick();
+  if (!p) {
+    if (cwShownKey) {
+      cwShownKey = '';
+      els.status.classList.remove('has-detail', 'cw-wait', 'cw-retry');
+      if (!statusNoticeTimer) { statusNoticeDetail = ''; closeStatusDetail(); restoreStatus(); }
+    }
+    return;
+  }
+  if (statusNoticeTimer) return;   // お知らせを出している最中は、引っ込むまで待つ（dismissStatusNotice → restoreStatus がここへ戻す）
+  const { label, detail } = claudeWatchText(p);
+  statusNoticeDetail = detail;
+  const key = `${p.kind}:${p.c.id}`;
+  if (key !== cwShownKey) {
+    cwShownKey = key;
+    setStatus('caution', label, label + '（押すと詳細）');
+    els.status.classList.add('has-detail', p.kind === 'wait' ? 'cw-wait' : 'cw-retry');
+  } else if (statusIsland) {
+    statusIsland.setQuiet(label);   // 時間が進むだけ。字の出し入れの動きはしない
+    els.status.title = label + '（押すと詳細）';
+  } else {
+    els.status.textContent = label;
+  }
+}
+window.onClaudeWatchChange = () => {
+  const busy = typeof claudeWatchCalls === 'function' && claudeWatchCalls().length > 0;
+  if (busy && !cwTimer) cwTimer = setInterval(paintClaudeWatch, 1000);
+  if (!busy && cwTimer) { clearInterval(cwTimer); cwTimer = 0; }
+  paintClaudeWatch();
+};
+
+function setStatus(mode, label, detail) {
+  if (statusIsland) statusIsland.prepare(label);   // v0.24.82: class を書き換える前に、いまの字の場所を覚える
+  els.status.className = `status ${mode}` + (statusIsland ? ' island' : '');
+  if (statusIsland) statusIsland.setText(label);
+  else els.status.textContent = label;
+  // detail: 画面には入りきらない全文 (v0.24.7)。
+  // 状態表示は max-width: 360px で末尾から切れるので、
+  // 長い理由（claude の stderr など）はホバーで読めるようにする。
+  // 省略すれば今までどおり label がそのまま title に入る
+  els.status.title = detail || label;
+}
+
+/* ───────── 状態表示の「お知らせ」 (v0.24.7) ─────────
+ *
+ * やっさんの要望:
+ * > このメッセージ長くてずっと出てるので、そのへんの表示にもこだわりたい
+ * > ログを画面にずっとだすのはちょっとね　押したらエラーの詳細が出るとか
+ *
+ * v0.24.7 ではこれに合わせて Dynamic Island 風の動きも付けたが、v0.24.8 で外した:
+ * > やっぱアニメーションはやめとこう　エラーメッセージだけアニメーションするというのも
+ * > なんかちょっとね　他の停止とか　録音中みたいに　アニメーションなしで大丈夫
+ *
+ * **動くのがエラーのときだけだと、かえって浮く。**
+ *
+ * ■ 状態とお知らせを分ける
+ *
+ * `setStatus()` は**状態**（待機中／聞き取り中）。出たままでよい。
+ * `statusNotice()` は**お知らせ**（〜に失敗しました）。出て、しばらくして消える。
+ * 今まではお知らせも setStatus で出していたので、戻す処理を書き忘れた場所が
+ * 消えずに残っていた（Claude から Gemini に戻したときの表示がそれ）。
+ *
+ * ■ 詳細を画面に流さない
+ *
+ * stderr のような長い文字は、状態表示に貼ると末尾から切れるうえ、
+ * 読み終わったあとも居座る。押したときだけ開く。
+ * 全文は設定→診断ログにも残るので、消えても失われない。
+ */
+const STATUS_NOTICE_MS = 6000;
+let statusNoticeTimer = null;
+let statusNoticeDetail = '';
+let statusDetailEl = null;
+
+function statusNotice(mode, label, { detail = '', ms = STATUS_NOTICE_MS } = {}) {
+  if (!els.status) return;
+  // 同じお知らせが立て続けに来たら、出し直さずに時間だけ延ばす (v0.24.8)
+  //
+  // やっさん報告「claude のエラーが2回出る　１回目でて自動で閉じてまた出る」。
+  // 録音を止めると**要約とタイトルの2つ**を続けて回すので、
+  // 中継が失敗していると同じ文言が2回来る（それぞれ本当に起きた失敗）。
+  // 二度言っても情報は増えないので、同じ文言なら出したままにする。
+  // （回数を知りたいときは診断ログに全件残っている）
+  const same = statusNoticeTimer && els.status.textContent === label;
+  clearTimeout(statusNoticeTimer);
+  if (!same) {
+    closeStatusDetail();
+    statusNoticeDetail = String(detail || '');
+    setStatus(mode, label, statusNoticeDetail ? label + '（押すと詳細）' : label);
+    els.status.classList.toggle('has-detail', !!statusNoticeDetail);
+  }
+  statusNoticeTimer = setTimeout(dismissStatusNotice, Math.max(500, ms));
+}
+
+/** お知らせを畳んで、いまの状態に戻す */
+function dismissStatusNotice() {
+  clearTimeout(statusNoticeTimer);
+  statusNoticeTimer = null;
+  if (!els.status) return;
+  // 詳細を開いて読んでいる最中に消さない
+  if (statusDetailEl) return;
+  els.status.classList.remove('has-detail');
+  statusNoticeDetail = '';
+  restoreStatus();
+}
+
+function closeStatusDetail() {
+  if (statusDetailEl) {
+    // v0.24.68: 札へ縮みながらふわっと消してから外す（TODO「動きを SUMADO の仕様書に合わせる」の 9。前は一瞬）。
+    // 「開いているか」はすぐ「閉じた」にする（消える途中のものは押せない）
+    const box = statusDetailEl;
+    statusDetailEl = null;
+    if (window.Motion) {
+      box.style.pointerEvents = 'none';
+      box.classList.add('is-closing');   // 消える途中の印（開いている吹き出しと見分ける）
+      Motion.popOut(box, { to: 0.9 }).then(() => box.remove());
+    } else {
+      box.remove();
+    }
+  }
+  if (els.status) els.status.classList.remove('is-open');
+}
+
+function openStatusDetail() {
+  if (!statusNoticeDetail || !els.status) return;
+  clearTimeout(statusNoticeTimer);   // 読んでいる間は消さない
+  statusNoticeTimer = null;
+  const box = document.createElement('div');
+  box.className = 'status-detail';
+  box.textContent = statusNoticeDetail;
+  const hint = document.createElement('div');
+  hint.className = 'status-detail-hint';
+  hint.textContent = 'この内容は 設定 → 診断ログ にも残っています';
+  box.appendChild(hint);
+  (els.status.parentNode || document.body).appendChild(box);
+  statusDetailEl = box;
+  // v0.24.68: 札から、小さいところから少し行き過ぎてぽんと出る（前は一瞬）
+  if (window.Motion) { box.hidden = true; Motion.popIn(box); }
+  els.status.classList.add('is-open');
+}
+
+function toggleStatusDetail() {
+  if (statusDetailEl) { closeStatusDetail(); dismissStatusNotice(); }
+  else openStatusDetail();
+}
+
+if (els.status) {
+  els.status.addEventListener('click', () => {
+    if (statusNoticeDetail) toggleStatusDetail();
+  });
+}
+// 外を押したら閉じる。閉じたらそのままお知らせも引っ込める
+document.addEventListener('click', (e) => {
+  if (!statusDetailEl) return;
+  if (e.target === els.status || els.status.contains(e.target)) return;
+  if (statusDetailEl.contains(e.target)) return;
+  closeStatusDetail();
+  dismissStatusNotice();
+});
+window.statusNotice = statusNotice;   // gemini.js から呼ぶ
 
 function setRecordingUI(isRec) {
   els.btnToggle.classList.toggle('recording', isRec);
   const iconEl = els.btnToggle.querySelector('[data-icon]');
+  // ボタンの記号は「押すと何が起きるか」（待機中 ● ＝録音、録音中 ■ ＝停止）。
+  // 家電と同じで、IEC 60417 でも ● 録音・■ 停止は**操作の記号**として決まっている。
+  // v0.24.31 で録音中も ● にしたが、やっさんと相談して v0.24.32 で戻した。
+  // 「今録音中か」はボタンではなく、右上の「聞き取り中」とタブの赤線で示す
   if (iconEl && typeof setIcon === 'function') setIcon(iconEl, isRec ? 'record-stop' : 'record', 18);
   els.btnToggle.title = isRec ? '停止' : '録音開始';
   renderTabs();
+  tellSumadoRecording(isRec);
+}
+
+// SUMADO（iPhone 風のホーム。bayashievolution/sumado）の中で使っているとき、録音中だと知らせる。
+// SUMADO の上の帯の時計のまわりが赤くなり、アイランド（上の黒い帯）に録音の時間が出る。
+// 取り決めは SUMADO の docs/v1/SUMADO対応アプリの作り方.md の「SUMADO の仕組みを使う（API）」。
+// - 録音の状態は、どの道（Web Speech・Gemini・エラーで止まった）でも setRecordingUI を通るので、ここ 1 か所で送る
+// - SUMADO が入っていない Chrome でも、届かないだけ（lastError を読んで捨てる）。ブラウザ版（serve.js）には chrome.runtime がないので送らない
+// - ttl 30 秒：毎秒の update で延びる。拡張が落ちて end を送れなくても、30 秒で SUMADO から消える
+const SUMADO_ID = 'bjmnpgoaodjhbkpmpiaaceibhffemmgo';
+let sumadoRecStart = 0;
+let sumadoRecTimer = null;
+function toSumado(msg) {
+  try {
+    if (!(typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage && chrome.runtime.id)) return;
+    chrome.runtime.sendMessage(SUMADO_ID, { type: 'island', id: 'rec', ...msg }, () => void chrome.runtime.lastError);
+  } catch (e) {
+    // 送れなくても録音には関係ない
+  }
+}
+function fmtRecElapsed(ms) {
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+// 声の大きさのメーター（SUMADO のアイランドの縦の棒）。
+// - Web Speech のときは録音の音の流れを自分では持っていないので、メーターのためにマイクの大きさを別に測る
+//   （同じマイクを 2 つで使っても Chrome では問題ない。v0.15 の同時利用テストで確かめ済み）
+// - SUMADO の中で使っているとき・設定でオンにしたときだけ。測るのは 80ms ごと、送るのは大きさの数だけ（音は送らない）
+let sumadoMeter = null;
+async function startSumadoMeter() {
+  if (sumadoMeter || !(typeof window !== 'undefined' && window.parent !== window)) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const ctx = new AudioContext();
+    const an = ctx.createAnalyser();
+    an.fftSize = 1024;
+    ctx.createMediaStreamSource(stream).connect(an);
+    const buf = new Float32Array(an.fftSize);
+    const timer = setInterval(() => {
+      an.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      toSumado({ action: 'level', level: Math.min(1, Math.sqrt(sum / buf.length) * 4) });
+    }, 80);
+    sumadoMeter = { stream, ctx, timer };
+    if (!sumadoRecTimer) stopSumadoMeter(); // 測りはじめるまでのあいだに録音が止まっていた
+  } catch (e) {
+    diagLog.info(`SUMADO のメーター用にマイクを開けませんでした: ${e.message || e}`);
+  }
+}
+function stopSumadoMeter() {
+  if (!sumadoMeter) return;
+  clearInterval(sumadoMeter.timer);
+  sumadoMeter.stream.getTracks().forEach((t) => t.stop());
+  sumadoMeter.ctx.close().catch(() => {});
+  sumadoMeter = null;
+}
+function tellSumadoRecording(isRec) {
+  if (isRec) {
+    if (sumadoRecTimer) return; // 自動の再接続などで続けて呼ばれても、時間は最初から数えなおさない
+    sumadoRecStart = Date.now();
+    const meter = !!state.settings.sumadoIslandMeter;
+    toSumado({ action: 'start', glyph: 'mic', right: '0:00', color: '#ff453a', recording: true, meter, ttl: 30 });
+    if (meter) startSumadoMeter();
+    sumadoRecTimer = setInterval(() => toSumado({ action: 'update', right: fmtRecElapsed(Date.now() - sumadoRecStart), ttl: 30 }), 1000);
+  } else {
+    if (!sumadoRecTimer) return;
+    clearInterval(sumadoRecTimer);
+    sumadoRecTimer = null;
+    stopSumadoMeter();
+    toSumado({ action: 'end' });
+  }
+}
+
+// SUMADO の中（iframe）で開かれているときだけ、いちばん上の地の色を SUMADO に知らせる。
+// SUMADO はアプリの上に時刻の帯を出していて、その帯の色をこのページに合わせるため（外からはこのページの中を読めない）。
+// 1 秒ごとに測って、変わったときだけ送る（テーマを変えたときも追いかける）。
+// **関数の中に入れないこと**：ページを読み込んだときに必ず動く場所に置く（CLAUDE.md「誰がいつ呼ぶか」）
+if (typeof window !== 'undefined' && window.parent !== window) {
+  let lastTopColor = '';
+  const okColor = (bg) => bg && bg !== 'transparent' && !/rgba\(.*,\s*0\)$/.test(bg);
+  const topColor = () => {
+    for (let n = document.elementFromPoint(innerWidth / 2, 2); n; n = n.parentElement) {
+      const bg = getComputedStyle(n).backgroundColor;
+      if (okColor(bg)) return bg;
+    }
+    const root = getComputedStyle(document.documentElement).backgroundColor;
+    return okColor(root) ? root : '#ffffff';
+  };
+  const reportTopColor = () => {
+    try {
+      const c = topColor();
+      if (c === lastTopColor) return;
+      lastTopColor = c;
+      window.parent.postMessage({ sumadoStatus: 1, color: c }, `chrome-extension://${SUMADO_ID}`);
+    } catch (e) {
+      // 送れなくても、この拡張の動きには関係ない
+    }
+  };
+  window.addEventListener('load', reportTopColor);
+  setInterval(reportTopColor, 1000);
+  // v0.24.38: SUMADO は、上の帯（時刻）を透明にしてページの上に重ねる。帯の高さを知らせてくるので、その分だけ上をあける（style.css の #app）
+  window.addEventListener('message', (e) => {
+    if (e.origin !== `chrome-extension://${SUMADO_ID}` || !e.data || typeof e.data.sumadoSafeTop !== 'number') return;
+    document.documentElement.style.setProperty('--sumado-safe-top', `${Math.max(0, Math.min(120, e.data.sumadoSafeTop))}px`);
+  });
+  try { window.parent.postMessage({ sumadoAskSafeTop: 1 }, `chrome-extension://${SUMADO_ID}`); } catch (e) { /* 単独のときは何もしない */ }
 }
 
 function hideEmptyHint() {
-  if (els.emptyHint && !els.emptyHint.hidden) els.emptyHint.hidden = true;
+  showHint(els.emptyHint, false);   // v0.24.79: 空のときの案内は、高さと濃さをばねでしまう
 }
 
 function getActivePaneEl() {
   if (state.activePane === 'pane-transcript') return els.paneTranscript;
   if (state.activePane === 'pane-memo') return els.paneMemo;
+  if (state.activePane === 'pane-live') return els.paneLive;
   return els.paneSummary;
 }
 
@@ -501,28 +1356,196 @@ function isPinnedToBottom() {
   return pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 40;
 }
 
-function autoScroll(force = false) {
+/* ───────── 文字起こしの動き（v0.24.60・SUMADO の仕様書 1 章「唐突な動きをしない」）─────────
+ *
+ * TODO「動きを SUMADO の仕様書に合わせる」の 1。
+ * 仮の段落が消える・段落がまとまる・差し替わると、そこから下が一瞬で跳んでいた。
+ * 一番下に張りついているときの自動スクロールも、いきなり最下部へ飛んでいた。
+ *
+ * - 自動スクロールはばねで（見えない要素をばねで動かし、毎フレーム scrollTop に写す。仕様書 2.1 の onFrame の形）
+ * - 段落を差し替える・消すときは、見えている段落の「前の画面上の位置」を覚え、差し替えたあと前の位置から
+ *   新しい位置へばねで動かす（FLIP）。画面上の位置で測るので、末尾が縮んでスクロールが詰められた分も一緒に滑らかになる
+ * - 消える段落は、写し（ゴースト）を同じ場所に置いてふわっと消す。本物はすぐ消す
+ *   （本物を残したまま消えるのを待つと、その間に保存した文字起こしに「（文字起こし中…）」が入ってしまう）
+ */
+const transcriptScroll = { driver: null, moving: false };
+
+function transcriptScrollDriver() {
+  if (transcriptScroll.driver || !window.Motion) return transcriptScroll.driver;
+  const d = document.createElement('span');
+  Motion.onFrame(d, ({ x }) => { els.paneTranscriptBody.scrollTop = x; });
+  transcriptScroll.driver = d;
+  return d;
+}
+
+/** ばねのスクロールを止める（人が自分で動かしたとき。その場から人の操作に任せる） */
+function stopTranscriptScroll() {
+  if (!transcriptScroll.moving || !transcriptScroll.driver) return;
+  transcriptScroll.moving = false;
+  Motion.set(transcriptScroll.driver, { x: els.paneTranscriptBody.scrollTop });
+}
+
+function autoScroll(force = false, { instant = false } = {}) {
   if (state.activePane !== 'pane-transcript') return;
   if (force || !state.userScrolledUp) {
-    els.paneTranscriptBody.scrollTop = els.paneTranscriptBody.scrollHeight;
+    const pane = els.paneTranscriptBody;
+    const to = Math.max(0, pane.scrollHeight - pane.clientHeight);
+    const d = !instant && transcriptScrollDriver();
+    if (!d) { stopTranscriptScroll(); pane.scrollTop = pane.scrollHeight; return; }
+    if (Math.abs(to - pane.scrollTop) < 1 && !transcriptScroll.moving) return;
+    // 動いている途中なら、その速さのまま行き先だけ変える（文字が続けて届いても途切れない）
+    if (!transcriptScroll.moving) Motion.set(d, { x: pane.scrollTop });
+    transcriptScroll.moving = true;
+    Motion.animate(d, { x: to }, { spring: Motion.SPRINGS.sheet }).then((done) => {
+      if (!done) return;
+      // 動いている間に下が伸びた（仮の段落が長い文に差し替わった等）なら、着いたところで止めずに追いかける。
+      // ここで止めると、着いたときのスクロールで「人が上へ戻した」と見なして、自動スクロールが止まってしまう
+      // （テストで見つけた。前は scrollTop を一気に書いていたので、伸びた分は次の自動スクロールで追いついていた）
+      const again = Math.max(0, pane.scrollHeight - pane.clientHeight);
+      if (Math.abs(again - pane.scrollTop) > 1 && state.activePane === 'pane-transcript') {
+        Motion.animate(d, { x: again }, { spring: Motion.SPRINGS.sheet }).then((d2) => { if (d2) transcriptScroll.moving = false; });
+        return;
+      }
+      transcriptScroll.moving = false;
+    });
   }
 }
 
+/**
+ * 文字起こしの段落を差し替える・消すときに包む（FLIP）(v0.24.60)
+ * @param {Function} fn       差し替え・消す処理
+ * @param {object} [o]
+ * @param {Element[]} [o.removing]  fn の中で消す段落（写しを置いてふわっと消す）
+ */
+function transcriptMorph(fn, { removing = [] } = {}) {
+  const pane = els.paneTranscriptBody;
+  if (!window.Motion || state.activePane !== 'pane-transcript' || !pane || !pane.offsetParent) return fn();
+  const view = pane.getBoundingClientRect();
+  const near = (r) => r.bottom > view.top - 80 && r.top < view.bottom + 80;
+  const items = Array.from(els.confirmed.children).concat([els.interim]);
+  const before = new Map();
+  for (const el of items) {
+    const r = el.getBoundingClientRect();
+    if (near(r)) before.set(el, r.top);
+  }
+  const ghosts = [];
+  for (const el of removing) {
+    if (!el || !el.isConnected || !els.confirmed.contains(el)) continue;
+    const r = el.getBoundingClientRect();
+    if (!near(r) || r.height === 0) continue;
+    const g = el.cloneNode(true);
+    g.removeAttribute('id');
+    g.setAttribute('aria-hidden', 'true');
+    const z = Motion.zoom();   // v0.24.76: 画面の拡大率で割る
+    Object.assign(g.style, { position: 'fixed', left: `${r.left / z}px`, top: `${r.top / z}px`, width: `${r.width / z}px`,
+      margin: '0', pointerEvents: 'none', zIndex: '1', animation: 'none' });
+    ghosts.push(g);
+  }
+  const out = fn();
+  for (const g of ghosts) {
+    document.body.appendChild(g);
+    Motion.animate(g, { opacity: 0 }, { spring: Motion.SPRINGS.fade }).then(() => g.remove());
+  }
+  for (const [el, top] of before) {
+    if (!el.isConnected) continue;
+    const dy = (top - el.getBoundingClientRect().top) / Motion.zoom();   // v0.24.76: 画面の拡大率で割る
+    if (Math.abs(dy) < 1) continue;
+    // v0.24.71: place（ほかのばねを止めない）。set だと、差し替えたばかりの段落のふわっと（濃さ）まで止まる
+    Motion.place(el, { y: dy + (Motion.current(el).y || 0) });
+    Motion.animate(el, { y: 0 }, { spring: Motion.SPRINGS.sheet }).then((done) => { if (done) Motion.clear(el); });
+  }
+  return out;
+}
+
+/**
+ * 要素から文字を取り出す。**表示されていてもいなくても同じ結果になる** (v0.24.3)
+ *
+ * ■ なぜ自分で書くのか
+ *
+ * `innerText` は**画面に出ている見た目**を返すので、要素が描画されていない
+ * （タブが閉じている、`display:none`、document に繋がっていない）と
+ * `textContent` に落ちる。`textContent` には改行が無いので、
+ * **全行が一つに繋がって出てくる**。
+ *
+ * 実測した（実機の Chromium）:
+ *   メモタブを開いている   → "第3回 評価誺\nルーブリック要確認\n来週までに提出"
+ *   質問タブを開いている   → "第3回 評価誺ルーブリック要確認来週までに提出"
+ *
+ * 質問するときに開いているのは必ず質問タブなので、
+ * **質問ペインに渡すメモと要約はこれまですっと一塊で渡っていた**。
+ * 他のセッションから読む `htmlToPlain()` も、document に繋がっていない
+ * div を使っているので同じだった。
+ *
+ * 行が潰れると単に読みにくいだけでなく、箇条書きの項目同士が繋がって
+ * （「評価誺ルーブリック要確認」）**言っていない語ができてしまう**。
+ *
+ * ■ なぜこの範囲にとどめたか
+ *
+ * インデントやチェックの入/切は表現しない。`innerText` でも落ちていて
+ * 質問ペインはそれで動いてきたので、ここでは**改行を戻すだけ**にする。
+ */
+const PLAIN_LINE_TAGS = new Set([
+  'div', 'p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'blockquote', 'pre', 'label', 'tr', 'hr', 'table', 'ul', 'ol',
+  'section', 'article', 'figcaption', 'dd', 'dt',
+]);
+
+function elementToPlainText(el) {
+  if (!el) return '';
+  const out = [];
+  // ブロックの切れ目は「区切り」なので重ならせない。
+  // 連続した li の間に空行が入ると、表示中の innerText と食い違うし、
+  // 送るトークンも無駄に増える。
+  // ただし <br> は書き手が明示的に入れた改行（Shift+Enter）なので、
+  // これだけは重なってよい。空の <div><br></div> が空行になるのはこのため。
+  const sep = () => { if (out.length && out[out.length - 1] !== '\n') out.push('\n'); };
+  const walk = (node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3) { out.push(child.data); continue; }   // TEXT_NODE
+      if (child.nodeType !== 1) continue;
+      const tag = (child.tagName || '').toLowerCase();
+      if (tag === 'br') { out.push('\n'); continue; }
+      if (tag === 'img' || tag === 'input') continue;   // 文字を持たないもの
+      const breaks = PLAIN_LINE_TAGS.has(tag);
+      if (breaks) sep();
+      walk(child);
+      if (breaks) sep();
+    }
+  };
+  walk(el);
+  return out.join('')
+    .replace(/[ \t]+\n/g, '\n')      // 行末の空白
+    .replace(/\n{3,}/g, '\n\n')       // 空行は1つまで
+    .trim();
+}
+
 function getConfirmedText() {
-  // innerText で全体のプレーンテキストを取る（ペースト直書きにも対応）
-  const plain = els.confirmed.innerText.replace(/\u00A0/g, ' ').trim();
+  // 全体のプレーンテキストを取る（ペースト直書きにも対応）
+  // v0.24.3: innerText はタブを閉じていると改行を落とすので自分で取る
+  const plain = elementToPlainText(els.confirmed).replace(/\u00A0/g, ' ').trim();
   if (!plain) return '';
 
   const paragraphs = els.confirmed.querySelectorAll('.paragraph');
   if (paragraphs.length === 0) return plain;
 
   // 録音+Gemini整形された .paragraph 構造を ## 見出し 付きで抽出
+  //
+  // v0.17.4: 以前は querySelector('h2') / querySelector('.p-body') で
+  // **最初の1つずつ**しか見ていなかった。ところが setParagraphContent() は
+  // 空行区切りごとに .p-body を作るので、1つの .paragraph の中に
+  // h2 + .p-body + .p-body … と並ぶことがある。
+  // その結果「見出しのある段落の2つ目以降の本文」が、画面には出ているのに
+  // コピー・Notion 送信・要約の入力から**黙って消えていた**（やっさん発見）。
+  // 子要素を順番に全部見る形に直す。
   const structured = Array.from(paragraphs)
     .map(p => {
-      const h2 = p.querySelector('h2');
-      const body = p.querySelector('.p-body');
-      if (h2 && body) return `## ${h2.textContent.trim()}\n\n${body.innerText.trim()}`;
-      return p.innerText.trim();
+      const parts = [];
+      for (const child of p.children) {
+        const t = elementToPlainText(child);
+        if (!t) continue;                                  // 段落間のすき間 div 等
+        parts.push(child.tagName === 'H2' ? `## ${t}` : t);
+      }
+      return parts.length ? parts.join('\n\n') : elementToPlainText(p);
     })
     .filter(Boolean)
     .join('\n\n');
@@ -533,11 +1556,11 @@ function getConfirmedText() {
 }
 
 function getMemoText() {
-  return els.memo.innerText.trim();
+  return elementToPlainText(els.memo);
 }
 
 function getSummaryText() {
-  return els.summary.innerText.trim();
+  return elementToPlainText(els.summary);
 }
 
 function hasAnyContent() {
@@ -551,8 +1574,11 @@ function updateActionButtons() {
   // v0.14.2: Notion アップロードは拡張版のみ。HTML 版では押せないようにしておく
   if (els.btnNotionUpload) {
     const usable = notionIsAvailable();
-    els.btnNotionUpload.disabled = !has || !usable;
+    // v0.24.50: 「Notion 連携」がオフなら押せない
+    const enabled = !!state.settings.notionEnabled;
+    els.btnNotionUpload.disabled = !has || !usable || !enabled;
     if (!usable) els.btnNotionUpload.title = 'Notion保存はChrome拡張版でのみ使えます';
+    else if (!enabled) els.btnNotionUpload.title = 'Notion 連携がオフです（設定 → Notion 連携）';
   }
 }
 
@@ -565,6 +1591,12 @@ function createParagraphEl(text, className = 'paragraph') {
   body.className = 'p-body';
   body.textContent = text;
   p.appendChild(body);
+  // v0.24.71: 新しい段落だけ、少し下からふわっと出す。前は CSS の keyframes（.paragraph に付いていた）で、
+  // セッションを切り替えて描き直すたびに全部の段落が一斉に出直していた（TODO「動きを SUMADO の仕様書に合わせる」の 10）
+  if (window.Motion) {
+    Motion.set(p, { opacity: 0, y: 8 });
+    Motion.animate(p, { opacity: 1, y: 0 }, { spring: Motion.SPRINGS.fade }).then((d) => { if (d) Motion.clear(p); });
+  }
   return p;
 }
 
@@ -599,6 +1631,12 @@ function setParagraphContent(pEl, refinedText) {
       pEl.appendChild(body);
     }
     isFirst = false;
+  }
+  // v0.24.71: 整えた中身に差し替わったときの、ふわっと（前は .paragraph.refined の keyframes で、
+  // セッションを切り替えて描き直すたびに整形済みの段落が全部ちらついていた）。いま画面にあるものだけ
+  if (window.Motion && pEl.isConnected && pEl.classList.contains('refined')) {
+    Motion.place(pEl, { opacity: 0.4 });
+    Motion.animate(pEl, { opacity: 1 }, { spring: Motion.SPRINGS.fade }).then((d) => { if (d) Motion.clear(pEl); });
   }
 }
 
@@ -730,6 +1768,10 @@ function appendRawChunk(text) {
     if (forceNewPara) state.pendingChunkEl.dataset.shortTs = String(Date.now());
     container.appendChild(state.pendingChunkEl);
     state.pendingChunkText = text;
+    // v0.24.133: 整形が続くなら処理、続かなければ確定
+    const phase = webSpeechFinalWillBeRefined() ? 'proc' : 'final';
+    if (phase === 'proc') state.pendingChunkEl.classList.add('ph-proc');
+    if (!inBg) playStageFx(state.pendingChunkEl, text, phaseFxMode(phase));
   } else {
     state.pendingChunkText += ' ' + text;
     const body = state.pendingChunkEl.querySelector('.p-body');
@@ -762,19 +1804,34 @@ function appendRawChunk(text) {
   // 既存のミドル整形（maybeConsolidateShortChunks、3 段落 or 60 秒）が拾って統合・見出し付け。
   if (
     state.settings.inputMode === 'web-speech' &&
-    state.settings.aiEnabled &&
-    state.settings.apiKey
+    tabOpt(workingSessionId(), 'liveRefine') &&   // v0.24.143: タブごと
+    geminiKey()
   ) {
     flushPendingToGemini();
   }
 }
 
-function getContextForGemini() {
-  // 録音対象コンテナから直近の整形済み3段落を使う（BG録音中はBG側から）
+/**
+ * 直前の文脈（録音対象コンテナの直近の整形済み3段落・BG録音中はBG側から）
+ * v0.24.55: 長さに上限を付けた。5分ぶんをまとめた段落が入ると数千字になり、それを毎回送っていた。
+ * 整形（ライブ整形・見出し追加）は前の流れを読むので 800字、文字起こしは表記の参考だけなので 300字
+ */
+function getContextForGemini(maxChars = 800) {
   const container = getWriteContainer();
   const paragraphs = container.querySelectorAll('.paragraph:not(.raw):not(.refining)');
   const last = Array.from(paragraphs).slice(-3);
-  return last.map(p => p.innerText.trim()).filter(Boolean).join('\n\n');
+  return tailForContextHint(last.map(p => p.innerText.trim()).filter(Boolean).join('\n\n'), maxChars);
+}
+
+/**
+ * ライブ整形・見出し追加を回せるか (v0.24.52)
+ * 連携がオンなら Claude が受けるので、Gemini のキーが無くても回せる
+ * （Web Speech モードなら Gemini を一度も使わずに済む）。
+ */
+function liveRefineReady() {
+  if (!tabOpt(workingSessionId(), 'liveRefine')) return false;   // v0.24.143: タブごと
+  if (geminiKey()) return true;
+  return typeof claudeBridgeIsEnabled === 'function' && claudeBridgeIsEnabled();
 }
 
 async function flushPendingToGemini() {
@@ -793,29 +1850,34 @@ async function flushPendingToGemini() {
     persistSessions();
   };
 
-  if (!state.settings.aiEnabled || !state.settings.apiKey) {
+  if (!liveRefineReady()) {
     targetEl.className = 'paragraph';
     setParagraphContent(targetEl, rawText);
     persist();
     return;
   }
 
-  targetEl.className = 'paragraph refining';
+  targetEl.className = 'paragraph refining ph-proc';   // v0.24.133: 整形を待つあいだも処理の見た目
 
   try {
     const refined = await refineWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
+      sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
     });
-    targetEl.className = 'paragraph refined';
-    setParagraphContent(targetEl, refined || rawText);
+    confirmSwap(targetEl, () => {   // v0.24.60: 整形で高さが変わっても下を跳ばさない。v0.24.128: AI整形の段階のエフェクト
+      targetEl.className = 'paragraph refined';
+      setParagraphContent(targetEl, refined || rawText);
+    }, phaseFxMode('final'));   // v0.24.133: 整形した字は確定
     updateActionButtons();
     persist();
   } catch (e) {
     console.warn('[refine] skipped (marked for retry):', e.message || e);
-    targetEl.className = 'paragraph needs-retry';
-    setParagraphContent(targetEl, rawText);
+    transcriptMorph(() => {
+      targetEl.className = 'paragraph needs-retry';
+      setParagraphContent(targetEl, rawText);
+    });
     persist();
   } finally {
     if (!inBg) autoScroll();
@@ -829,11 +1891,11 @@ async function flushPendingToGemini() {
  * まとめて Gemini に送って .paragraph として整形置換する。
  */
 async function refineUnstructuredInTranscript({ force = false, showFeedback = true } = {}) {
-  if (!state.settings.apiKey) {
+  if (!geminiKey()) {
     if (showFeedback) { alert('Gemini API キーが未設定です'); openSettings(); }
     return;
   }
-  if (!force && !state.settings.aiEnabled) return;
+  if (!force && !tabOpt(state.activeId, 'liveRefine')) return;   // v0.24.143: タブごと
 
   // .paragraph でない直下ノードを収集
   const unstructuredNodes = Array.from(els.confirmed.childNodes).filter(n => {
@@ -865,7 +1927,8 @@ async function refineUnstructuredInTranscript({ force = false, showFeedback = tr
 
   try {
     const refined = await refineWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
+      sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
     });
@@ -891,7 +1954,7 @@ async function refineUnstructuredInTranscript({ force = false, showFeedback = tr
  * 「今すぐ整形」ボタン押下時に呼ばれる。
  */
 async function retryPendingRefinements({ showFeedback = true } = {}) {
-  if (!state.settings.apiKey) return { tried: 0, ok: 0, failed: 0 };
+  if (!geminiKey() && !(typeof claudeBridgeIsEnabled === 'function' && claudeBridgeIsEnabled())) return { tried: 0, ok: 0, failed: 0 };
   const pending = Array.from(els.confirmed.querySelectorAll('.paragraph.needs-retry'));
   if (pending.length === 0) return { tried: 0, ok: 0, failed: 0 };
   let ok = 0, failed = 0;
@@ -901,7 +1964,8 @@ async function retryPendingRefinements({ showFeedback = true } = {}) {
     p.className = 'paragraph refining';
     try {
       const refined = await refineWithGemini({
-        apiKey: state.settings.apiKey,
+        apiKey: geminiKey(),
+        sessionContext: getSessionContextForAi(),
         context: getContextForGemini(),
         newChunk: rawText,
       });
@@ -921,10 +1985,7 @@ async function retryPendingRefinements({ showFeedback = true } = {}) {
   autoScroll();
   if (showFeedback && failed > 0) {
     setStatus('error', `${failed}件の整形は失敗（後でまた再試行可）`);
-    setTimeout(() => {
-      if (state.isRecording) setStatus('listening', '録音中');
-      else setStatus('idle', '停止');
-    }, 4000);
+    setTimeout(() => restoreStatus(), 4000);   // v0.24.56: 走っている処理があればそれを出す
   }
   return { tried: pending.length, ok, failed };
 }
@@ -936,7 +1997,7 @@ async function retryPendingRefinements({ showFeedback = true } = {}) {
  * ミドル整形を全体に拡張した版。
  */
 async function refineWholeTranscript({ showFeedback = true } = {}) {
-  if (!state.settings.apiKey) {
+  if (!geminiKey()) {
     if (showFeedback) { alert('Gemini API キーが未設定です'); openSettings(); }
     return;
   }
@@ -983,12 +2044,12 @@ async function refineWholeTranscript({ showFeedback = true } = {}) {
   const chunkNote = willChunk
     ? `\n\n⚠️ 長文のため、段落境界で分割して順次整形します（約${Math.ceil(allText.length / 3000)}チャンク、各 3000字 目安）。`
     : '';
-  if (!confirm(
-    `現在の文字起こし ${lengthStr} 文字を、見出し付きで再整形します。\n` +
-    `既存のパラグラフ構造は置き換わります。${chunkNote}\n\n` +
-    `もし結果がおかしければ「戻す」（Ctrl+Z）で元に戻せます。\n\n` +
-    `続けますか？`
-  )) return;
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  if (!(await confirmDialog({
+    title: `文字起こし ${lengthStr} 文字を、見出し付きで整形し直しますか？`,
+    message: `いまの段落の分け方は置き換わります。${chunkNote.replace(/^\n+/, '\n')}\n結果がおかしければ Ctrl+Z で戻せます。`,
+    ok: '整形し直す',
+  }))) return;
 
   // 破壊的操作なので Undo スナップショット
   pushUndo('全体整形', 'pane-transcript');
@@ -1000,13 +2061,44 @@ async function refineWholeTranscript({ showFeedback = true } = {}) {
     else if (n.nodeType === Node.ELEMENT_NODE && !n.classList.contains('paragraph')) n.remove();
   });
   const target = createParagraphEl('（全体整形中… しばらくお待ちください）', 'paragraph refining');
+  // v0.24.27: 途中でタブを切り替えられても結果を戻せるよう、印を付けておく
+  const refineId = 'r' + Date.now().toString(36);
+  target.dataset.refineId = refineId;
   container.appendChild(target);
 
   const inBg = container !== els.confirmed;
+  const sessionId = state.activeId;
   const persist = () => {
     if (inBg) syncBgToSession();
     else snapshotActiveToSession();
     persistSessions();
+  };
+  /* v0.24.27: 結果を「整形中」の段落に入れる。
+   *
+   * 途中で別のタブに移ると、画面の文字起こしはそのタブのものに入れ替わり、`target` は
+   * 画面から外れる。v0.24.26 まではそのまま外れた `target` に書いて**結果を捨て**、
+   * 元のタブには「（全体整形中…）」の1行だけが残っていた（実機の Chromium で再現）。
+   * 外れていたら、印の付いた段落を探して入れる（元のタブに戻っていれば画面の中、
+   * まだ別のタブなら保存データの中）。 */
+  const applyToTarget = (fn) => {
+    if (inBg || target.isConnected) { fn(target); delete target.dataset.refineId; persist(); return; }
+    if (sessionId === state.activeId) {
+      const el = els.confirmed.querySelector(`[data-refine-id="${refineId}"]`);
+      if (el) { fn(el); delete el.dataset.refineId; snapshotActiveToSession(); persistSessions(); }
+      return;
+    }
+    const sess = state.sessions.find((x) => x.id === sessionId);
+    if (!sess) return;
+    const box = document.createElement('div');
+    box.innerHTML = sess.transcript || '';
+    const el = box.querySelector(`[data-refine-id="${refineId}"]`);
+    if (!el) return;
+    fn(el);
+    delete el.dataset.refineId;
+    sess.transcript = box.innerHTML;
+    sess.updatedAt = Date.now();
+    persistSessions();
+    diagLog.info('全体整形: 別のタブを開いている間に終わったので、元のタブに入れました');
   };
   if (inBg) syncBgToSession(); else autoScroll();
   diagLog.info(`全体整形開始: ${allText.length}字${willChunk ? '（チャンク分割）' : ''}`);
@@ -1017,26 +2109,23 @@ async function refineWholeTranscript({ showFeedback = true } = {}) {
       refined = await refineByChunks(allText, target);
     } else {
       refined = await refineWithGemini({
-        apiKey: state.settings.apiKey,
+        apiKey: geminiKey(),
+        sessionContext: getSessionContextForAi(),
         context: '',
         newChunk: allText,
         maxOutputTokens: 8192,
+        feature: 'whole-refine',   // v0.24.0: 後処理なので Claude に回してよい
       });
     }
-    target.className = 'paragraph refined';
-    setParagraphContent(target, refined || allText);
-    persist();
+    applyToTarget((el) => { el.className = 'paragraph refined'; setParagraphContent(el, refined || allText); });
     diagLog.info(`全体整形完了: ${(refined || allText).length}字`);
-    if (!inBg) { updateActionButtons(); autoScroll(); }
+    if (!inBg && sessionId === state.activeId) { updateActionButtons(); autoScroll(); }
   } catch (e) {
     console.warn('[refine whole] failed:', e.message || e);
-    target.className = 'paragraph needs-retry';
-    setParagraphContent(target, allText);
-    persist();
+    applyToTarget((el) => { el.className = 'paragraph needs-retry'; setParagraphContent(el, allText); });
     if (showFeedback) {
       setStatus('error', '全体整形失敗: ' + (e.message || '').slice(0, 60));
-      setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
-                                  state.isRecording ? '録音中' : '停止'), 4000);
+      setTimeout(() => restoreStatus(), 4000);
     }
   }
 }
@@ -1072,10 +2161,12 @@ async function refineByChunks(fullText, progressTargetEl) {
     }
     try {
       const out = await refineWithGemini({
-        apiKey: state.settings.apiKey,
+        apiKey: geminiKey(),
+        sessionContext: getSessionContextForAi(),
         context: prevTail.slice(-500),  // 直前チャンクの末尾500字だけ文脈として
         newChunk: blocks[i],
         maxOutputTokens: 4096,           // チャンク単位なので 4k で十分
+        feature: 'whole-refine',         // v0.24.0: 全体整形の一部。後処理なので回してよい
       });
       const outClean = (out || blocks[i]).trim();
       results.push(outClean);
@@ -1095,12 +2186,50 @@ async function refineByChunks(fullText, progressTargetEl) {
  * 誤字が残ることがある。3段落溜まるか 60秒経ったら refineWithGemini で
  * 文脈込みに統合 + 見出し追加 で整形しなおす。 */
 
-const MID_CHUNK_THRESHOLD = 3;      // 何段落溜まったら発火
-const MID_TIME_THRESHOLD_MS = 60000; // 最初の短チャンクから何ms経ったら発火
+// v0.24.51: 段落の数で発火するのをやめ、設定の秒数（midConsolidateSec）だけで発火する。
+// 以前の「3段落 or 60秒」だと、チャンクが20秒前後で来るので実質1分ごとに見出しが付いていた
+function midConsolidateMs() {
+  const n = Number(state.settings.midConsolidateSec);
+  return (Number.isFinite(n) ? Math.max(30, Math.min(1800, n)) : 300) * 1000;
+}
+
+/**
+ * 送信中の音声チャンクが全部確定するまで黙って待つ (v0.18.6)
+ *
+ * 停止直後の最終整形が、**最後のチャンクの到着を待たずに**走っていた。
+ * 実機ログ:
+ *   18:34:35 録音停止
+ *   18:34:36 ミドル整形開始 2段落      ← まだ2つしか届いていない
+ *   18:34:36 音声チャンク送信 6.9秒    ← 最後のチャンクはこの後
+ * 結果、最後の段落だけが繋ぎ直しの対象から漏れ、文の途中で切れたまま残っていた。
+ *
+ * ensureTranscriptSettled() は確認ダイアログを出す対話用なので、ここでは使えない。
+ *
+ * recorder.stop() から onstop までは非同期なので、カウンタが増える前に見にいくと
+ * 「0件」と誤認する。finalChunkPending でその隙間を埋める。
+ */
+async function waitForAudioSettled(timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while ((state.finalChunkPending || state.audioInFlightCount > 0) && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 100));
+  }
+  if (state.finalChunkPending || state.audioInFlightCount > 0) {
+    diagLog.info(`確定待ちが${(timeoutMs / 1000)}秒で時間切れ`
+      + `（残り${state.audioInFlightCount}件）。そのまま整形に進みます`);
+  }
+  state.finalChunkPending = false;
+}
 
 function maybeConsolidateShortChunks() {
   if (state.isConsolidatingShortChunks) return; // 多重実行防止
-  if (!state.settings.aiEnabled || !state.settings.apiKey) return;
+  if (!liveRefineReady()) return;
+  // v0.18.9: 停止処理中は、最後のチャンクまで揃えてから一度にまとめたい。
+  // ここで先に発火すると、最後の1つが取り残されて別立てで整形される:
+  //   19:00:07 ミドル整形開始 3段落・224字   ← 3つ溜まって発火
+  //   19:00:09 ミドル整形開始 1段落・5字     ← 最後の1つだけ
+  // 分かれると、境界をまたいだ文を繋ぎ直せないうえ、呼び出しも1回余計になる。
+  // 停止処理の最後で consolidateShortChunks が全部まとめて呼ばれる
+  if (!state.isRecording && (state.finalChunkPending || state.audioInFlightCount > 0)) return;
   const container = getWriteContainer();
   if (!container) return;
   const shortParas = Array.from(container.querySelectorAll('.paragraph.short-refined'));
@@ -1109,7 +2238,7 @@ function maybeConsolidateShortChunks() {
   const firstTs = parseInt(shortParas[0].dataset.shortTs || '0', 10);
   const elapsed = firstTs ? Date.now() - firstTs : 0;
 
-  if (shortParas.length < MID_CHUNK_THRESHOLD && elapsed < MID_TIME_THRESHOLD_MS) return;
+  if (elapsed < midConsolidateMs()) return;
 
   consolidateShortChunks(shortParas);
 }
@@ -1124,11 +2253,16 @@ async function consolidateShortChunks(shortParas) {
   const rawText = shortParas.map(p => p.innerText.trim()).filter(Boolean).join('\n\n');
 
   // 先頭を refining に、2つ目以降は削除
-  firstPara.className = 'paragraph refining';
-  setParagraphContent(firstPara, '（文脈整形中…）');
-  for (let i = 1; i < shortParas.length; i++) {
-    shortParas[i].remove();
-  }
+  // v0.24.51: 待っている間も元の文字を出しておく（.refining で薄く見える）。以前は「（文脈整形中…）」の
+  // 1行に置き換えていたが、5分ぶんまとめるようになって、その間に5分ぶんが見えなくなるため
+  // v0.24.60: まとめるときに、残りの段落が一瞬で詰まらないように（FLIP）
+  transcriptMorph(() => {
+    firstPara.className = 'paragraph refining';
+    setParagraphContent(firstPara, rawText);
+    for (let i = 1; i < shortParas.length; i++) {
+      shortParas[i].remove();
+    }
+  });
   if (inBg) syncBgToSession(); else snapshotActiveToSession();
   persistSessions();
 
@@ -1136,17 +2270,31 @@ async function consolidateShortChunks(shortParas) {
 
   try {
     const refined = await refineWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
+      sessionContext: getSessionContextForAi(),
       context: getContextForGemini(),
       newChunk: rawText,
+      // v0.17.2: ここに集まるのは同じ発話を機械的に切った断片の並び。
+      // 文の途中で切れているものを繋ぎ直させる
+      joinFragments: true,
+      // v0.24.51: 5分ぶんまとめると数千字になり、既定の 2048 では返事が途中で切れる。量に合わせて広げる
+      maxOutputTokens: Math.min(16384, Math.max(2048, rawText.length * 2)),
+      // v0.24.52: 連携がオンなら Claude に回す。失敗しても Gemini には回さない
+      feature: 'live-heading',
+      // v0.24.54 ①: ライブ要約の目次と見出しの言葉をそろえる
+      headingHints: liveSummaryTocTitles(inBg ? (state.recordingSessionId || state.activeId) : state.activeId),
     });
-    firstPara.className = 'paragraph refined';
-    setParagraphContent(firstPara, refined || rawText);
+    transcriptMorph(() => {   // v0.24.60
+      firstPara.className = 'paragraph refined';
+      setParagraphContent(firstPara, refined || rawText);
+    });
     diagLog.info(`ミドル整形完了 → ${(refined || rawText).length}字`);
   } catch (e) {
     console.warn('[consolidate] failed:', e.message || e);
-    firstPara.className = 'paragraph needs-retry';
-    setParagraphContent(firstPara, rawText);
+    transcriptMorph(() => {
+      firstPara.className = 'paragraph needs-retry';
+      setParagraphContent(firstPara, rawText);
+    });
   } finally {
     state.isConsolidatingShortChunks = false;
     if (inBg) syncBgToSession(); else snapshotActiveToSession();
@@ -1159,8 +2307,17 @@ async function consolidateShortChunks(shortParas) {
 
 /* ───────── Silence timers ───────── */
 
+/**
+ * ライブ整形のタイミング（Web Speech モード）
+ *
+ * v0.24.49: 「黙ってから◯秒」をやめ、「聞き取り始めてから◯秒」で送る（やっさんの指定
+ * 「無音ではなく設定した秒数で送信するよう変更」）。以前は聞き取るたびにタイマーを
+ * 掛け直していたので、話し続けている間はいつまでも送られなかった。
+ * いまは、走っていなければ掛けるだけで、掛け直さない。
+ * 名前（resetSilenceTimer / silenceSec）は呼び出し元と保存のキーに合わせて据え置き。
+ */
 function resetSilenceTimer() {
-  if (state.silenceTimer) clearTimeout(state.silenceTimer);
+  if (state.silenceTimer) return;
   state.silenceTimer = setTimeout(() => {
     state.silenceTimer = null;
     flushPendingToGemini();
@@ -1221,17 +2378,54 @@ function updateSilenceCountdown() {
 
 /* ───────── Recognition ───────── */
 
+/**
+ * 音声認識がどこまで進んだかを数える (v0.24.20)
+ *
+ * やっさん報告「リアルタイム表示が動かない」→「Web Speech モードでも文字が出ない」。
+ * 診断ログには並走の「開始」だけがあり、エラーも文字も無かった。**黙って何も
+ * 返さない**状態で、どこで止まっているかが見えない。音声認識は
+ *   audiostart（音を取り始めた）→ soundstart（音を検知）→ speechstart（声と判断）→ result
+ * の順に進むので、それぞれ何回起きたかを録音停止時に1行で残す。
+ *   - audiostart が 0 … マイクを開けていない（許可・デバイス）
+ *   - soundstart が 0 … 開けたが無音しか来ない（別のマイク・ミュート・OS の許可）
+ *   - speechstart はあるが result が 0 … 声は届いているのに認識結果が返らない（Chrome / Google 側）
+ * on〜 は各所で上書きされるので addEventListener で横から数える。
+ */
+function attachSpeechTrace(rec) {
+  const t = { audiostart: 0, soundstart: 0, speechstart: 0, result: 0, nospeech: 0, end: 0, errors: {} };
+  for (const k of ['audiostart', 'soundstart', 'speechstart', 'result', 'end']) {
+    rec.addEventListener(k, () => { t[k]++; });
+  }
+  rec.addEventListener('error', (e) => {
+    if (e.error === 'no-speech') t.nospeech++;
+    else t.errors[e.error] = (t.errors[e.error] || 0) + 1;
+  });
+  rec.__trace = t;
+  return rec;
+}
+
+function logSpeechTrace(rec, label) {
+  const t = rec && rec.__trace;
+  if (!t) return;
+  const errs = Object.entries(t.errors).map(([k, v]) => `${k}×${v}`).join(' ');
+  diagLog.info(`${label}のまとめ: 音を取り始めた${t.audiostart}回 音を検知${t.soundstart}回 `
+    + `声と判断${t.speechstart}回 結果${t.result}回 / 無音で終了${t.nospeech}回 区切り${t.end}回`
+    + (errs ? ` / エラー ${errs}` : ''));
+}
+
 function buildRecognition() {
   if (!SpeechRecognition) {
     alert('このブラウザは Web Speech API に対応していません。Google Chrome で開いてください。');
     return null;
   }
-  const rec = new SpeechRecognition();
+  const rec = attachSpeechTrace(new SpeechRecognition());
   rec.lang = 'ja-JP';
   rec.continuous = true;
   rec.interimResults = true;
 
-  rec.onstart = () => setStatus('listening', '録音中');
+  // Web Speech モードの本体。recordingLabel() はこのモードでは「録音中」を返すが、
+  // 直書きしないのは、モードが増えたときに取り残されないようにするため
+  rec.onstart = () => setStatus('listening', recordingLabel());
 
   rec.onresult = (event) => {
     // v0.13.31 完全分離型：
@@ -1280,7 +2474,7 @@ function buildRecognition() {
     if (isBgRecording()) {
       els.interim.textContent = '';
     } else {
-      els.interim.textContent = interimForDisplay;
+      ConfirmFx.renderDraft(els.interim, interimForDisplay, state.settings.draftEffect);   // v0.24.120: 下書きのエフェクト
       if (interim || gotFinal) hideEmptyHint();
       if (gotFinal || interim) autoScroll();
     }
@@ -1403,7 +2597,22 @@ function showMicDeniedGuide(detail) {
   ].join('\n'));
 }
 
+/** 録音中、一定間隔で文脈を拾い直すタイマー (v0.16.1) */
+function startContextExtractTimer() {
+  stopContextExtractTimer();
+  // 起動直後は記録が短くて意味がないので、最初の実行も間隔ぶん待つ
+  state.contextExtractTimer = setInterval(() => { refreshAutoContext(); }, 30 * 1000);
+}
+function stopContextExtractTimer() {
+  if (state.contextExtractTimer) {
+    clearInterval(state.contextExtractTimer);
+    state.contextExtractTimer = null;
+  }
+}
+
 async function startRecording() {
+  // v0.24.55: この録音のあいだに Gemini をどれだけ使ったかを数え直す（止めたときに診断ログへ）
+  if (typeof geminiUsageReset === 'function') geminiUsageReset();
   if (state.settings.inputMode === 'gemini-audio') {
     return startGeminiAudioRecording();
   }
@@ -1433,6 +2642,8 @@ async function startRecording() {
   try {
     state.recognition.start();
     setRecordingUI(true);
+    startContextExtractTimer();   // v0.16.1
+  startLiveSummaryTimer();      // v0.24.22
     resetLongSilenceTimer();
     // v0.13.14: Web Speech 強制 commit タイマーを起動（commitSec=0 なら何もしない）
     restartWebSpeechCommitTimer();
@@ -1455,8 +2666,10 @@ function stopRecording() {
   state.shouldAutoRestart = false;
   if (state.midChunkWatchdog) { clearInterval(state.midChunkWatchdog); state.midChunkWatchdog = null; }
   if (state.settings.inputMode === 'gemini-audio') {
+    stopLiveDisplay();          // v0.17.0
     stopGeminiAudioRecording();
   } else {
+    logSpeechTrace(state.recognition, '音声認識（Web Speech）');   // v0.24.20
     // v0.13.14: 強制 commit タイマーを止めてから recognition を止める
     stopWebSpeechCommitTimer();
     // v0.13.31: 無音 stop タイマーも停止
@@ -1471,15 +2684,28 @@ function stopRecording() {
   }
   setStatus('idle', '停止');
   setRecordingUI(false);
+  // v0.16.1: 文脈の自動抽出を止め、最後の内容で1回だけ更新しておく
+  // （次にこのタブで録音を再開したとき、いきなり文脈が効く）
+  stopContextExtractTimer();
+  stopLiveSummaryTimer();       // v0.24.22
+  refreshAutoContext({ force: true });
   clearAllTimers();
   flushPendingToGemini().finally(async () => {
+    // v0.18.6: 最後のチャンクが届く前に整形を始めると、その段落だけが
+    // 繋ぎ直しの対象から漏れる（文の途中で切れたまま残る）
+    await waitForAudioSettled();
     // 録音停止時に、残っている short-refined パラグラフを強制的に
     // ミドル整形（refineWithGemini で見出し付け＋文脈統合）してからサマリ化
     const container = (state.bgTranscriptEl && recSessionId !== state.activeId)
       ? state.bgTranscriptEl : els.confirmed;
     const remainingShort = Array.from(container.querySelectorAll('.paragraph.short-refined'));
-    if (remainingShort.length > 0 && state.settings.aiEnabled && state.settings.apiKey) {
+    if (remainingShort.length > 0 && liveRefineReady()) {
       await consolidateShortChunks(remainingShort);
+    }
+    // v0.24.55: 録音中に Gemini をどれだけ使ったか（要約・タイトルはこのあとなので含まない）
+    if (typeof formatGeminiUsage === 'function') {
+      const line = formatGeminiUsage(geminiUsageSnapshot());
+      if (line) diagLog.info(line + '（録音中の分）');
     }
     // BGモードの場合、flushPendingToGemini は bgTranscriptEl に書き込んだ後 syncBgToSession で
     // session.transcript に反映済み。foreground なら snapshot が必要。
@@ -1493,18 +2719,1490 @@ function stopRecording() {
     state.recordingSessionId = null;
     persistSessions();
     renderTabs(); // 録音中の赤線消去
-    if (state.settings.autoSummarize && state.settings.aiEnabled && state.settings.apiKey) {
+    // v0.24.25: リアルタイム要約は別のタブになったので、最終版に更新したうえで、
+    // 普通の要約もこれまでどおり作る（v0.24.22〜24 は同じタブだったので、普通の要約を止めていた）
+    if (liveSummaryActive(recSessionId)) {   // v0.24.143: 止めたタブのオン・オフで（recordingSessionId はもう空）
+      await runLiveSummary({ sessionId: recSessionId, final: true });
+    }
+    // v0.24.39: 「要約・タイトル生成」はライブ整形（aiEnabled）と独立。以前はライブ整形をオフにすると
+    // 要約も止まっていた（やっさん「ここに矛盾がある。独立させてほしい」）
+    if (tabOpt(recSessionId, 'autoSummary') && geminiKey()) {   // v0.24.143: タブごと
       await generateSummary({ silent: true, sessionId: recSessionId });
       await autoGenerateTitle({ sessionId: recSessionId });
     }
+    // v0.24.142: 要約・タイトル生成のあとで、Notion に自動で保存（設定がオンのとき）
+    await autoSaveToNotion(recSessionId);
   });
+}
+
+/* ───────── リアルタイム要約 (v0.24.22) ─────────
+ *
+ * 目次付きで、録音中に一定間隔で要約を更新する。Claude 連携のみ。
+ * 文面の組み立てと整形は live-summary.js（純関数）。ここは「いつ・どのタブに」を受け持つ。
+ */
+
+/* ───────── 動いている処理の印をタブごとに持つ (v0.24.27) ─────────
+ *
+ * やっさん「要約を生成ボタンを押すと、アニメーションがタブをまたいでも動いてる。
+ * タブで独立して動くよね？」。ボタンや要約の欄は**全タブで1つ**なのに、
+ * 処理を始めたタブを見ずに印を付け外ししていた。別のタブに移っても印が残り、
+ * 要約の欄は暗く押せないまま、逆に元のタブに戻ると先に外れていることもあった。
+ * 印は「どのタブで何が動いているか」で持ち、タブを切り替えるたびに付け直す。
+ */
+function busySet(kind) {
+  if (!state.busy) state.busy = {};
+  if (!state.busy[kind]) state.busy[kind] = new Set();
+  return state.busy[kind];
+}
+function markBusy(kind, sessionId, on) {
+  const set = busySet(kind);
+  if (on) set.add(sessionId); else set.delete(sessionId);
+  refreshBusyIndicators();
+}
+function isBusy(kind, sessionId) { return busySet(kind).has(sessionId); }
+
+function refreshBusyIndicators() {
+  const id = state.activeId;
+  const summary = isBusy('summary', id);
+  if (els.btnSummaryCombo) els.btnSummaryCombo.classList.toggle('firing', summary);
+  if (els.summary) els.summary.classList.toggle('generating', summary);
+  if (els.liveSummary) els.liveSummary.classList.toggle('generating', isBusy('liveDim', id));
+  if (els.btnLiveRedo) els.btnLiveRedo.disabled = isBusy('live', id);
+  if (els.btnRefineTranscript) els.btnRefineTranscript.classList.toggle('firing', isBusy('refine', id));
+  const memoBtn = document.getElementById('btn-memo-refine-selection');
+  if (memoBtn) memoBtn.classList.toggle('firing', isBusy('memoRefine', id));
+}
+
+/**
+ * ライブ要約を Gemini で作る (v0.24.93)
+ * 文面は Claude と同じ（buildLiveSummaryPrompt）。返す形も claudeBridgeRun にそろえる（{ ok, text, seconds, error }）。
+ * feature 'live-summary' は Claude の振り分けの対象に入っていないので、_callGemini はそのまま Gemini に送る
+ */
+/** ライブ要約を Claude で（v0.24.145: 見張りつき。スタンバイから戻ったら、待たずに 1 回やり直す） */
+async function runLiveSummaryWithClaude(prompt) {
+  const opts = { effort: 'low', timeoutMs: LIVE_SUMMARY_TIMEOUT_MS };
+  if (typeof claudeWatchRun !== 'function') return claudeBridgeRun(prompt, opts);
+  let r = await claudeWatchRun(prompt, opts, { feature: 'live-summary' });
+  if (r.wake) {
+    diagLog.info('スタンバイから戻ったので、ライブ要約を待たずにやり直します');
+    r = await claudeWatchRun(prompt, opts, { feature: 'live-summary', mode: 'wake' });
+  }
+  return r;
+}
+
+async function runLiveSummaryWithGemini(prompt) {
+  const t0 = Date.now();
+  try {
+    const text = await _callGemini({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.3, topP: 0.9, maxOutputTokens: 8192, responseMimeType: 'text/plain' },
+    }, geminiKey(), { feature: 'live-summary' });
+    return { ok: true, text, seconds: Math.round((Date.now() - t0) / 100) / 10 };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+/** リアルタイム要約で Claude を待つ上限。ほかの処理（180秒）より長くする (v0.24.23) */
+const LIVE_SUMMARY_TIMEOUT_MS = 600000;
+
+/** いま使える状態か。設定がオンで、Claude 連携がオンで、ログイン切れ等で止まっていない */
+function liveSummaryActive(sessionId = workingSessionId()) {
+  if (!tabOpt(sessionId, 'liveSummary')) return false;   // v0.24.143: タブごと
+  // v0.24.93: 作るのは 7 個セットの AI（使う AI の表）。Claude ならログイン切れ等で止まっていないかも見る
+  const engine = postEngineNow();
+  if (!engine) return false;
+  if (engine === 'claude' && typeof claudeBridgeBrokenReason === 'function' && claudeBridgeBrokenReason()) return false;
+  return true;
+}
+
+function startLiveSummaryTimer() {
+  stopLiveSummaryTimer();
+  state.liveSummaryLastAt = Date.now();   // 最初の更新も間隔ぶん待つ（始めた直後は中身が無い）
+  state.liveSummaryLastLen = 0;
+  // 20秒ごとに「間隔が来たか」だけ見る。間隔そのもので setInterval しないのは、
+  // 録音中に設定で分数を変えたときに、その場で効かせるため
+  state.liveSummaryTimer = setInterval(liveSummaryTick, 20 * 1000);
+}
+
+function stopLiveSummaryTimer() {
+  if (state.liveSummaryTimer) { clearInterval(state.liveSummaryTimer); state.liveSummaryTimer = null; }
+}
+
+function liveSummaryTick() {
+  if (!state.isRecording) { stopLiveSummaryTimer(); return; }
+  if (!liveSummaryActive() || state.liveSummaryBusy) return;
+  const ms = clampLiveSummaryMinutes(state.settings.liveSummaryMin) * 60 * 1000;
+  if (Date.now() - (state.liveSummaryLastAt || 0) < ms) return;
+  runLiveSummary({ sessionId: state.recordingSessionId || state.activeId });
+}
+
+/** そのタブの文字起こし・メモ・いまの要約（プレーンテキスト）を集める */
+function liveSummarySources(session) {
+  const active = session.id === state.activeId;
+  // v0.24.25: 前回の要約は「リアルタイム要約」タブの中身（要約タブとは別）
+  return {
+    transcript: active ? getConfirmedText() : htmlToPlain(session.transcript),
+    memo: active ? getMemoText() : htmlToPlain(session.memo),
+    previous: active ? elementToPlainText(els.liveSummary) : htmlToPlain(session.liveSummary || ''),
+  };
+}
+
+/**
+ * Markdown → 要約タブに入れる HTML（目次から本文へ飛べるようにする）
+ * v0.24.54: 目次の項目に「始まりの発言」（data-ls-quote）と、文字起こしへ飛ぶボタンを付ける。
+ * 今回 Claude が発言を返さなかった項目は、前回の同じ見出しのものを引き継ぐ
+ */
+function renderLiveSummaryHtml(md, quotes = {}, previousHtml = '') {
+  const box = document.createElement('div');
+  box.innerHTML = renderMarkdown(md);
+  linkLiveSummaryToc(box);
+  const prev = {};
+  if (previousHtml) {
+    const pb = document.createElement('div');
+    pb.innerHTML = previousHtml;
+    pb.querySelectorAll('li[data-ls-quote]').forEach((li) => {
+      prev[liveSummaryTextKey(cleanLiveSummaryTitle(liveSummaryTocItemText(li)))] = li.dataset.lsQuote;
+    });
+  }
+  box.querySelectorAll('li[data-ls-jump]').forEach((li) => {
+    const q = (quotes || {})[li.dataset.lsJump] || prev[liveSummaryTextKey(cleanLiveSummaryTitle(liveSummaryTocItemText(li)))];
+    if (q) li.dataset.lsQuote = q;
+  });
+  decorateLiveSummaryToc(box);
+  return box.innerHTML;
+}
+
+/** 目次の項目の文字（飛ぶボタンを除く）(v0.24.54) */
+function liveSummaryTocItemText(li) {
+  const c = li.cloneNode(true);
+  c.querySelectorAll('.ls-goto').forEach((b) => b.remove());
+  return c.textContent.trim();
+}
+
+/**
+ * 目次の各項目に「文字起こしで見る」ボタンを付ける (v0.24.54・やっさん採用の案②)
+ * 前の版で作ったライブ要約にも付くよう、開くたびに呼ぶ（付いていれば何もしない）。
+ * ボタンは文字を持たないので、コピー・Notion・次の回に Claude へ渡す前回の要約には混ざらない
+ */
+function decorateLiveSummaryToc(root) {
+  if (!root) return;
+  root.querySelectorAll('ol.live-summary-toc > li[data-ls-jump]').forEach((li) => {
+    if (li.querySelector('.ls-goto')) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ls-goto';
+    b.contentEditable = 'false';
+    b.dataset.lsGoto = '1';
+    b.title = '文字起こしで見る';
+    b.setAttribute('aria-label', '文字起こしで見る');
+    b.innerHTML = typeof icon === 'function' ? icon('mic', 13) : '';
+    li.appendChild(b);
+  });
+}
+
+/** 目次の項目から、文字起こしのその話題の場所へ飛ぶ (v0.24.54) */
+function liveSummaryJumpToTranscript(li) {
+  const blocks = [], targets = [];
+  els.confirmed.querySelectorAll('.paragraph').forEach((p) => {
+    for (const c of p.children) {
+      const t = elementToPlainText(c);
+      if (!t) continue;
+      blocks.push({ kind: c.tagName === 'H2' ? 'h2' : 'p', text: t });
+      targets.push(c);
+    }
+  });
+  const r = findLiveSummaryTarget({ title: liveSummaryTocItemText(li), quote: li.dataset.lsQuote || '', blocks });
+  if (r.index < 0) {
+    statusNotice('error', '文字起こしの中で、この話題の場所を見つけられませんでした', { ms: 3500 });
+    return false;
+  }
+  const el = targets[r.index];
+  switchInnerPane('pane-transcript');
+  // タブの切り替えが済んでから（見えていない要素は scrollIntoView が効かない）
+  setTimeout(() => {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // 印は DOM に残さない（クラスを付けると、消す前に保存されて残ることがある）
+    if (el.animate) el.animate([{ backgroundColor: 'rgba(255, 196, 0, 0.35)' }, { backgroundColor: 'transparent' }], { duration: 1800, easing: 'ease-out' });
+  }, 80);
+  return true;
+}
+
+/**
+ * いまのライブ要約の目次の見出し (v0.24.54 ①)。見出し追加で言葉をそろえるのに使う
+ * ライブ要約を使っていないときは空（使っていない人のプロンプトを変えない）
+ */
+function liveSummaryTocTitles(sessionId) {
+  if (!liveSummaryActive(sessionId)) return [];
+  const s = state.sessions.find((x) => x.id === sessionId);
+  const html = sessionId === state.activeId && els.liveSummary ? els.liveSummary.innerHTML : ((s && s.liveSummary) || '');
+  if (!html) return [];
+  const box = document.createElement('div');
+  box.innerHTML = html;
+  return Array.from(box.querySelectorAll('ol.live-summary-toc > li'))
+    .map((li) => cleanLiveSummaryTitle(liveSummaryTocItemText(li))).filter(Boolean);
+}
+
+/**
+ * 要約を1回更新する
+ * @param {object} o
+ * @param {string} o.sessionId
+ * @param {boolean} [o.final]  録音を止めたあと
+ * @param {boolean} [o.fresh]  前回に縛られず最初から（要約ボタンから）
+ * @param {boolean} [o.manual] 人が押した（失敗したら必ず知らせる）
+ */
+async function runLiveSummary({ sessionId, final = false, fresh = false, manual = false } = {}) {
+  if (state.liveSummaryBusy) return false;
+  let session = state.sessions.find((x) => x.id === sessionId);
+  if (!session) return false;
+  if (session.id === state.activeId) snapshotActiveToSession();
+  const src = liveSummarySources(session);
+  // 前回から増えていなければ回さない（無音が続いているときに同じものを作り直さない）。
+  // 最後と「作り直す」は、増えていなくても回す
+  if (!src.transcript || src.transcript.length < 200) {
+    if (manual) setStatus('idle', '文字起こしがまだ短いので、要約できません');
+    return false;
+  }
+  if (!final && !fresh && src.transcript.length - (state.liveSummaryLastLen || 0) < 200) {
+    state.liveSummaryLastAt = Date.now();
+    return false;
+  }
+
+  state.liveSummaryBusy = true;
+  state.liveSummaryLastAt = Date.now();
+  const wasActive = session.id === state.activeId;
+  // 録音中の定期更新では暗くしない（.generating は押せなくする。読んでいる途中で
+  // 30秒ほど読めなくなるのは困る）。人が押したときと、止めたあとの最終版だけ
+  const dim = manual || fresh || final;
+  markBusy('live', sessionId, true);
+  if (dim) markBusy('liveDim', sessionId, true);
+  // v0.24.93: Claude か Gemini か（使う AI の表の 7 個セット）。途中で表を変えても、この回は始めたときの AI で作る
+  const engine = postEngineNow();
+  const who = engine === 'gemini' ? 'Gemini' : 'Claude';
+  diagLog.info(`ライブ要約を更新します（${who} / ${fresh ? '最初から' : final ? '最終版' : '途中'} / 文字起こし${src.transcript.length}字）`);
+  if (!state.isRecording || manual) beginStatusTask(`live:${sessionId}`, fresh ? `目次付きで要約し直しています（${who}）` : `ライブ要約を更新中（${who}）`);
+  try {
+    const prompt = buildLiveSummaryPrompt({
+      transcript: src.transcript, previous: src.previous, memo: src.memo,
+      title: session.title, final, fresh,
+    });
+    // v0.24.23: 考える量を減らし（実測 23秒→14秒・中身はほぼ同じ）、長く待つ。
+    // やっさんの手元では 144.8秒かかり、次の回は 180秒で時間切れになっていた
+    const r = engine === 'gemini'
+      ? await runLiveSummaryWithGemini(prompt)
+      : await runLiveSummaryWithClaude(prompt);
+    if (!r.ok) throw new Error(r.error || `${who} で処理できませんでした`);
+    const norm = normalizeLiveSummary(r.text);
+    if (!norm.ok) diagLog.info('ライブ要約: 目次が見つからない形で返ってきました（そのまま表示します）');
+    session = state.sessions.find((x) => x.id === sessionId);
+    if (!session) return false;
+    const html = renderLiveSummaryHtml(norm.md, norm.quotes,
+      session.id === state.activeId && els.liveSummary ? els.liveSummary.innerHTML : (session.liveSummary || ''));
+    if (session.id === state.activeId && elementToPlainText(els.liveSummary).trim()) {
+      pushUndo(fresh ? 'ライブ要約を作り直し' : 'ライブ要約を更新', 'pane-live');
+    }
+    session.liveSummary = html;
+    session.updatedAt = Date.now();
+    if (session.id === state.activeId) {
+      els.liveSummary.innerHTML = html;
+      showHint(els.liveSummaryEmpty, false);   // v0.24.79
+      syncPaneBaselineFromDOM();
+      updateActionButtons();
+    }
+    persistSessions();
+    state.liveSummaryLastLen = src.transcript.length;
+    diagLog.info(`ライブ要約を更新しました（${r.seconds != null ? r.seconds + '秒' : '?'}）`);
+    statusNotice('listening', fresh ? `目次付きで要約し直しました（${who}）` : `ライブ要約を更新しました（${who}）`, { ms: 2500 });
+    return true;
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    diagLog.info('ライブ要約を更新できませんでした: ' + msg);
+    // ログイン切れなどは覚えて、10分ごとに同じ失敗を繰り返さない（要約・質問と同じ扱い）
+    if (engine === 'claude' && typeof claudeBridgeIsFatal === 'function' && claudeBridgeIsFatal(msg)) claudeBridgeMarkBroken(msg);
+    // Claude で失敗しても **Gemini には戻さない**。戻すと 10分ごとに黙って Gemini のトークンを使う。
+    // Gemini で作るのは、使う AI の表でやっさんが Gemini を選んだときだけ
+    statusNotice('error', engine === 'claude' ? 'ライブ要約を更新できませんでした（Gemini には切り替えていません）' : 'ライブ要約を更新できませんでした（Gemini）', {
+      detail: `${msg}\n\n${state.isRecording ? '次の回にもう一度試します。' : ''}`
+        + (engine === 'claude' ? '「接続を確認」で Claude 連携の状態を見られます。' : ''),
+    });
+    return false;
+  } finally {
+    state.liveSummaryBusy = false;
+    markBusy('liveDim', sessionId, false);
+    markBusy('live', sessionId, false);
+    // restoreStatus はここで呼ばない。成功も失敗も statusNotice で知らせていて、
+    // 時間が来たら statusNotice が戻す。ここで戻すと**失敗の知らせが一瞬で消える**（テストで見つけた）
+    // v0.24.56: 登録だけ外す（お知らせが出ていないとき＝途中で返ったときは戻す）
+    endStatusTask(`live:${sessionId}`);
+  }
 }
 
 /* ───────── Gemini Audio recording mode ───────── */
 
+/* ───────── 無音検出（v0.18.0）─────────
+ *
+ * v0.17 まで、Gemini へ送るチャンクは setInterval で 12 秒ちょうどに切っていた。
+ * 喋っている真っ最中だろうと問答無用で切るので、
+ *
+ *   「実害 | はないので大丈夫ですが」   ← 単語の途中で切れる
+ *
+ * が普通に起きる。ここから v0.17.1（捏造）と v0.17.2（繋ぎ直し）の問題が生えていた。
+ * どちらも**切り方が乱暴なことの後始末**であって、根治ではない。
+ *
+ * さらに悪いことに、stop → start の再開には 40ms の空白があり、その間の音は
+ * どこにも記録されない。発話の途中で切ると、その 40ms 分の音が消える。
+ *
+ * なので「最短を過ぎたら、次の無音の切れ目で切る」に変える。無音の位置で切れば
+ * 40ms の空白も無音に落ちるので、音の欠落も同時に消える。
+ *
+ * ■ しきい値を固定値にしない理由
+ * このアプリの利用者は「小さい声を拾ってくれるから」Gemini モードを使っている。
+ * -40dB のような固定値にすると、静かな部屋の小声が丸ごと「無音」に落ちて、
+ * 発話の途中で切るという元の失敗に戻る。
+ * そこで**その場の暗騒音（ノイズフロア）を推定し、そこから何dB上か**で判定する。
+ * 推定の作り方は SILENCE_WINDOW_MS のコメントを参照（v0.18.3 で一度作り直している。
+ * 最初の版は実機で「3秒黙っても無音が一度も検出されない」という形で失敗した）。
+ */
+const SILENCE_MARGIN_DB = 6;     // ノイズフロアからこれだけ上までは「無音」とみなす
+/* 「どれだけ静かなら文の切れ目か」(v0.18.2)
+ *
+ * v0.18.0/0.18.1 は 350ms 一本だった。実機で「…しかし、最初冒頭 / の方に喋り始めた」
+ * と真っ二つになった。日本語の話し言葉では、考えながら喋るときの言いよどみが
+ * 350ms を軽く超える。350ms は「文の切れ目」ではなく「息継ぎ」まで拾ってしまう。
+ *
+ * かといって一律に長くすると、切ってよい場所が見つからず強制区切りが増える
+ * （それは v0.17 に戻るということ）。そこで段階的にする:
+ *
+ *   最短〜(最長-4秒)  … 文の切れ目だけを狙う
+ *   (最長-4秒)〜最長   … 短い間でも妥協する。強制で切るよりはマシ
+ *
+ * v0.18.6 で数値を上げた。v0.18.5 で測定がまともになって初めて、実際の間の
+ * 長さが分かったため（2026-08-31 18:34 の実機ログ）:
+ *
+ *   1350ms … 文末（「〜黙ってみます。」）
+ *   1300ms … 文末（「〜終わりたいと思います。」）
+ *    950ms … **文の途中の言いよどみ**（「どのように…だったでしょうか」）
+ *
+ * 700ms だと 950ms の言いよどみを文の切れ目と判定して真っ二つにしていた。
+ * 1000ms なら分かれる。ただしこれは1回の録音から取った値なので、話し方が
+ * 変わればまた見直しが要る。外すほうに転んでも、切る場所が見つからず
+ * 最長秒数の強制区切りに落ちるだけで壊れはしない。
+ */
+const SILENCE_HOLD_MS = 1000;        // 通常。文の切れ目とみなす長さ
+const SILENCE_HOLD_LATE_MS = 500;    // 最長が近いときの妥協ライン
+const SILENCE_LATE_WINDOW_MS = 4000; // 最長のこれだけ手前から妥協を始める
+
+/* 最短より前に来た「明らかな切れ目」を捨てない (v0.18.9)
+ *
+ * 実機 2026-08-31 19:00 のログ:
+ *   長さ20.0秒 尻=強制 [判定可 最長無音3800ms 採用=level]
+ *
+ * **3.8秒の沈黙を検出していたのに、そこで切らず20秒で強制区切りした。**
+ * その沈黙は「3秒今から黙ってみます」の直後、チャンク開始から約6秒の時点。
+ * 最短12秒より前だったので使えないことになっていた。
+ *
+ * 3.8秒の沈黙は誰がどう見ても文の切れ目で、20秒での強制区切りより明らかに
+ * 良い区切り位置。実際その回は末尾が「…コピーして送り」で切れ、続きが失われた。
+ *
+ * 最短を設けたのは「短すぎるチャンクは文脈が無くて精度が落ちる」ため。だが
+ * 直前の文脈は contextHint で渡しているし、短チャンクはミドル整形でまとまる。
+ * **明らかな切れ目で終わった短いチャンクは、文の途中で切れた長いチャンクより良い。**
+ *
+ *   0 ─── 3秒 ────────── 最短 ─────── (最長-4秒) ─── 最長
+ *     切らない │ 2秒以上の無音なら切る │ 1秒 │ 0.5秒 │ 強制
+ */
+const SILENCE_ABS_MIN_MS = 3000;   // これより短いチャンクは作らない
+const SILENCE_HOLD_LONG_MS = 2000; // 最短前でも、これだけ空いたら明らかな切れ目
+const SILENCE_POLL_MS = 50;      // 判定の刻み
+
+/* ノイズフロアの推定方法 (v0.18.3 で作り直し)
+ *
+ * v0.18.2 までは「開始1秒を実測して初期値にし、以後は静かなときだけ EMA 追従」
+ * だった。実機ログで、3秒黙っても無音が一度も検出されないことが分かった。
+ * 原因はデッドロック:
+ *
+ *   録音開始直後は AudioContext にまだサンプルが流れておらず、解析結果は
+ *   ゼロ = -99dB。それが初期実測に入り、フロアが -99dB で確定する。
+ *   → quiet = db < -99+6 = -93dB は実際の音では絶対に成立しない
+ *   → フロアの学習は「静かなとき」限定なので、-99 から一生回復できない
+ *
+ * 「喋り続けるとフロアが持ち上がる」のを防ぐために学習を絞ったことが、
+ * 逆方向（フロアが低すぎる）から抜け出せない作りになっていた。
+ *
+ * なので片方向の追従をやめ、**直近の窓の最小値**をフロアにする。最小値なら
+ * 両方向に自己修正する。窓は SILENCE_WINDOW_MS のバケツ2本＝直近 4〜8 秒。
+ *
+ * ただし最小値だけだと、ずっと同じ音量で喋り続けたときにフロアが発話レベルに
+ * 張りついて発話が無音に見える。そこで**同じ窓の最大値**も持ち、最大と最小の
+ * 開きが SILENCE_DYNAMIC_RANGE_DB 未満なら「大きい側と小さい側の区別がついて
+ * いない」と見なして判定を放棄する（＝最長秒数で切る）。
+ * 「静か」は相対的な概念なので、開きが無いうちは判定できない。
+ *
+ * 既知の限界（意図した挙動）: 沈黙が窓を埋め尽くすと大きい側が窓から消え、
+ * 判定不能に戻る。判断材料が無いのに「きれいに切れた」と主張するより、
+ * 強制区切りに落ちるほうが正しい。実害も小さい（そんなチャンクは中身が沈黙なので
+ * 送信閾値で捨てられる）。喋り直せば復帰する。
+ */
+/* どの周波数を見るか (v0.18.5)
+ *
+ * v0.18.4 まで全帯域の RMS を測っていた。実機で「発話と3秒の沈黙の差が4dB」に
+ * なったのは、外部のゲイン調整ではなく**測る場所が間違っていた**から。
+ *
+ *   エアコンの効いた部屋でノートPCの近くで小声 →
+ *   エアコンの低域（ゴーッという成分）が全帯域 RMS を支配し、
+ *   その上に乗っている小声の差が埋もれる
+ *
+ * 会場で問題になる暗騒音は、空調・プロジェクタの送風・PC のファンなど、
+ * たいてい低域が主。全帯域で測っている限りどの会場でも同じ失敗をする。
+ * なので**人の声の帯域だけ**を見る。電話帯域（300〜3400Hz）が定番で、
+ * 日本語の音声認識でもこの範囲に主要な情報が入る。
+ */
+const VOICE_BAND_LOW_HZ = 300;
+const VOICE_BAND_HIGH_HZ = 3400;
+
+const SILENCE_WINDOW_MS = 4000;       // 最小/最大を集めるバケツの長さ（窓は最大この2倍）
+const SILENCE_DYNAMIC_RANGE_DB = 10;  // 窓内の最大-最小がこれ未満なら判定しない
+/* 「このチャンクに発話があったか」の判定に、続いていることを要求する (v0.18.10)
+ *
+ * 実機 2026-08-31 20:36 で、1.0秒の末尾チャンク（Gemini も Web Speech も
+ * 何も拾わなかった）に「発話あり」の判定が付き、
+ * 「（音声不明瞭・再試行可）」が残った。
+ * 1フレーム(50ms)でも大きい音があれば発話と見なしていたため、
+ * 舌打ちやクリック音、前の発話の余韻でも成立してしまう。
+ */
+const SILENCE_SPEECH_MIN_MS = 200;   // これだけ続いて初めて「発話あり」
+// 完全なゼロ（-95dB 未満）は「静かな部屋」ではなく「まだ音が流れていない」。
+// これをフロアの材料にすると上記のデッドロックが起きるので、材料から外す。
+const DIGITAL_SILENCE_DB = -95;
+
+function createSilenceDetector(stream) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  let ctx, analyser, src;
+  try {
+    ctx = new Ctx();
+    src = ctx.createMediaStreamSource(stream);
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    // 既定 0.8 だと周波数データが平滑化され、短い切れ目が鈍る
+    analyser.smoothingTimeConstant = 0;
+    src.connect(analyser);
+    // 自動再生ポリシーで suspended のまま作られることがある。
+    // そのままだと解析値が常にゼロになり、無音判定が一切効かなくなる
+    // （＝最長秒数での強制区切りに落ちるだけなので致命的ではないが、機能しない）
+    if (ctx.state === 'suspended') {
+      // resume は非同期。戻るまでの数フレームはゼロが返るが、ゼロは
+      // フロアの材料から外してあるので推定は汚れない
+      ctx.resume().then(
+        () => diagLog.info('無音検出: AudioContext を resume しました'),
+        () => diagLog.info('無音検出: AudioContext の resume に失敗（強制区切りに落ちます）'),
+      );
+    }
+  } catch (e) {
+    console.warn('[silence] AudioContext を作れませんでした:', e);
+    try { ctx && ctx.close(); } catch {}
+    return null;
+  }
+
+  const buf = new Float32Array(analyser.fftSize);       // 時間領域（音が流れているかの確認用）
+  const freq = new Float32Array(analyser.frequencyBinCount); // 周波数領域（判定はこちら）
+  // 声の帯域に対応するビンの範囲を求めておく
+  const binHz = (ctx.sampleRate || 48000) / analyser.fftSize;
+  const binLo = Math.max(1, Math.floor(VOICE_BAND_LOW_HZ / binHz));
+  const binHi = Math.min(analyser.frequencyBinCount - 1, Math.ceil(VOICE_BAND_HIGH_HZ / binHz));
+
+  let silentSinceMs = 0;    // 無音が始まった時刻（0 = いま無音ではない）
+  let lastDb = -99;      // 声の帯域（判定に使う値）
+  let lastWideDb = -99;  // 全帯域（比較用。v0.18.4 まではこちらで判定していた）
+  let speechInChunk = false;   // いまのチャンクの中で発話らしい音量を見たか
+  let speechFrames = 0;        // 発話らしい音量が何フレーム続いているか
+  let longestSilentInChunk = 0; // 同上・いちばん長かった無音（診断用）
+  // チャンク全体の音量の振れ幅（診断用）。窓の値だけだと、そのチャンクに
+  // そもそも十分な差があったのかが分からない
+  let chunkMinDb = Infinity, chunkMaxDb = -Infinity;
+
+  // 直近の窓の最小/最大。バケツ2本を回して「直近 4〜8 秒」を見る
+  let curMin = Infinity, curMax = -Infinity;
+  let prevMin = Infinity, prevMax = -Infinity;
+  let bucketStartedAt = Date.now();
+
+  const floorDb = () => Math.min(curMin, prevMin);
+  const peakDb = () => Math.max(curMax, prevMax);
+  /** 大きい側と小さい側の区別がついているか（ついていなければ判定を放棄する） */
+  const canJudge = () => {
+    const f = floorDb(), p = peakDb();
+    return Number.isFinite(f) && Number.isFinite(p) && p - f >= SILENCE_DYNAMIC_RANGE_DB;
+  };
+
+  const timer = setInterval(() => {
+    // 音がそもそも流れているか（時間領域）。完全なゼロなら「まだ来ていない」
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    const rms = Math.sqrt(sum / buf.length);
+    const wideDb = rms > 0 ? 20 * Math.log10(rms) : -99;
+
+    // 判定は声の帯域だけで行う（空調などの低域に埋もれさせない）
+    analyser.getFloatFrequencyData(freq);
+    let power = 0;
+    for (let i = binLo; i <= binHi; i++) {
+      const v = freq[i];
+      if (Number.isFinite(v)) power += Math.pow(10, v / 10);
+    }
+    const db = power > 0 ? 10 * Math.log10(power) : -99;
+    lastDb = db;
+    lastWideDb = wideDb;
+    const now = Date.now();
+
+    // 完全なゼロは「まだ音が流れていない」。フロアの材料にしないし、
+    // 無音とも見なさない（材料にすると v0.18.2 のデッドロックが再発する）。
+    // 判断は時間領域の広帯域値で行う（帯域を絞った値はゼロ入力でも -99 とは限らない）
+    const hasSignal = wideDb > DIGITAL_SILENCE_DB;
+    if (hasSignal) {
+      if (db < curMin) curMin = db;
+      if (db > curMax) curMax = db;
+      if (db < chunkMinDb) chunkMinDb = db;
+      if (db > chunkMaxDb) chunkMaxDb = db;
+      if (now - bucketStartedAt >= SILENCE_WINDOW_MS) {
+        prevMin = curMin; prevMax = curMax;
+        curMin = Infinity; curMax = -Infinity;
+        bucketStartedAt = now;
+      }
+    }
+
+    const quiet = hasSignal && canJudge() && db < floorDb() + SILENCE_MARGIN_DB;
+    // 一瞬の物音を発話と取り違えないよう、続いていることを条件にする
+    if (hasSignal && canJudge() && db >= floorDb() + SILENCE_DYNAMIC_RANGE_DB) {
+      speechFrames++;
+      if (speechFrames * SILENCE_POLL_MS >= SILENCE_SPEECH_MIN_MS) speechInChunk = true;
+    } else {
+      speechFrames = 0;
+    }
+
+    if (quiet) {
+      if (!silentSinceMs) silentSinceMs = now;
+      const held = now - silentSinceMs;
+      if (held > longestSilentInChunk) longestSilentInChunk = held;
+    } else {
+      silentSinceMs = 0;
+    }
+  }, SILENCE_POLL_MS);
+
+  return {
+    /**
+     * いま何 ms 静かが続いているか（0 = 静かではない／判定できない）。
+     * どれだけ続いたら切るかの判断は decideChunkCut 側に置く。
+     */
+    silentMs() {
+      if (!silentSinceMs) return 0;
+      return Date.now() - silentSinceMs;
+    },
+    db() { return lastDb; },
+    wideDb() { return lastWideDb; },
+    floorDb() { const f = floorDb(); return Number.isFinite(f) ? f : -99; },
+    peakDb() { const p = peakDb(); return Number.isFinite(p) ? p : -99; },
+    /** 大きい側と小さい側の区別がついているか（診断用） */
+    canJudge,
+    /** AudioContext の状態（suspended のままだと解析値が全部ゼロになる） */
+    ctxState() { return ctx.state; },
+    /** いまのチャンクの中で、一度でも発話らしい音量があったか */
+    sawSpeechInChunk() { return speechInChunk; },
+    /** いまのチャンクの中でいちばん長かった無音（ms・診断用） */
+    longestSilentMsInChunk() { return longestSilentInChunk; },
+    /** そのチャンク全体での音量の振れ幅 [最小, 最大]（診断用） */
+    chunkRangeDb() {
+      return [Number.isFinite(chunkMinDb) ? chunkMinDb : -99,
+              Number.isFinite(chunkMaxDb) ? chunkMaxDb : -99];
+    },
+    /** チャンクを切ったときに呼ぶ */
+    resetChunkSpeech() {
+      speechInChunk = false; speechFrames = 0; longestSilentInChunk = 0;
+      chunkMinDb = Infinity; chunkMaxDb = -Infinity;
+    },
+    close() {
+      clearInterval(timer);
+      try { src.disconnect(); } catch {}
+      try { ctx.close(); } catch {}
+    },
+  };
+}
+
+/**
+ * 「いまチャンクを切るべきか」の判断 (v0.18.0 / しきい値は v0.18.2)
+ *
+ *   0 ─────── minMs ─────────────── maxMs
+ *   |  絶対切らない  |  無音になったら切る  | 無音でなくても切る
+ *
+ * minMs 未満で切らないのは、短すぎるチャンクは文脈が無くて精度が落ちるから。
+ * maxMs で諦めるのは、ずっと喋り続けられたときにチャンクが無限に伸びて
+ * 画面が止まる（＆ Gemini の入力上限に当たる）のを防ぐため。
+ *
+ * @returns {null|'silence'|'forced'} null = まだ切らない
+ */
+function decideChunkCut({ elapsed, minMs, maxMs, useSilenceCut, silentMs }) {
+  if (elapsed >= maxMs) return 'forced';
+  if (!useSilenceCut) return null;          // 従来動作では minMs === maxMs なので上で切れる
+  const ms = silentMs || 0;
+
+  // 最短より前でも、明らかな切れ目（長い無音）なら使う。
+  // 捨てると、そのあと切る場所が見つからず強制区切りに落ちることがある
+  if (elapsed < minMs) {
+    return (elapsed >= SILENCE_ABS_MIN_MS && ms >= SILENCE_HOLD_LONG_MS) ? 'silence' : null;
+  }
+
+  // 最長が近づいたら、短い間でも妥協する（強制で切るよりはマシ）
+  const needed = elapsed >= maxMs - SILENCE_LATE_WINDOW_MS
+    ? SILENCE_HOLD_LATE_MS
+    : SILENCE_HOLD_MS;
+  return ms >= needed ? 'silence' : null;
+}
+
+/* ───────── 話者判別用の録音（保管側） (v0.21.0) ─────────
+ *
+ * live の文字起こしとは**別の MediaRecorder** を、同じストリームに掛けて回す。
+ * 理由は audio-store.js の冒頭に書いたとおりで、live 側の
+ * `stop() → start()` で出てくるチャンクは1本ずつ独立した webm なので、
+ * 繋いでも最初の1本しか読めないため。
+ *
+ * こちらは `start(timeslice)` で回す。出てくるかけらは1本の録音の続きなので、
+ * 順に繋げば正しい webm になる。
+ *
+ * ■ 二重にエンコードすることについて
+ *
+ * Opus のエンコーダが2つ回るぶん CPU は増えるが、64kbps の音声1本ぶんなので
+ * 実用上は問題にならない。**同じストリームを2つの MediaRecorder が読める**のは
+ * MediaRecorder の仕様どおりの使い方。
+ *
+ * ■ 保持がオフなら、そもそも作らない
+ *
+ * 「既定は残さない」を守るため、`audioKeepRecording` が false のときは
+ * この録音機を作らない。作らなければ、消し忘れも起きない。
+ */
+
+/** かけらを吐く間隔。短いほど落ちたときの取りこぼしが減り、レコードが増える */
+const ARCHIVE_SLICE_MS = 5000;
+/** 区間の目安。これを過ぎたら、次の無音で区間を切り替える */
+const ARCHIVE_SEG_TARGET_MS = 10 * 60 * 1000;
+/** 無音が来なくてもここで切り替える（喋りっぱなしのとき用） */
+const ARCHIVE_SEG_MAX_MS = 12 * 60 * 1000;
+/** 区間の切り替えに要求する無音の長さ。live の区切りより厳しくする */
+const ARCHIVE_SEG_SILENCE_MS = 1500;
+
+/**
+ * 区間を切り替えるべきか (v0.21.0)
+ *
+ * live の `decideChunkCut` と別にしてあるのは、目的が違うから。
+ * live は「早く出したい」ので 12〜20 秒で切るが、こちらは
+ * **切れ目を減らしたい**（切れ目ごとに話者の対応づけが切れる）。
+ * だから目安の10分までは何があっても切らず、そのあと最初の無音で切る。
+ *
+ * @returns {null|'silence'|'forced'}
+ */
+function shouldRollArchiveSegment({ elapsed, targetMs, maxMs, silentMs }) {
+  const target = Number.isFinite(targetMs) ? targetMs : ARCHIVE_SEG_TARGET_MS;
+  const max = Number.isFinite(maxMs) ? maxMs : ARCHIVE_SEG_MAX_MS;
+  if (elapsed >= max) return 'forced';
+  if (elapsed < target) return null;
+  return (silentMs || 0) >= ARCHIVE_SEG_SILENCE_MS ? 'silence' : null;
+}
+
+/**
+ * 保管用の録音機を作って回し始める。保持がオフなら null を返す
+ */
+function startArchiveRecorder(stream, recOpts) {
+  if (!state.settings.audioKeepRecording) return null;
+  const sessionId = state.recordingSessionId || state.activeId;
+  if (!sessionId) return null;
+
+  state.audioSeg = 0;
+  state.audioSeq = 0;
+  state.archiveSegStartedAt = Date.now();
+
+  const make = () => {
+    let rec;
+    try {
+      rec = new MediaRecorder(stream, recOpts);
+    } catch (e) {
+      diagLog.info('話者判別用の録音を作れませんでした（文字起こしは続きます）: ' + (e.message || e));
+      return null;
+    }
+    rec.ondataavailable = (e) => {
+      if (!e.data || !e.data.size) return;
+      audioStorePut(sessionId, e.data, state.audioSeq++, state.audioSeg).catch(err => {
+        // 容量不足などで失敗しうる。1回だけ知らせて、以後は黙って諦める。
+        // ここで録音本体を止める価値は無い
+        if (!state.audioStoreWarned) {
+          state.audioStoreWarned = true;
+          diagLog.info('音声の保管に失敗しました（録音と文字起こしは続きます）: ' + (err.message || err));
+        }
+      });
+    };
+    rec.onstop = () => {
+      // 区間の切り替えなら次を作る。録音そのものの停止なら state 側で null になっている
+      if (!state.isRecording || state.archiveRecorder !== rec) return;
+      state.audioSeg++;
+      state.audioSeq = 0;
+      state.archiveSegStartedAt = Date.now();
+      const next = make();
+      state.archiveRecorder = next;
+      if (next) {
+        try { next.start(ARCHIVE_SLICE_MS); }
+        catch (e) { diagLog.info('話者判別用の録音を再開できませんでした: ' + (e.message || e)); }
+      }
+    };
+    rec.onerror = () => { /* 保管が壊れても live は止めない */ };
+    return rec;
+  };
+
+  const rec = make();
+  if (!rec) return null;
+  try {
+    rec.start(ARCHIVE_SLICE_MS);
+  } catch (e) {
+    diagLog.info('話者判別用の録音を開始できませんでした: ' + (e.message || e));
+    return null;
+  }
+  state.archiveRecorder = rec;
+  return rec;
+}
+
+/** 区間を切り替える（onstop が次の区間を作る） */
+function rollArchiveSegment(why) {
+  const rec = state.archiveRecorder;
+  if (!rec || rec.state !== 'recording') return;
+  const mins = ((Date.now() - state.archiveSegStartedAt) / 60000).toFixed(1);
+  diagLog.info(`話者判別用の録音: 区間${state.audioSeg}を${mins}分で区切り（${why === 'silence' ? '無音' : '強制'}）`);
+  try { rec.stop(); } catch { /* 状態が変わっていたら諦める */ }
+}
+
+/** 録音停止。最後のかけらは stop() が吐くので、それを取りこぼさないよう先に外す */
+function stopArchiveRecorder() {
+  const rec = state.archiveRecorder;
+  state.archiveRecorder = null;   // onstop の「次を作る」を止める
+  if (rec && rec.state !== 'inactive') {
+    try { rec.stop(); } catch { /* 既に止まっていれば何もしない */ }
+  }
+}
+
+/**
+ * 無音検出の状態を1行にまとめる（診断ログ用・v0.18.3）
+ *
+ * v0.18.2 は「3秒黙ったのに無音が一度も検出されない」という形で壊れていたが、
+ * ログには「尻=強制」としか出ず、検出器の中で何が起きているか分からなかった。
+ * **そのチャンク中でいちばん長かった無音**を出せば、次からは一目で切り分けられる:
+ *   最長無音 3000ms なのに強制で切れている → 区切りの判断がおかしい
+ *   最長無音 0ms なのに黙っていた          → 検出器がおかしい
+ */
+/**
+ * 「何 ms 声が途切れているか」を、使える手段から選ぶ (v0.18.4)
+ *
+ * 音量だけに頼っていたら、実機で床-38dB / 天井-34dB という**差が4dBしかない**
+ * 音が来た。20秒の中に発話と3秒の沈黙が両方入っているのにこの差では、
+ * 大きい側と小さい側を区別できない（`autoGainControl:false` は要求済みなので、
+ * Chrome の外側 ── Windows の音声拡張やドライバ、マイク本体 ── で平坦化されている）。
+ *
+ * そこで Web Speech を第二の手段にする。並走している音声認識器が「いま声が
+ * 出ているか」を判断してくれるので、**音量が平坦でも効く**。
+ *
+ * 優先順位を明確にする（両方を混ぜない）:
+ *   1. 音量で判定できるなら音量（合成音で検証済みの経路）
+ *   2. 無理なら Web Speech（音量に依存しない）
+ *   3. どちらも無理なら 0 ＝ 最長秒数での強制区切り（v0.17 と同じ）
+ *
+ * @returns {{ms: number, source: 'level'|'webspeech'|'none'}}
+ */
+function pickSilentMs({ levelMs, levelCanJudge, webMs, webActive }) {
+  if (levelCanJudge) return { ms: levelMs || 0, source: 'level' };
+  if (webActive) return { ms: webMs || 0, source: 'webspeech' };
+  return { ms: 0, source: 'none' };
+}
+
+/** いま使える無音シグナルを集める */
+function currentSilenceSignal() {
+  const d = state.silenceDetector;
+  // liveLastActivityAt が 0 ＝ Web Speech がまだ一度も聞き取っていない。
+  // その状態を「無音が続いている」と読んではいけない（判断材料が無いだけ）
+  const webActive = !!state.liveRecognition && !!state.liveLastActivityAt;
+  return pickSilentMs({
+    levelMs: d ? d.silentMs() : 0,
+    levelCanJudge: !!d && d.canJudge(),
+    webMs: webActive ? Date.now() - state.liveLastActivityAt : 0,
+    webActive,
+  });
+}
+
+function silenceDiag(source) {
+  const d = state.silenceDetector;
+  if (!d) return `[検出器なし 採用=${source || '?'}]`;
+  const [lo, hi] = d.chunkRangeDb();
+  // v0.19.1: 無音の計測はチャンクの区切りをまたいで続く（判定にはそれが正しい）。
+  // ただしログにそのまま出すと「このチャンクの中に3.4秒の沈黙があった」と
+  // 読めてしまうので、チャンク自身の長さで頭打ちにする。
+  // 前から続いていた分は `+` を付けて区別する
+  const elapsed = state.chunkStartedAt ? Date.now() - state.chunkStartedAt : Infinity;
+  const raw = d.longestSilentMsInChunk();
+  const shown = Math.min(raw, elapsed);
+  return `[声帯域 窓${d.floorDb().toFixed(0)}〜${d.peakDb().toFixed(0)} `
+    + `全体${lo.toFixed(0)}〜${hi.toFixed(0)}(幅${(hi - lo).toFixed(0)}dB) `
+    + `${d.canJudge() ? '判定可' : '判定不能'} `
+    // v0.19.2: 空チャンクを消すかどうかはこの値で決まるのに、出していなかった。
+    // 実機で「（音声不明瞭・再試行可）」が残った理由を判断できなかった
+    + `発話${d.sawSpeechInChunk() ? 'あり' : 'なし'} `
+    + `最長無音${Math.round(shown)}ms${raw > elapsed ? '+' : ''} `
+    + `採用=${source || '?'} ctx=${d.ctxState()}]`;
+}
+
+/* ───────── Web Speech の遅れによる二重表示 (v0.18.8) ─────────
+ *
+ * Web Speech の「確定」は遅れて届く。あるチャンクの音声に対応する文字が、
+ * そのチャンクを切った**後**に確定し、次のチャンクの「未確定分」として付く。
+ *
+ * 実機 2026-08-31 18:48:
+ *   チャンク3(16.0秒) … 「はい、3秒間黙りました…報告します。」の音声が入っている
+ *   チャンク4( 2.3秒) … 残りのほぼ沈黙。Gemini は空を返した
+ *   → チャンク3の音声に対応する Web Speech の文字がチャンク4に付いていたため、
+ *     v0.17.0 の「Gemini が空でも Web Speech の結果は捨てない」が働いて、
+ *     **すでに画面にある文がもう一度出た**
+ *
+ * 時刻で対応づけ直すことはできない（Web Speech は確定の元になった音声の時刻を
+ * 教えてくれない）。なので「すでに画面にあるものは出さない」で対処する。
+ * 消してよいと分かるのは**同じ内容が確かに残っているとき**だけなので、
+ * 取りこぼしにはならない。
+ */
+
+/** 比較用に表記のゆれを落とす（空白・句読点・注記を除く） */
+function normalizeForCompare(text) {
+  return (text || '')
+    .replace(/\[[^\]]*\]/g, '')                      // [Gemini は聞き取れず…] のような注記
+    .replace(/[\s\u3000]/g, '')
+    .replace(/[、。，．,.!?！？・「」『』（）()]/g, '');
+}
+
+/** 2文字ずつの並びの集合（語の切れ目が engine ごとに違っても比べられる） */
+function bigrams(str) {
+  const set = new Set();
+  for (let i = 0; i < str.length - 1; i++) set.add(str.slice(i, i + 2));
+  return set;
+}
+
+/**
+ * provisionalText が、すでに確定している末尾の文とほぼ同じ内容か
+ *
+ * Gemini と Web Speech では表記が違う（「はい、3秒間黙りました。」と
+ * 「はい 3秒間 黙りました」）ので、完全一致では判定できない。
+ * 2文字の並びがどれだけ重なるかで見る。
+ */
+/* 判定の下限を2段階にする (v0.19.2)
+ *
+ * v0.18.8 は一律 8 文字未満を対象外にしていた。実機で「乗り越えるべき」（7文字）が
+ * 二重に出て、**1文字足りずにすり抜けた**。
+ *
+ * かといって一律に下げると、あいまい一致（2文字の並びの重なり）で偶然の一致が増える。
+ * ただし**そのまま含まれている**場合は短くても確実なので、そこだけ下限を下げる。
+ */
+const DUP_MIN_EXACT = 4;   // 完全に含まれているなら、これだけあれば確か
+const DUP_MIN_FUZZY = 8;   // あいまい一致は短いと偶然当たる
+
+function isDuplicateOfTail(provisionalText, tailText, threshold = 0.7) {
+  const a = normalizeForCompare(provisionalText);
+  const b = normalizeForCompare(tailText);
+  if (a.length < DUP_MIN_EXACT || b.length < DUP_MIN_EXACT) return false;
+  // そのまま含まれているなら、短くても重複と断定してよい
+  if (b.includes(a)) return true;
+  // ここから先はあいまい一致。短い文字列は偶然当たるので判定しない
+  if (a.length < DUP_MIN_FUZZY || b.length < DUP_MIN_FUZZY) return false;
+  const ba = bigrams(a), bb = bigrams(b);
+  if (ba.size === 0) return false;
+  let hit = 0;
+  for (const g of ba) if (bb.has(g)) hit++;
+  return hit / ba.size >= threshold;
+}
+
+/**
+ * 相づちだけか (v0.24.34)
+ *
+ * やっさんの実機（2026-11-02）: 「みんな無言で文字を打っている」間の文字起こしが
+ *   はい。／はい。／はい。…（17行）
+ * になった。キーボードの音を Gemini が発話と取り違え、相づちを書いている。
+ * 音量の判定でもキーボードの音は「発話あり」になりうるので、音量では止められない。
+ *
+ * 全部消すと**本当の返事（「はい」）まで消える**ので、相づちだけのチャンクが**続いたとき**、
+ * 2つ目以降を出さない（1つ目は残す）。句読点と空白を除いて、相づちの語だけで
+ * できているものを「相づちだけ」とみなす。
+ */
+const FILLER_ONLY_RE = /^(?:はい|ええ|うん|ふん|ふーん|へー|ああ|あー|あ|え|お|ん|はーい)+$/;
+function isFillerOnly(text) {
+  const t = String(text || '').replace(/[\s、。，．,.!！?？…・ー〜~「」]/g, '');
+  if (!t) return false;
+  return FILLER_ONLY_RE.test(t);
+}
+
+/** すぐ前の確定した段落の文字（処理中の段落は飛ばす） */
+function previousParagraphText(el) {
+  for (let p = el && el.previousElementSibling; p; p = p.previousElementSibling) {
+    if (!p.classList || !p.classList.contains('paragraph')) continue;
+    if (p.classList.contains('refining')) continue;
+    return p.textContent || '';
+  }
+  return '';
+}
+
+/** 指定要素を除いた、直近の確定テキスト（末尾 maxChars 文字） */
+function confirmedTailText(excludeEl, maxChars = 400) {
+  const container = excludeEl && excludeEl.parentElement;
+  if (!container) return '';
+  const parts = [];
+  for (const child of container.children) {
+    if (child === excludeEl) continue;
+    const t = (child.innerText || '').trim();
+    if (t) parts.push(t);
+  }
+  const all = parts.join('\n');
+  return all.length > maxChars ? all.slice(-maxChars) : all;
+}
+
+/**
+ * 期限切れの音声を掃除する (v0.19.0)
+ *
+ * **起動時に必ず呼ぶ。** 「タブを閉じたら消す」はクラッシュや強制リロードでは
+ * 走らないので、消し忘れを防ぐ本体はこちら。
+ */
+/** 設定画面の「保持中の音声: …」表示を更新する (v0.19.0) */
+/* ───────── 録音を「残す」・ファイルに保存 (v0.24.103) ─────────
+ * やっさん「今日は会議を一つ録音できて残してるから、検証用の録音としてキープできないかな。間違って消したらもったいない」。
+ * 「残す」にした録音は、どの設定でも・タブを閉じても・保持をオフにしても・「すべて消す」でも消さない（消すのは「残す」を外したときの次の掃除）。
+ * それでもブラウザのデータを消せば消えるので、ファイルとして PC に保存もできるようにした（ファイルなら拡張の外に残る）
+ */
+function pinnedAudioIds() { return new Set(Object.keys(state.settings.audioPinned || {})); }
+function isAudioPinned(id) { return !!(state.settings.audioPinned && state.settings.audioPinned[id]); }
+function rememberPinnedTitle(session) {
+  if (!session || !isAudioPinned(session.id)) return;
+  state.settings.audioPinned[session.id].title = session.title || state.settings.audioPinned[session.id].title;
+  saveSettings();
+}
+function setAudioPinned(id, on, meta = {}) {
+  const m = { ...(state.settings.audioPinned || {}) };
+  if (on) m[id] = { title: meta.title || '', savedAt: meta.savedAt || Date.now() };
+  else delete m[id];
+  state.settings.audioPinned = m;
+  saveSettings();
+  diagLog.info(`録音を${on ? '残す' : '残さない'}にしました（${(meta.title || id).slice(0, 30)}）`);
+}
+/** その録音の名前（タブがあればタブの名前、閉じていれば覚えておいた名前） */
+function recordingTitle(sessionId) {
+  const s = state.sessions.find((x) => x.id === sessionId);
+  if (s) return s.title || '（名前なし）';
+  const p = state.settings.audioPinned && state.settings.audioPinned[sessionId];
+  return (p && p.title) || '（タブは閉じられています）';
+}
+function safeFileName(t) { return String(t || '録音').replace(/[\\/:*?"<>|\n\r\t]+/g, '_').slice(0, 60).trim() || '録音'; }
+async function downloadRecording(sessionId) {
+  const segs = await audioStoreGetSegments(sessionId);
+  if (!segs.length) { statusNotice('error', 'この録音はもう残っていません', { ms: 4000 }); return; }
+  const base = safeFileName(recordingTitle(sessionId));
+  segs.forEach((g, i) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(g.blob);
+    a.download = segs.length > 1 ? `${base}_区間${i + 1}.webm` : `${base}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+  });
+  diagLog.info(`録音をファイルに保存しました（${base}・${segs.length}個）`);
+  statusNotice('listening', `録音をファイルに保存しました（${segs.length}個）`, { ms: 3000 });
+}
+async function renderStoredRecordings(sessions) {
+  const box = document.getElementById('audio-recordings');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const s of sessions.slice().sort((a, b) => b.savedAt - a.savedAt)) {
+    const row = document.createElement('div');
+    row.className = 'recording-row';
+    const when = new Date(s.savedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    row.innerHTML = '<label class="field-row recording-pin"><input type="checkbox"><span><span class="recording-title"></span>'
+      + '<small class="field-hint" style="display:block"></small></span></label>'
+      + '<button type="button" class="btn btn-ghost btn-sm recording-save">ファイルに保存</button>';
+    row.querySelector('.recording-title').textContent = recordingTitle(s.sessionId);
+    row.querySelector('small').textContent = `${when}・${formatBytes(s.bytes)}${isAudioPinned(s.sessionId) ? '・残す' : ''}`;
+    const cb = row.querySelector('input');
+    cb.checked = isAudioPinned(s.sessionId);
+    cb.setAttribute('aria-label', `「${recordingTitle(s.sessionId)}」を残す`);
+    cb.addEventListener('change', () => {
+      setAudioPinned(s.sessionId, cb.checked, { title: recordingTitle(s.sessionId), savedAt: s.savedAt });
+      row.querySelector('small').textContent = `${when}・${formatBytes(s.bytes)}${cb.checked ? '・残す' : ''}`;
+    });
+    row.querySelector('.recording-save').addEventListener('click', () => downloadRecording(s.sessionId).catch((e) => statusNotice('error', '保存できませんでした: ' + (e.message || e), { ms: 5000 })));
+    box.appendChild(row);
+  }
+}
+
+async function refreshAudioUsage() {
+  if (!els.audioUsageText) return;
+  try {
+    const { sessions, totalBytes } = await audioStoreSummary();
+    renderStoredRecordings(sessions);   // v0.24.103
+    els.audioUsageText.textContent = sessions.length === 0
+      ? '保持中の音声: なし'
+      : `保持中の音声: ${sessions.length}件 / ${formatBytes(totalBytes)}`;
+    if (els.btnClearAudio) els.btnClearAudio.disabled = sessions.length === 0;
+  } catch (e) {
+    // IndexedDB が使えない環境（プライベートモード等）でも設定画面は開けるべき
+    els.audioUsageText.textContent = '保持中の音声: 確認できません（' + (e.message || e) + '）';
+    if (els.btnClearAudio) els.btnClearAudio.disabled = true;
+  }
+}
+
+async function sweepStoredAudio() {
+  try {
+    const live = new Set(state.sessions.map(s => s.id));
+    const done = new Map(state.sessions
+      .filter(s => s.audioRepassDoneAt)
+      .map(s => [s.id, s.audioRepassDoneAt]));
+    const r = await audioStoreSweep({
+      // 保持がオフなら 'off' を渡して、残っている分を全部消す
+      retention: state.settings.audioKeepRecording ? state.settings.audioRetention : 'off',
+      liveSessionIds: live,
+      repassDoneAt: done,
+      pinnedIds: pinnedAudioIds(),   // v0.24.103
+    });
+    if (r.deletedSessions > 0) {
+      diagLog.info(`保管していた音声を掃除: ${r.deletedSessions}件 / ${formatBytes(r.deletedBytes)}`);
+    }
+    // v0.21.1: 呼び出し側が「実際に消えたか」を言えるように結果を返す。
+    // 推測で「消しました」と書くと、消えていなかったときに嘘になる
+    return r;
+  } catch (e) {
+    console.warn('[audio] 掃除に失敗:', e.message || e);
+    return { deletedSessions: 0, deletedBytes: 0 };
+  }
+}
+
+/* ───────── 話者判別 (v0.21.0) ─────────
+ *
+ * live の文字起こしは12〜20秒のチャンクを1本ずつ投げるので、**話者を区別できない**。
+ * 同じ声かどうかは前後を並べて聞かないと分からないし、そもそも1チャンクに
+ * 1人しか入っていないことも多い。
+ *
+ * 録音が終わったあとなら、保管しておいた音声をまとめて投げられる。
+ * そこで初めて「誰が喋ったか」を付けられる。
+ *
+ * ■ 勝手には走らせない
+ *
+ * 音声全体をもう一度 Google に上げ直すので、
+ *   - 通信量（区間ごとに数MB）
+ *   - トークン（音声は1秒=32トークン。90分で約17万トークン）
+ *   - **録音そのものがもう一度 Google に渡る**
+ * のすべてが発生する。3つ目が一番重い。必ず確認してから走らせる。
+ */
+
+/** 話者判別の進行状態。二重起動を防ぎ、中止を受け取る */
+function diarizationState() {
+  if (!state.diarizing) state.diarizing = { running: false, cancel: null };
+  return state.diarizing;
+}
+
+/** ボタンの見た目を状態に合わせる */
+function updateDiarizeButton() {
+  if (!els.btnDiarize) return;
+  const r = diarizationState();
+  els.btnDiarize.classList.toggle('firing', r.running);
+  // v0.21.2: 結果が残っていれば、音声が消えていても貼り直せる。
+  // ボタンの説明もそれに合わせる（押す前に何が起きるか分かるように）
+  const s = getActiveSession();
+  const hasSaved = !!(s && s.repass && s.repass.turns && s.repass.turns.length);
+  els.btnDiarize.title = r.running
+    ? '話者判別を中止する'
+    : hasSaved
+      ? '話者付きの結果を貼り直す／録音が残っていれば話者判別をかけ直す'
+      : '保管した録音をまとめて Gemini に通し、話者付きで書き起こす（録音の保持がオンのときだけ）';
+}
+
+/**
+ * 話者判別をかける (v0.21.0)
+ *
+ * 区間ごとに「上げる → 待つ → 文字起こし → 消す」を順に回す。
+ * **1区間ずつ消す**のは、途中で止めたときに上げっぱなしのファイルを
+ * 残さないため（48時間で自動削除されるとはいえ、置いておく理由が無い）。
+ */
+async function runDiarization() {
+  const r = diarizationState();
+  if (r.running) {
+    // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+    if (await confirmDialog({ title: '話者判別を中止しますか？', message: 'ここまでに書き出した分はそのまま残ります。', ok: '中止する', destructive: true })) {
+      r.cancel.aborted = true;
+      setStatus('idle', '話者判別を中止しています…');
+    }
+    return;
+  }
+
+  if (!geminiKey()) { alert('Gemini API キーが未設定です'); openSettings(); return; }
+  if (state.isRecording && state.recordingSessionId === state.activeId) {
+    alert('録音中は話者判別できません。先に録音を止めてください。');
+    return;
+  }
+  const session = getActiveSession();
+  if (!session) return;
+
+  let segments;
+  try {
+    segments = await audioStoreGetSegments(session.id);
+  } catch (e) {
+    alert('保管した音声を読み出せませんでした:\n' + (e.message || e));
+    return;
+  }
+  if (!segments.length) {
+    // v0.21.2: 音声が消えていても、結果が残っていれば貼り直せる。
+    // 「もう2度とできない」を先に否定する
+    if (session.repass && session.repass.turns && session.repass.turns.length) {
+      restoreDiarizationResult(session);
+      return;
+    }
+    alert(explainNoAudioForDiarization({
+      keepRecording: !!state.settings.audioKeepRecording,
+      retention: state.settings.audioRetention,
+      repassDoneAt: session.audioRepassDoneAt,
+    }));
+    return;
+  }
+
+  const totalBytes = segments.reduce((n, s) => n + s.bytes, 0);
+  // 音声は 1秒あたり 32 トークン。ビットレートから秒数を見積もる
+  const bps = Number(state.settings.audioBitrate) || 64000;
+  const approxSec = Math.round(totalBytes * 8 / bps);
+  const approxTokens = approxSec * 32;
+  const mins = Math.max(1, Math.round(approxSec / 60));
+
+  // v0.21.2: 前の結果があるなら、投げ直す前に**安いほう**を先に出す。
+  // 「画面から消えただけ」なら、貼り直しは一瞬でトークンもかからない
+  const saved = session.repass;
+  if (saved && saved.turns && saved.turns.length) {
+    const when = new Date(saved.doneAt).toLocaleString('ja-JP');
+    // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+    // 「作り直す」を選ぶと、次の確認（話者判別をかけるか）へ進む（前の confirm の［キャンセル］と同じ）
+    if (await confirmDialog({
+      title: '保存してある話者付きの結果を貼り直しますか？',
+      message: `${when} に作った結果（発言 ${saved.turns.length}件・話者 ${(saved.speakers || []).length}人）が、このタブに保存されています。貼り直すならトークンはかかりません。\n「作り直す」を選ぶと、録音からもう一度作ります（前の結果は上書きされます）。`,
+      ok: '貼り直す', cancel: '作り直す',
+    })) {
+      await restoreDiarizationResult(session, { ask: false });
+      return;
+    }
+  }
+
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  if (!(await confirmDialog({
+    title: 'この録音に話者判別をかけますか？',
+    message: `保管した録音をまとめて Gemini に通し、話者付きで書き起こし直します。\n`
+      + `音声: 約${mins}分・${formatBytes(totalBytes)}・${segments.length}区間／入力トークン: 約${approxTokens.toLocaleString()}（音声は1秒=32トークン）\n`
+      + `録音全体をもう一度 Gemini にアップロードします（Google ドライブではありません）。使い終わったファイルはこちらから削除しますが、削除できなかった場合も Gemini 側で48時間後に自動削除されます。\n`
+      + `いまの文字起こしは置き換わります（Ctrl+Z で戻せます）。`,
+    ok: '話者判別をかける',
+  }))) return;
+
+  r.running = true;
+  r.cancel = { aborted: false };
+  updateDiarizeButton();
+  pushUndo('話者判別', 'pane-transcript');
+
+  const container = getWriteContainer();
+  const inBg = container !== els.confirmed;
+  const persist = () => {
+    if (inBg) syncBgToSession(); else snapshotActiveToSession();
+    persistSessions();
+  };
+
+  // 画面をいったん空にして、進行状況だけを置く
+  Array.from(container.childNodes).forEach(n => n.remove());
+  const progressEl = createParagraphEl('（話者判別の準備中…）', 'paragraph refining');
+  container.appendChild(progressEl);
+  const say = (msg) => {
+    const body = progressEl.querySelector('.p-body');
+    if (body) body.textContent = `（${msg}）`;
+  };
+
+  diagLog.info(`話者判別開始: ${segments.length}区間 / ${formatBytes(totalBytes)} / 約${mins}分`);
+
+  const rosters = [];
+  const allTurns = [];   // v0.21.2: セッションに残して、あとから貼り直せるようにする
+  let prevTail = '';
+  let wrote = 0;
+  let stoppedBy = null;
+
+  try {
+    for (let i = 0; i < segments.length; i++) {
+      if (r.cancel.aborted) { stoppedBy = '中止'; break; }
+      const seg = segments[i];
+      const label = `${i + 1}/${segments.length}`;
+      let uploaded = null;
+
+      try {
+        say(`区間 ${label} を送信中… 0%`);
+        setStatus('processing', `話者判別 ${label}`);
+        uploaded = await geminiFileUpload({
+          apiKey: geminiKey(),
+          blob: seg.blob,
+          displayName: `dictation-${session.id}-seg${seg.seg}`,
+          cancel: r.cancel,
+          onProgress: (ratio) => say(`区間 ${label} を送信中… ${Math.round(ratio * 100)}%`),
+        });
+        say(`区間 ${label} の準備を待っています…`);
+        await geminiFileWaitActive({
+          apiKey: geminiKey(), name: uploaded.name, cancel: r.cancel,
+        });
+
+        say(`区間 ${label} を話者付きで書き起こし中…`);
+        const out = await diarizeSegmentWithGemini({
+          apiKey: geminiKey(),
+          fileUri: uploaded.uri,
+          mimeType: uploaded.mimeType,
+          sessionContext: getSessionContextForAi(),
+          knownSpeakers: mergeSpeakerRosters(rosters),
+          prevTail: prevTail.slice(-300),
+          index: i + 1,
+          total: segments.length,
+        });
+
+        rosters.push(out.speakers);
+        for (const t of out.turns) {
+          const el = createParagraphEl('', 'paragraph refined');
+          setParagraphContent(el, formatSpeakerTurn(t));
+          container.insertBefore(el, progressEl);
+          allTurns.push(t);
+          wrote++;
+        }
+        if (out.turns.length) prevTail = out.turns[out.turns.length - 1].text;
+        diagLog.info(`話者判別 ${label}: ${out.turns.length}発言 / 話者${out.speakers.length}人`
+          + (out.speakers.length ? ` (${out.speakers.map(s => s.label).join('、')})` : ''));
+        persist();
+      } finally {
+        // 上げたものは、成功でも失敗でも中止でも消す
+        if (uploaded && uploaded.name) {
+          const ok = await geminiFileDelete({ apiKey: geminiKey(), name: uploaded.name });
+          if (!ok) diagLog.info(`話者判別 ${label}: 上げたファイルを消せませんでした（48時間で自動削除されます）`);
+        }
+      }
+    }
+  } catch (e) {
+    stoppedBy = e.message || String(e);
+    console.warn('[diarize] failed:', e);
+    diagLog.info('話者判別を中断: ' + stoppedBy);
+  } finally {
+    r.running = false;
+    r.cancel = null;
+    updateDiarizeButton();
+  }
+
+  progressEl.remove();
+
+  if (wrote === 0) {
+    // 1行も書けなかったときに空の画面を残すのは最悪なので、元に戻せることを言う
+    const el = createParagraphEl(
+      `（話者判別できませんでした: ${stoppedBy || '結果が空でした'}／Ctrl+Z で元の文字起こしに戻せます）`,
+      'paragraph needs-retry');
+    container.appendChild(el);
+    persist();
+    setStatus('error', '話者判別に失敗');
+    return;
+  }
+
+  persist();
+  if (!inBg) { updateActionButtons(); autoScroll(); }
+
+  const roster = mergeSpeakerRosters(rosters);
+  // v0.21.2: 中断でも、書き出せた分は残す。ここまでの結果も作り直せない
+  saveDiarizationResult(session, { speakers: mergeSpeakerRosters(rosters), turns: allTurns });
+
+  if (stoppedBy) {
+    setStatus('error', `話者判別を中断（${wrote}発言まで）`);
+    alert(`途中で止まりました: ${stoppedBy}\n\n`
+      + `ここまでの ${wrote}発言は書き出してあります。\n`
+      + `元の文字起こしに戻すには Ctrl+Z を押してください。`);
+    return;
+  }
+
+  // 完了した分だけ、保持設定の「話者判別が終わったら消す」を効かせる
+  session.audioRepassDoneAt = Date.now();
+  persistSessions();
+  // v0.21.1: 待つ。ここで消えるかどうかを、この場で利用者に言うため
+  // （黙って消すと、次に押したときに「録音がありません」だけが出て理由が分からない）
+  const swept = await sweepStoredAudio();
+  refreshAudioUsage();
+
+  setStatus('idle', `話者判別が完了（話者${roster.length}人）`);
+  diagLog.info(`話者判別完了: ${wrote}発言 / 話者${roster.length}人`);
+  alert(`話者付きで書き起こしました。\n\n`
+    + `　発言: ${wrote}件\n`
+    + `　話者: ${roster.length}人（${roster.map(s => s.label).join('、')}）\n\n`
+    + `※ 区間の変わり目で話者の対応がずれることがあります。\n`
+    + `　 区間ごとに別々に送っているので、モデルは前の区間の声を覚えていません。\n`
+    + `　 名前が分かっているなら、タグアイコンの「話者」に書いておくと安定します。\n\n`
+    + (swept && swept.deletedSessions > 0
+        ? `※ 設定にしたがって、保管していた録音（${formatBytes(swept.deletedBytes)}）を消しました。\n`
+          + `　 録音からの書き起こし直しはもうできませんが、**この結果はタブに保存してあります**。\n`
+          + `　 間違って消しても、同じボタンから貼り直せます。\n`
+          + `　 別の設定で試し直したいときは、次の録音の前に「音声ファイルの取り扱い」を変えてください。`
+        : `※ 保管した録音は設定にしたがって残してあります。もう一度かけ直せます。`));
+}
+
+/* ───────── 話者判別の結果を残す (v0.21.2) ─────────
+ *
+ * v0.21.1 までは、話者付きの結果を**取り消し履歴にしか置いていなかった**。
+ * 「間違えて元に戻すボタンを押したら、もう2度と話者判別はできないのでは」
+ * という指摘のとおりで、これは設計の穴だった。
+ *
+ * 消えて困るのは録音ではなく**結果そのもの**。
+ * 結果はテキストなので数十KBしかなく、残しても録音のような
+ * 二次利用の問題が無い（「文字起こしはよいが録音はダメ」という同意の形に
+ * そのまま収まる）。いちばん高価で二度と作れないものを、
+ * リロードで消える場所にしか置いていなかったのが間違い。
+ *
+ * ■ 保存するのは結果だけ
+ *
+ * 話者判別**前**の文字起こしは保存しない。取り消し履歴で戻せるうえ、
+ * 戻したあとは画面にあるものがそれになる（貼り直しは pushUndo してから
+ * 行うので、そこからまた戻せる）。両方を貯めると localStorage を
+ * 二重に食うだけで、行き来はできている。
+ */
+
+/** 結果をセッションに残す。turns が空なら何もしない（空で上書きしない） */
+function saveDiarizationResult(session, { speakers, turns }) {
+  if (!session || !turns || !turns.length) return;
+  session.repass = {
+    doneAt: Date.now(),
+    speakers: (speakers || []).map(x => ({ label: x.label, note: x.note || '' })),
+    // 画面の HTML ではなくプレーンな発言の配列で持つ。
+    // 保存量が小さく、貼り直すときに段落を作り直せる
+    turns: turns.map(t => ({ speaker: t.speaker, text: t.text })),
+  };
+  persistSessions();
+  updateDiarizeButton();
+}
+
+/**
+ * 残してある結果を画面に貼り直す (v0.21.2)
+ *
+ * 話者判別本体と同じ形（1発言＝1段落）で組み直す。
+ * **先に pushUndo する**ので、貼り直しも取り消せる。
+ */
+async function restoreDiarizationResult(session, { ask = true } = {}) {
+  const saved = session && session.repass;
+  if (!saved || !saved.turns || !saved.turns.length) return false;
+
+  const when = new Date(saved.doneAt).toLocaleString('ja-JP');
+  const names = (saved.speakers || []).map(x => x.label).join('、');
+  // 呼び出し側ですでに聞いている場合は二重に聞かない
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  if (ask && !(await confirmDialog({
+    title: 'いまの文字起こしを、保存してある話者付きの結果で置き換えますか？',
+    message: `${when} に作った結果（発言 ${saved.turns.length}件・話者 ${(saved.speakers || []).length}人${names ? `（${names}）` : ''}）。いまの内容は Ctrl+Z で戻せます。`,
+    ok: '置き換える',
+  }))) return false;
+
+  pushUndo('話者付きの結果を貼り直し', 'pane-transcript');
+  const container = getWriteContainer();
+  Array.from(container.childNodes).forEach(n => n.remove());
+  for (const t of saved.turns) {
+    const el = createParagraphEl('', 'paragraph refined');
+    setParagraphContent(el, formatSpeakerTurn(t));
+    container.appendChild(el);
+  }
+  if (container !== els.confirmed) syncBgToSession(); else snapshotActiveToSession();
+  persistSessions();
+  updateActionButtons();
+  autoScroll();
+  diagLog.info(`話者付きの結果を貼り直し: ${saved.turns.length}発言`);
+  setStatus('idle', `結果を貼り直しました（${saved.turns.length}発言）`);
+  return true;
+}
+
+/**
+ * 「話者判別をかけられる音声が無い」理由を説明する (v0.21.1)
+ *
+ * v0.21.0 は「保持の設定を入れる前の録音か、期限切れ」としか言わなかった。
+ * ところが実機でいちばん多いのは**そのどちらでもない**:
+ * 「話者判別が終わったら消す」設定で1回かけたあと、もう一度押した場合。
+ *
+ * 設計としては正しく消えているのだが、**心当たりの無い理由を挙げられると
+ * 利用者は設定を直しようがない**。実際に起きたことを言う。
+ *
+ * 純関数にしてあるのは、この文言こそが機能の本体だから
+ * （消えたこと自体は仕様であって、直せるのは説明のほうだけ）。
+ */
+function explainNoAudioForDiarization({ keepRecording, retention, repassDoneAt }) {
+  if (!keepRecording) {
+    return '録音の保持がオフなので、話者判別をかけられる音声がありません。\n\n'
+      + '設定 →「録音の保持」をオンにすると、次の録音から話者判別をかけられるようになります。';
+  }
+  if (repassDoneAt) {
+    // ここがいちばん多い。理由と、次はどうすればよいかをセットで言う
+    const when = new Date(repassDoneAt).toLocaleString('ja-JP');
+    const base = `この録音は ${when} に話者判別が済んでいて、音声はもう消えています。\n\n`;
+    return retention === 'repass'
+      ? base
+        + '設定「音声ファイルの取り扱い」が『話者判別処理が終わったら消す』なので、'
+        + '1回かけた時点で消しています。\n\n'
+        + 'もう一度かけられるようにしたいときは、次の録音の前に'
+        + '『タブを閉じたら消す』などに変えてください。\n'
+        + '（いまの文字起こしは Ctrl+Z で戻せます）'
+      : base + '文字起こしそのものは Ctrl+Z で戻せます。';
+  }
+  return 'このセッションには保管された録音がありません。\n\n'
+    + '保持の設定を入れる前に録音したもの、保持期間が過ぎたもの、'
+    + 'v0.21.0 より前に保管したものには、話者判別をかけられません。';
+}
+
+/**
+ * 発言1つを段落のテキストにする (v0.21.0)
+ *
+ * 純関数。**プレーンテキストの接頭辞**にしてあるのは、この文字起こしが
+ * コピー・Notion・HTML 保存と何通りにも出ていくため。見た目だけの装飾にすると
+ * 出口のどれかで話者が消える。
+ */
+function formatSpeakerTurn(turn) {
+  const who = (turn?.speaker || '').trim();
+  const text = (turn?.text || '').trim();
+  return who ? `${who}：${text}` : text;
+}
+
+/**
+ * Gemini が空を返したチャンクを、画面から消してよいか (v0.18.1 / v0.18.10)
+ *
+ * 無音位置で区切るようになった結果、最後の区切りのあとに「中身が沈黙だけ」の
+ * チャンクが必ず1本できるようになった。それを送ると Gemini は正しく空を返すが、
+ * 従来のコードはそれを「（音声不明瞭・再試行可）」として画面に残していた。
+ *
+ * **間違えると小声を黙って捨てることになる**ので、条件は厳しくする。
+ * 前提として次の2つは必須:
+ *   - Gemini が空（呼び出し側で確認済み）
+ *   - Web Speech も何も拾っていない（別エンジンでも聞こえていない）
+ *
+ * そのうえで、次のどちらかが言えるときに消す:
+ *   (a) 検出器がこのチャンク中に発話音量を一度も見ていない
+ *   (b) チャンクが SILENCE_ABS_MIN_MS より短い
+ *
+ * (b) は v0.18.10 で追加。実機 2026-08-31 20:36 で 1.0 秒の末尾チャンクに
+ * 「（音声不明瞭・再試行可）」が残った。(a) が成立していなかったため
+ * （幅12dB の物音を発話と判定していた。そちらは SILENCE_SPEECH_MIN_MS で対処済み）。
+ *
+ * (b) が安全な理由: cutChunk は SILENCE_ABS_MIN_MS より前に切らないので、
+ * これより短いチャンクは**録音停止時の末尾**しか存在しない。そのうえ両エンジンが
+ * 何も拾っていないので、消しても失う文字が無い。
+ * この表示は「再試行できます」と言うが、再試行はテキストを整形し直す仕組みなので、
+ * 中身が空のこれを再試行しても何も起きない。
+ *
+ * 検出器が無い場合 hadSpeech は undefined なので (a) は成立せず、(b) だけで判断する。
+ */
+function shouldDropEmptyChunk(provisionalText, edges) {
+  if (provisionalText) return false;
+  if (!edges) return false;
+  if (edges.hadSpeech === false) return true;
+  return Number.isFinite(edges.durationMs) && edges.durationMs < SILENCE_ABS_MIN_MS;
+}
+
 async function startGeminiAudioRecording() {
-  if (!state.settings.apiKey) {
-    alert('Gemini Audio モードは API キーが必要です');
+  // v0.24.83: 聞き取りが Groq なら Gemini のキーは無くても録音できる（話者判別と、Groq で失敗したときの代わりには要る）
+  if (!geminiKey() && !usesGroqTranscribe()) {
+    alert('「AI で聞き取る」は Gemini の API キーが必要です（聞き取る AI を Groq Whisper にしたときは Groq の API キー）');
     openSettings();
     return;
   }
@@ -1533,6 +4231,28 @@ async function startGeminiAudioRecording() {
     return;
   }
 
+  // v0.18.4: 要求した制約が本当に効いているかは getSettings() でしか分からない。
+  // autoGainControl が true のままだと、静かになるとゲインが上がって暗騒音が
+  // 発話と同じ音量まで持ち上がり、無音が無音に見えなくなる
+  try {
+    const st = state.audioStream.getAudioTracks()[0]?.getSettings?.() || {};
+    diagLog.info(`マイク実設定 AGC=${st.autoGainControl} ノイズ抑制=${st.noiseSuppression} `
+      + `エコー除去=${st.echoCancellation} ${st.sampleRate || '?'}Hz`);
+  } catch (e) { /* getSettings 非対応でも録音は続ける */ }
+
+  // v0.18.0: 無音位置で切るための検出器。作れなかった場合は null になり、
+  // 従来どおりの固定間隔にフォールバックする（録音自体は止めない）。
+  // 前回の分が残っていたら必ず閉じる（AudioContext はページあたりの生成数に
+  // 上限があり、漏らすと数回の録音で作れなくなる）
+  if (state.silenceDetector) {
+    try { state.silenceDetector.close(); } catch {}
+    state.silenceDetector = null;
+  }
+  if (state.audioChunkTimer) { clearInterval(state.audioChunkTimer); state.audioChunkTimer = null; }
+  state.silenceDetector = state.settings.audioSilenceCut !== false
+    ? createSilenceDetector(state.audioStream)
+    : null;
+
   let mimeType = 'audio/webm;codecs=opus';
   if (!MediaRecorder.isTypeSupported(mimeType)) {
     mimeType = 'audio/webm';
@@ -1540,7 +4260,12 @@ async function startGeminiAudioRecording() {
   }
 
   state.audioChunks = [];
-  const recorder = new MediaRecorder(state.audioStream, mimeType ? { mimeType } : undefined);
+  // v0.19.0: 音声認識用途では既定(約128kbps)は過剰。下げると保管サイズも送信量も減る
+  const recOpts = {};
+  if (mimeType) recOpts.mimeType = mimeType;
+  const bitrate = Number(state.settings.audioBitrate);
+  if (Number.isFinite(bitrate) && bitrate >= 16000) recOpts.audioBitsPerSecond = bitrate;
+  const recorder = new MediaRecorder(state.audioStream, recOpts);
   state.mediaRecorder = recorder;
 
   recorder.ondataavailable = (e) => {
@@ -1553,20 +4278,39 @@ async function startGeminiAudioRecording() {
       const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
       // 設定の minChunkBytes 未満は無音と見なしてスキップ（デフォ400: 従来1200より感度↑）
       const minBytes = Number.isFinite(state.settings.audioMinChunkBytes) ? state.settings.audioMinChunkBytes : 400;
+      // v0.21.0: 保管はこの経路では行わない。ここに来るチャンクは1本ずつ
+      // 独立した webm で、繋いでも最初の1本しか読めないため
+      // （話者判別用は startArchiveRecorder が別に録っている）
       if (blob.size > minBytes) {
         // 発話あり（と推定） → 長無音タイマーをリセット
         resetLongSilenceTimer();
-        diagLog.info(`音声チャンク送信 ${blob.size}B (>${minBytes})`);
-        sendAudioChunkToGemini(blob);
+        const edges = state.pendingChunkEdges || { startsAtSilence: false, endsAtSilence: false };
+        // 長さも出す。強制区切りばかりになっていないかを実機ログで見分けるため
+        diagLog.info(`音声チャンク送信 ${blob.size}B (>${minBytes}) `
+          + `長さ${((edges.durationMs || 0) / 1000).toFixed(1)}秒 `
+          + `切り口 頭=${edges.startsAtSilence ? '無音' : '強制'} 尻=${edges.endsAtSilence ? '無音' : '強制'} `
+          + (edges.diag || ''));
+        // 未確定分はここで確定（次のチャンクに持ち越さない）。
+        // 送らなかったチャンクでは取り出さず、次まで溜め続ける
+        sendAudioChunkToGemini(blob, takeLiveFinals(), edges);
       } else {
         diagLog.info(`音声チャンクスキップ ${blob.size}B (<=${minBytes}, 無音判定)`);
       }
     }
+    // 停止時の最後のチャンク。ここまで来れば送り出し済み
+    state.finalChunkPending = false;
     // 録音継続中なら再スタート
     if (state.isRecording && state.mediaRecorder === recorder) {
       setTimeout(() => {
         if (state.isRecording && recorder.state === 'inactive') {
-          try { recorder.start(); } catch (e) { console.warn('restart failed', e); }
+          try {
+            recorder.start();
+            // 次チャンクの「頭」は、直前のチャンクの「尻」と同じ切り口になる。
+            // 無音で切ったなら頭も無音始まり、強制で切ったなら文の途中から始まる。
+            state.chunkStartedAtSilence = !!(state.pendingChunkEdges
+              && state.pendingChunkEdges.endsAtSilence);
+            state.chunkStartedAt = Date.now();
+          } catch (e) { console.warn('restart failed', e); }
         }
       }, 40);
     }
@@ -1587,18 +4331,75 @@ async function startGeminiAudioRecording() {
   state.isRecording = true;
   state.shouldAutoRestart = true;
   state.recordingSessionId = state.activeId; // BG録音用に固定
-  diagLog.info(`録音開始 (Gemini) session=${state.recordingSessionId?.slice(-6)} chunkSec=${state.settings.audioChunkSec || 12}`);
+  // v0.19.1: 保持のオン/オフをログに残す。これが無いと、保持まわりの
+  // 動作確認をログから判断できない（実機テストで実際に困った）
+  diagLog.info(state.settings.audioKeepRecording
+    ? `録音の保持: オン（${{
+        repass: '話者判別が終わったら消す', close: 'タブを閉じたら消す',
+        '1d': '1日', '7d': '7日', manual: '手動で消すまで',
+      }[state.settings.audioRetention] || state.settings.audioRetention}）`
+    : '録音の保持: オフ（この PC に残しません）');
+  diagLog.info(`録音開始 (Gemini) session=${state.recordingSessionId?.slice(-6)} `
+    + `最短=${state.settings.audioChunkSec || 12}秒 `
+    + (state.settings.audioSilenceCut !== false && state.silenceDetector
+        ? `最長=${state.settings.audioChunkMaxSec || 20}秒 (無音位置で区切る)`
+        : '(固定間隔)'));
   setRecordingUI(true);
-  setStatus('listening', '録音中 (Gemini)');
+  startContextExtractTimer();   // v0.16.1
+  startLiveSummaryTimer();      // v0.24.22
+  startLiveDisplay();           // v0.17.0
+  setStatus('listening', recordingLabel());
   resetLongSilenceTimer();
 
-  // チャンク区切り
-  const intervalMs = Math.max(5, Math.min(60, state.settings.audioChunkSec || 12)) * 1000;
+  // チャンク区切り（v0.18.0: 無音位置で切る。判断は decideChunkCut）
+  const minMs = Math.max(5, Math.min(60, state.settings.audioChunkSec || 12)) * 1000;
+  const useSilenceCut = state.settings.audioSilenceCut !== false && !!state.silenceDetector;
+  // 最長は最短より短くできない。既定は 20 秒
+  const maxMs = useSilenceCut
+    ? Math.max(minMs + 2000, Math.min(90, state.settings.audioChunkMaxSec || 20) * 1000)
+    : minMs;
+
+  state.chunkStartedAt = Date.now();
+  state.chunkStartedAtSilence = true;   // 録音開始直後は必ず「頭から」
+
+  // v0.21.0: 話者判別用の録音は live とは別の録音機で録る。
+  // 保持がオフなら作らない（作らなければ消し忘れも起きない）
+  startArchiveRecorder(state.audioStream, recOpts);
+
+  const cutChunk = (endedAtSilence, source) => {
+    if (!state.mediaRecorder || state.mediaRecorder.state !== 'recording') return;
+    state.pendingChunkEdges = {
+      startsAtSilence: !!state.chunkStartedAtSilence,
+      endsAtSilence: !!endedAtSilence,
+      // 検出器が無いときは undefined のまま（＝判断材料なし）にしておく
+      hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
+      durationMs: Date.now() - state.chunkStartedAt,
+      diag: silenceDiag(source),
+    };
+    if (state.silenceDetector) state.silenceDetector.resetChunkSpeech();
+    state.mediaRecorder.stop(); // onstop で送信＋再スタート
+  };
+
   state.audioChunkTimer = setInterval(() => {
-    if (state.mediaRecorder && state.mediaRecorder.state === 'recording') {
-      state.mediaRecorder.stop(); // onstop で送信＋再スタート
+    if (!state.mediaRecorder || state.mediaRecorder.state !== 'recording') return;
+    const sig = useSilenceCut ? currentSilenceSignal() : { ms: 0, source: 'none' };
+    const cut = decideChunkCut({
+      elapsed: Date.now() - state.chunkStartedAt,
+      minMs, maxMs, useSilenceCut,
+      silentMs: sig.ms,
+    });
+    if (cut) cutChunk(cut === 'silence', sig.source);
+
+    // v0.21.0: 話者判別用の録音を約10分ごとに区切る。live の区切りとは
+    // 独立して判断する（目的が違う。shouldRollArchiveSegment の解説を参照）
+    if (state.archiveRecorder) {
+      const roll = shouldRollArchiveSegment({
+        elapsed: Date.now() - state.archiveSegStartedAt,
+        silentMs: sig.ms,
+      });
+      if (roll) rollArchiveSegment(roll);
     }
-  }, intervalMs);
+  }, SILENCE_POLL_MS);
 
   // 時間しきい値（60秒経過）だけでも発火できるよう、ウォッチドッグを常駐させる
   if (state.midChunkWatchdog) clearInterval(state.midChunkWatchdog);
@@ -1612,8 +4413,26 @@ function stopGeminiAudioRecording() {
   }
   const recorder = state.mediaRecorder;
   state.mediaRecorder = null; // onstop の再スタートを抑止
+  // 最後のチャンクの切り口。尻は検出器の実測に従う
+  // （利用者が文の途中で停止したなら「強制」＝続きを作らせない）
+  const stopSig = currentSilenceSignal();
+  state.pendingChunkEdges = {
+    startsAtSilence: !!state.chunkStartedAtSilence,
+    endsAtSilence: stopSig.ms >= SILENCE_HOLD_LATE_MS,
+    hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
+    durationMs: state.chunkStartedAt ? Date.now() - state.chunkStartedAt : 0,
+    diag: silenceDiag(stopSig.source),
+  };
   if (recorder && recorder.state !== 'inactive') {
-    try { recorder.stop(); } catch {}
+    state.finalChunkPending = true;   // onstop で下ろす
+    try { recorder.stop(); } catch { state.finalChunkPending = false; }
+  }
+  // v0.21.0: 保管側も止める。**ストリームを閉じる前に**止めること
+  // （トラックが先に止まると、最後のかけらが出てこない）
+  stopArchiveRecorder();
+  if (state.silenceDetector) {
+    try { state.silenceDetector.close(); } catch {}
+    state.silenceDetector = null;
   }
   if (state.audioStream) {
     state.audioStream.getTracks().forEach(t => t.stop());
@@ -1621,15 +4440,244 @@ function stopGeminiAudioRecording() {
   }
 }
 
-async function sendAudioChunkToGemini(blob) {
+/* ───────── Gemini モードのリアルタイム表示 (v0.17.0) ─────────
+ *
+ * Gemini モードは 12 秒ごとに一気に文字が出るので、喋っている間は画面が動かない。
+ * そこで Web Speech を「表示専用」で並走させ、確定までの間を埋める。
+ * （マイクを同時に使えることは mic-test.html で実機確認済み）
+ *
+ *   喋る → Web Speech の文字が「未確定」として出る
+ *        → チャンクの区切りでその文が段落に固定される（まだ未確定の見た目）
+ *        → Gemini の結果が返ったらその段落が置き換わる（確定）
+ *
+ * ここで作る recognition は **transcript に一切書かない**。
+ * buildRecognition() は appendRawChunk や字幕バッファと密結合しているので流用しない。
+ *
+ * チャンクの区切りで受け渡すので、Web Speech と Gemini の時間軸を突き合わせる必要がない。
+ * 「区切りまでに Web Speech が確定した分」がそのままそのチャンクの未確定表示になる。
+ */
+
+/** 表示専用の Web Speech を作る。文字起こしペインには書かない */
+function buildLiveDisplayRecognition() {
+  if (!SpeechRecognition) return null;
+  const rec = attachSpeechTrace(new SpeechRecognition());
+  rec.lang = 'ja-JP';
+  rec.continuous = true;
+  rec.interimResults = true;
+
+  rec.onresult = (event) => {
+    let interim = '';
+    let gotText = false;
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const r = event.results[i];
+      if (r.isFinal) { state.liveFinals = (state.liveFinals || '') + r[0].transcript; gotText = true; }
+      else { interim += r[0].transcript; if (r[0].transcript) gotText = true; }
+    }
+    // v0.18.4: 「いま声が出ているか」の記録。音量ではなく音声認識器の判断なので、
+    // マイク側のゲイン調整で音量が平坦化されていても効く
+    if (gotText) state.liveLastActivityAt = Date.now();
+    if (gotText && !state.liveGotAny) {
+      state.liveGotAny = true;
+      diagLog.info('リアルタイム表示: 最初の文字を受け取りました');
+    }
+    // BG録音中は共有の #interim に書かない（表示中の別タブに漏れるため）
+    if (isBgRecording()) els.interim.textContent = '';
+    else ConfirmFx.renderDraft(els.interim, (state.liveFinals || '') + interim, state.settings.draftEffect);   // v0.24.120
+  };
+
+  rec.onerror = (e) => {
+    // 表示専用なので、失敗しても録音は続ける。Gemini 側が本体
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    console.warn('[live] Web Speech エラー（表示のみ・録音は継続）:', e.error);
+    /* v0.24.19: v0.24.18 までは console にしか出さず、止まっていても誰も気づけなかった
+     * （やっさん報告「リアルタイム文字表示が動いてない」→ 手がかりが何も残っていなかった）。
+     * 診断ログには毎回、画面には待っても直らない種類のときだけ1回出す。 */
+    // 失敗→再開を繰り返す種類（network など）でログが埋まらないよう、同じエラーは3回まで
+    const counts = state.liveErrorCounts || (state.liveErrorCounts = {});
+    counts[e.error] = (counts[e.error] || 0) + 1;
+    if (counts[e.error] <= 3) {
+      diagLog.info(`リアルタイム表示: エラー ${e.error}${state.liveUsingTrack ? '（指定マイクを渡して開始）' : ''}`
+        + (counts[e.error] === 3 ? '（同じエラーはこれ以降ログに出しません）' : ''));
+    }
+    if (state.liveUsingTrack && (e.error === 'audio-capture' || e.error === 'not-allowed')) {
+      // 指定マイクを渡す形が通らなかった。既定のマイクで聞き直す（次の onend で再開）
+      state.liveTrackRejected = true;
+      diagLog.info('リアルタイム表示: 指定マイクを渡せなかったので、Chrome の既定のマイクで聞き直します');
+      return;
+    }
+    if (LIVE_FATAL_ERRORS.has(e.error)) {
+      state.liveFatal = e.error;
+      statusNotice('error', 'リアルタイム表示が止まりました（録音と文字起こしは続いています）', {
+        detail: `Web Speech のエラー: ${e.error}\n\n${liveErrorHint(e.error)}`,
+      });
+    }
+  };
+
+  rec.onend = () => {
+    // continuous でも切れることがあるので、録音中なら黙って再開する。
+    // ただし待っても直らないエラーのあとは再開しない（失敗→再開を延々と繰り返すため）
+    if (state.isRecording && state.liveRecognition === rec && !state.liveFatal) {
+      startLiveRecognition(rec);
+    }
+  };
+  return rec;
+}
+
+/** 待っても直らない Web Speech のエラー。出たら再開をやめて、画面に一言出す */
+const LIVE_FATAL_ERRORS = new Set(['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported']);
+
+function liveErrorHint(code) {
+  switch (code) {
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'Chrome が音声認識を許可していません。マイクの許可を確かめてください。';
+    case 'audio-capture':
+      return 'Chrome の既定のマイクが見つからないか、使えません。';
+    case 'language-not-supported':
+      return 'この Chrome では日本語の音声認識が使えません。';
+    default:
+      return '';
+  }
+}
+
+/**
+ * 並走の音声認識を始める (v0.24.19)
+ *
+ * ■ 指定マイクを渡す
+ *
+ * Web Speech は従来**マイクを選べず、Chrome の既定のマイクを聞く**。設定でマイク
+ * （仮想マイクなど）を選んでいても、それは Gemini に送る録音にしか効かない。
+ * やっさんは Meet の講義を仮想マイクで録っていて、並走は既定のマイク（無音）を
+ * 聞いていたと見ている（**実機では未確認**）。
+ *
+ * 仕様には `start(MediaStreamTrack)` が足されていて、MDN にも載っているが、
+ * 普通の Chrome で使えるかは確かめられなかった。**対応していない Chrome では
+ * 余分な引数として無視される**だけなので、指定マイクがあるときは渡しておく。
+ * 渡したことで失敗したら（audio-capture など）、既定のマイクに戻して聞き直す。
+ * 既定のマイクのときは何も渡さない（これまでと同じ呼び方のまま）。
+ */
+function startLiveRecognition(rec) {
+  const track = (!state.liveTrackRejected && state.settings.audioDeviceId && state.audioStream)
+    ? state.audioStream.getAudioTracks()[0] : null;
+  state.liveUsingTrack = !!(track && track.readyState === 'live');
+  try {
+    if (state.liveUsingTrack) rec.start(track);
+    else rec.start();
+    return true;
+  } catch (e) {
+    if (state.liveUsingTrack) {
+      state.liveTrackRejected = true;
+      state.liveUsingTrack = false;
+      diagLog.info(`リアルタイム表示: 指定マイクを渡せませんでした（${e.name || e.message}）。既定のマイクで聞きます`);
+      try { rec.start(); return true; } catch (_) {}
+    }
+    return false;
+  }
+}
+
+/**
+ * 録音しているのに並走から文字が1つも来ないときに、1回だけ知らせる (v0.24.19)
+ *
+ * エラーが出ないまま黙っていることがある。既定のマイクが無音なら、Web Speech は
+ * 'no-speech' を出すだけで、それはふつうの沈黙と区別できない。Gemini のほうに
+ * 文字が出ているのに並走が黙っているなら、聞いている先が違う可能性が高い。
+ */
+function maybeWarnLiveSilent() {
+  if (!state.liveRecognition || state.liveGotAny || state.liveSilentWarned || state.liveFatal) return;
+  state.liveGeminiTextChunks = (state.liveGeminiTextChunks || 0) + 1;
+  if (state.liveGeminiTextChunks < 3) return;
+  state.liveSilentWarned = true;
+  diagLog.info('リアルタイム表示: Gemini には文字が出ているのに、並走からは1文字も来ていません');
+  statusNotice('error', 'リアルタイム表示に文字が来ていません（文字起こしは続いています）', {
+    detail: '並走している音声認識（Web Speech）は、Chrome の既定のマイクを聞きます。\n'
+      + (state.settings.audioDeviceId
+        ? '設定で別のマイク（仮想マイクなど）を選んでいるので、並走は別のマイクを聞いている可能性があります。\n\n'
+          + '── 試せること ──\n'
+          + 'Chrome のアドレス欄に chrome://settings/content/microphone を入れ、\n'
+          + 'いちばん上のマイクを、設定で選んでいるのと同じマイクに変えてから録音し直す。\n'
+          + '（ほかのサイトのマイクも変わることがあります）'
+        : '既定のマイクに声が届いているか確かめてください。'),
+  });
+}
+
+function startLiveDisplay() {
+  if (state.settings.geminiLiveDisplay === false) return;
+  stopLiveDisplay();
+  state.liveFinals = '';
+  state.liveGotAny = false;
+  state.liveSilentWarned = false;
+  state.liveGeminiTextChunks = 0;
+  state.liveFatal = '';
+  state.liveTrackRejected = false;
+  state.liveErrorCounts = {};
+  const rec = buildLiveDisplayRecognition();
+  if (!rec) {
+    diagLog.info('リアルタイム表示: この環境は Web Speech 非対応のためスキップ');
+    return;
+  }
+  state.liveRecognition = rec;
+  // v0.18.11: ここで現在時刻を入れてはいけない。
+  // 入れると「録音開始からずっと無音」に見えて、まだ一言も喋っていない
+  // 3.0秒（最短チャンク長）の時点で区切ってしまう。実機 2026-08-31 20:42:
+  //   音声チャンク送信 長さ3.0秒 [幅5dB 判定不能 最長無音0ms 採用=webspeech]
+  // 表示はされないが Gemini への送信が1回まるまる無駄になる。
+  // 0 のままにしておけば currentSilenceSignal の webActive が false になり、
+  // Web Speech が実際に何か聞き取るまでこの手段は使われない
+  // （レベル検出器で「大きい側を知るまで判定しない」としたのと同じ原則）。
+  state.liveLastActivityAt = 0;
+  if (startLiveRecognition(rec)) {
+    diagLog.info('リアルタイム表示 (Web Speech 並走) を開始'
+      + (state.liveUsingTrack ? '（設定で選んだマイクを渡しました。Chrome が対応していなければ既定のマイクを聞きます）'
+                              : '（Chrome の既定のマイク）'));
+  } else {
+    console.warn('[live] 開始できませんでした（表示のみ・録音は継続）');
+    diagLog.info('リアルタイム表示: 開始できませんでした');
+    state.liveRecognition = null;
+  }
+}
+
+function stopLiveDisplay() {
+  const rec = state.liveRecognition;
+  state.liveRecognition = null;
+  if (rec) {
+    logSpeechTrace(rec, 'リアルタイム表示');   // v0.24.20
+    rec.onend = null;
+    try { rec.stop(); } catch (_) {}
+  }
+  els.interim.textContent = '';
+  // state.liveFinals はここでは消さない。
+  // 停止時に MediaRecorder が最後のチャンクを吐くので、その未確定表示に使う。
+  // 次の録音開始時に startLiveDisplay() が '' に戻すので溜まりっぱなしにはならない。
+}
+
+/** チャンクの区切りで、そこまでに確定した文を取り出して次に持ち越さない */
+function takeLiveFinals() {
+  const t = (state.liveFinals || '').trim();
+  state.liveFinals = '';
+  els.interim.textContent = '';
+  return t;
+}
+
+async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) {
   state.audioInFlightCount++;
   const container = getWriteContainer();
   const inBg = container !== els.confirmed;
   if (!inBg) hideEmptyHint();
-  const targetEl = createParagraphEl('（文字起こし中…）', 'paragraph refining');
+  // v0.17.0: Web Speech が聞き取った分があれば、それを未確定として置いておく。
+  // 無ければ従来どおり「（文字起こし中…）」
+  const targetEl = provisionalText
+    ? createParagraphEl(provisionalText, 'paragraph refining provisional')
+    : createParagraphEl('（文字起こし中…）', 'paragraph refining');
   container.appendChild(targetEl);
   if (inBg) syncBgToSession();
   else autoScroll();
+  // v0.24.128: WebSpeech確定の段階のエフェクト（下書きの字が段落になる）
+  // v0.24.133: Web Speech の字の段落は、AI の字に入れ替わるまで処理。
+  // Web Speech を並走させないときの「（文字起こし中…）」は字ではないので、処理の見た目は付けない（やっさん「WebSpeech を並走させないとき」）
+  if (provisionalText) {
+    targetEl.classList.add('ph-proc');
+    if (!inBg) playStageFx(targetEl, provisionalText, phaseFxMode('proc'));
+  }
 
   const persist = () => {
     if (inBg) syncBgToSession();
@@ -1637,40 +4685,167 @@ async function sendAudioChunkToGemini(blob) {
     persistSessions();
   };
 
+  // v0.24.83: 文字にするのは Gemini か Groq か。画面の断り書きにも実際に答えたほうの名前を出す
+  let engine = usesGroqTranscribe() ? 'Groq' : 'Gemini';
+  // v0.24.133: 最後に入れ替えるのは確定（整形した字でも、整形が無くて聞き取ったままの字でも）
+  const finalFx = phaseFxMode('final');
   try {
-    const text = await transcribeAudioWithGemini({
-      apiKey: state.settings.apiKey,
-      audioBlob: blob,
-      contextHint: getContextForGemini(),
-    });
-    if (text && text.trim()) {
+    let text;
+    if (engine === 'Groq') {
+      ({ text, engine } = await transcribeChunkWithGroq(blob, targetEl, edges, provisionalText));
+    } else {
+      text = await transcribeAudioWithGemini({
+        apiKey: geminiKey(),
+        sessionContext: getSessionContextForAi(),
+        audioBlob: blob,
+        contextHint: getContextForGemini(300),   // v0.24.55: 表記の参考だけなので短く
+        edges,
+      });
+    }
+    if (text && text.trim() && isFillerOnly(text) && isFillerOnly(previousParagraphText(targetEl))) {
+      // v0.24.34: 相づちだけのチャンクが続いたら、2つ目以降は出さない（判断根拠は isFillerOnly）
+      diagLog.info(`相づちだけのチャンクが続いたので表示しない（${text.trim().slice(0, 20)}）`);
+      transcriptMorph(() => targetEl.remove(), { removing: [targetEl] });   // v0.24.60: 仮の段落はふわっと消す
+      persist();
+    } else if (text && text.trim()) {
       // Geminiオーディオ経由の短チャンクは `.short-refined` とマーク。
       // このあと maybeConsolidateShortChunks() が 3つ溜まったら
       // refineWithGemini（見出し付き）でまとめて整形する。
-      targetEl.className = 'paragraph short-refined';
-      targetEl.dataset.shortTs = String(Date.now());
-      setParagraphContent(targetEl, text);
+      // v0.24.60: 仮の段落を差し替えると高さが変わる。下を跳ばさない
+      // v0.24.133: 最初に出る字がこれ（Web Speech を並走させず、Groq の字も見せていない）なら、下書きでもあり確定でもある。
+      // 下書きの見た目と演出で出し、終わったら確定の見た目と演出に続ける
+      const draftToo = !String(provisionalText || '').trim() && !targetEl.classList.contains('heard');
+      const shown = confirmSwap(targetEl, () => {   // v0.24.119〜133: 確定のエフェクト（className を替えるので ph-proc も外れる）
+        targetEl.className = 'paragraph short-refined' + (draftToo ? ' ph-draft' : '');
+        targetEl.dataset.shortTs = String(Date.now());
+        setParagraphContent(targetEl, text);
+      }, draftToo ? phaseFxMode('draft') : finalFx);
+      if (draftToo) {
+        shown.then(() => {
+          if (!targetEl.isConnected || !targetEl.classList.contains('ph-draft')) return;   // そのあいだに見出し追加でまとめられた・差し替えられた
+          targetEl.classList.remove('ph-draft');
+          playStageFx(targetEl, targetEl.textContent, finalFx);
+        });
+      }
       if (state.isRecording) resetLongSilenceTimer();
       persist();
+      maybeWarnLiveSilent();   // v0.24.19
       // 遅延ミドル整形をチェック
       maybeConsolidateShortChunks();
+    } else if (shouldDropEmptyChunk(provisionalText, edges)) {
+      // 沈黙だけのチャンク。従来はこれが「（音声不明瞭・再試行可）」として
+      // 画面に残っていた（判断根拠は shouldDropEmptyChunk のコメント）
+      diagLog.info('沈黙のみのチャンクだったので表示しない');
+      transcriptMorph(() => targetEl.remove(), { removing: [targetEl] });   // v0.24.60: 仮の段落はふわっと消す
+      persist();
+    } else if (isDuplicateOfTail(provisionalText, confirmedTailText(targetEl))) {
+      // v0.18.8: Web Speech の確定が遅れて次のチャンクに付いた分。
+      // 同じ内容がすでに画面にあるので出さない（判断根拠は上のコメント）
+      diagLog.info('Web Speech の確定が直前の内容と重複していたので表示しない');
+      transcriptMorph(() => targetEl.remove(), { removing: [targetEl] });   // v0.24.60: 仮の段落はふわっと消す
+      persist();
     } else {
-      // 空テキストも「需再試行」として残す（消さない）
-      // 「音声不明瞭の可能性。後で整形ボタンから再試行できます」
+      // 空テキストも「要再試行」として残す（消さない）
+      // v0.17.0: Web Speech が聞き取っていたなら、その文字は捨てない。
+      // Gemini が空でも「聞こえていた内容」は残っているほうが役に立つ
       targetEl.className = 'paragraph needs-retry';
-      setParagraphContent(targetEl, '（音声不明瞭・再試行可）');
+      /* v0.19.3: 文言を正直にする。
+       *
+       * 実機で番組終わりのジングル（音楽）にこれが付いた。従来の
+       * 「（音声不明瞭・再試行可）」は2点で嘘をついていた:
+       *   - 「音声不明瞭」… 不明瞭なのではなく、そもそも言葉ではない
+       *   - 「再試行可」  … 再試行はテキストを整形し直す仕組みで、
+       *                     中身が空のこれを再試行しても何も起きない
+       *
+       * 音楽かどうかの判別は作らない。hadSpeech は「大きい音があったか」を
+       * 見ているだけなので鳴り続ける音楽は素通りするが、それを直すには
+       * 変調スペクトルのような別の特徴量が要る。ここで得られるものに対して
+       * 大きすぎる。**何秒ぶんが文字にならなかったか**が分かれば用は足りる。 */
+      const sec = ((edges && edges.durationMs) || 0) / 1000;
+      transcriptMorph(() => setParagraphContent(targetEl, provisionalText
+        ? provisionalText + `　[${engine} は聞き取れず・Web Speech の結果です]`
+        : `（この${sec ? sec.toFixed(1) + '秒' : '区間'}は言葉として聞き取れませんでした。音楽や物音の可能性があります）`));
       persist();
     }
   } catch (e) {
     // 通信エラー等も黙って needs-retry に落とす（赤バナーは出さない）
     console.warn('[audio transcribe] skipped (marked for retry):', e.message || e);
+    // v0.17.0: 失敗しても Web Speech の結果は残す。ここで捨てると、
+    // 聞き取れていたのに何も残らないという最悪の結果になる
     targetEl.className = 'paragraph needs-retry';
-    setParagraphContent(targetEl, '[文字起こし失敗: ' + (e.message || '').slice(0, 60) + ']');
+    transcriptMorph(() => setParagraphContent(targetEl, provisionalText
+      ? provisionalText + `　[${engine} 失敗・Web Speech の結果です: ` + (e.message || '').slice(0, 40) + ']'
+      : '[文字起こし失敗: ' + (e.message || '').slice(0, 60) + ']'));
     persist();
   } finally {
     state.audioInFlightCount--;
     updateActionButtons();
     if (!inBg) autoScroll();
+  }
+}
+
+/**
+ * 1 つのかたまりを Groq で文字にして、ライブ整形に通す (v0.24.83)
+ *
+ * Whisper は句読点も改行も付けない。そのまま段落にすると、見出し追加（既定 5 分ごと）まで
+ * 句読点の無い文が並ぶ。なので Web Speech モードと同じライブ整形（refineWithGemini・連携オンなら Claude）に通す。
+ *
+ * 整形はここで**待ってから**返す。段落を short-refined にしたあとで整形の結果を書き込むと、
+ * そのあいだに見出し追加がこの段落をまとめていた場合に、まとめた文を 1 かたまりぶんで上書きしてしまう。
+ * 待っているあいだは audioInFlightCount が減らないので、停止時のまとめも待ってくれる。
+ *
+ * Groq で失敗したら、Gemini のキーがあれば Gemini で文字にする（そのかたまりを失わないため）。
+ * 料金はかかるが、失敗はまれな前提。どちらで文字にしたかは診断ログと断り書きに出す。
+ * @returns {Promise<{text: string, engine: 'Groq'|'Gemini'}>}
+ */
+async function transcribeChunkWithGroq(blob, targetEl, edges, provisionalText = '') {
+  const sessionContext = getSessionContextForAi();
+  // v0.24.127: 無音だったらしいか。音の大きさの検出が「大きい音なし」と言ったか、Web Speech を並走させていて何も聞き取らなかったか。
+  // そのときは Whisper の決まり文句（「ご視聴ありがとうございました」など）を落とす（groq.js の groqPickText）。
+  // 送るのはやめない: 3m 離れた声のように、検出器が拾わない小さな声でも Groq は聞き取れる（比較ページの実機）
+  const quiet = (edges && edges.hadSpeech === false)
+    || (state.settings.geminiLiveDisplay !== false && !!state.liveRecognition && !String(provisionalText || '').trim());
+  let raw;
+  try {
+    raw = await transcribeAudioWithGroq({
+      apiKey: state.settings.groqApiKey,
+      audioBlob: blob,
+      sessionContext,
+      contextHint: getContextForGemini(300),
+      durationSec: edges && edges.durationMs ? edges.durationMs / 1000 : undefined,   // v0.24.104: 無料枠の残りを数える
+      quiet,
+    });
+  } catch (e) {
+    if (!geminiKey()) throw e;
+    diagLog.info(`Groq で文字にできなかったので Gemini で文字にします: ${(e.message || e).toString().slice(0, 120)}`);
+    const text = await transcribeAudioWithGemini({
+      apiKey: geminiKey(),
+      sessionContext,
+      audioBlob: blob,
+      contextHint: getContextForGemini(300),
+      edges,
+    });
+    return { text, engine: 'Gemini' };
+  }
+  if (!raw || !raw.trim() || !liveRefineReady()) return { text: raw || '', engine: 'Groq' };
+  // 整形のあいだも、聞き取れた文字は見えているようにする（Web Speech の仮の文字より Groq のほうが確か）
+  // v0.24.133: 整形が続くので、Groq の字は処理。Web Speech を並走させず、これが最初に出る字なら下書き（整形を待つあいだも「未確定」のまま）
+  const rawPhase = String(provisionalText || '').trim() ? 'proc' : 'draft';
+  confirmSwap(targetEl, () => { targetEl.classList.add('heard', rawPhase === 'proc' ? 'ph-proc' : 'ph-draft'); setParagraphContent(targetEl, raw); }, phaseFxMode(rawPhase));
+  try {
+    const refined = await refineWithGemini({
+      apiKey: geminiKey(),
+      sessionContext,
+      context: getContextForGemini(),
+      newChunk: raw,
+      // v0.24.144: 設定がオンなら、同じ部分の Web Speech の字も渡す（聞き違いの確かめに）
+      altText: state.settings.refineWithWebSpeech ? provisionalText : '',
+    });
+    return { text: (refined && refined.trim()) ? refined : raw, engine: 'Groq' };
+  } catch (e) {
+    // 整形できなくても文字は残す。見出し追加のときにもう一度まとめ直される
+    diagLog.info(`Groq の文字を整形できなかったので、そのまま残します: ${(e.message || e).toString().slice(0, 120)}`);
+    return { text: raw, engine: 'Groq' };
   }
 }
 
@@ -1686,35 +4861,125 @@ async function listAudioInputDevices() {
   return devices.filter(d => d.kind === 'audioinput');
 }
 
+/**
+ * モードによって出す・しまう設定の行 (v0.24.74)
+ * 前は class（is-hidden）で grid の行の高さと濃さを ease の transition で動かしていた。SUMADO の reveal（高さと濃さをばねで）にした
+ * （TODO「動きを SUMADO の仕様書に合わせる」の 12）。開いた直後（animated: false）は動かさずにその状態にする
+ */
+/**
+ * 空のときの案内（「ここに文字起こしが出ます」など）を出し入れする (v0.24.79)
+ * 案内は流れの中にあって大きな余白（上下 60px）を持つので、一瞬で出し入れすると下の中身が跳ぶ。高さと濃さをばねで。
+ * セッション・タブの切り替え（中身ごと横に送る）では動かさない（animated: false）
+ */
+function showHint(el, show, animated = true) {
+  if (!el) return;
+  if (window.Motion) Motion.reveal(el, !!show, { instant: !animated });
+  else el.hidden = !show;
+}
+
+function revealSettingRow(el, show, animated, withMargin = false) {
+  if (!el) return;
+  if (window.Motion) Motion.reveal(el, show, { instant: !animated, withMargin });
+  else el.hidden = !show;
+}
+
+/**
+ * AI 設定のトグルの下（キーの欄・連携のボタン）は、オンのときだけ出す (v0.24.88)
+ * v0.24.83〜87 は Groq のキーの欄を「聞き取る AI で Groq を選んだとき」に出していた。キーはトグルの下にまとめた（設定の見本の 2 段目）
+ */
+function applyAiSettingsVisibility(animated = true) {
+  const on = (box) => !!(box && box.checked);
+  revealSettingRow(document.getElementById('gemini-key-fields'), on(els.inputGeminiEnabled), animated);
+  revealSettingRow(document.getElementById('groq-key-fields'), on(els.inputGroqEnabled), animated);
+  revealSettingRow(document.getElementById('claude-code-fields'), on(els.inputClaudeCode), animated);
+  // v0.24.132: 要約・タイトル生成がオフなら「要約の詳しさ」を隠す（やっさんの指定）
+  revealSettingRow(document.getElementById('summary-detail-field'), on(els.inputAutoSummarize), animated);
+  // v0.24.132: ライブ整形がオフなら「ライブ整形のタイミング」「見出し追加のタイミング」、ライブ要約がオフなら「ライブ要約の間隔」を隠す（やっさんの指定）
+  revealSettingRow(document.getElementById('live-refine-sec-field'), on(els.inputAiEnabled), animated);
+  revealSettingRow(document.getElementById('mid-consolidate-field'), on(els.inputAiEnabled), animated);
+  revealSettingRow(document.getElementById('refine-with-ws-field'), on(els.inputAiEnabled), animated);   // v0.24.144
+  revealSettingRow(document.getElementById('live-summary-min-field'), on(els.inputLiveSummary), animated);
+}
+
+/* ───────── 使う AI の表 (v0.24.92) ─────────
+ *
+ * やっさんの案（設定の見本の 3 段目）。行は働き、列は AI。丸を押して選ぶ。
+ * - 表に出すのは「設定画面でいまオンになっていて、キーが入っている AI」だけ選べる（保存前の欄の値で判断する）
+ * - 選んだ AI が使えなくなったら、無料で済むほうへ移ったように見せる（覚えている好みは消さない。戻せば元どおり）
+ * - ライブ整形〜質問は 7 個セット。どの行を押しても一緒に変わる。見えない「文脈の抽出」も一緒（claude-bridge の振り分け）
+ * - ライブ要約も 7 個セットに入る（v0.24.93 から Gemini でも作れる。Claude で失敗したときに黙って Gemini に回さないのは今までどおり）
+ * - 話者判別は Gemini だけ（音声を聞く処理なので Claude には回せない。Groq には話者判別が無い）
+ */
+let aiPickWorking = null;
+const AI_TABLE_COLS = ['gemini', 'groq', 'claude'];
+const AI_TABLE_ROWS = [
+  { key: 'stt', label: '文字起こし', can: ['gemini', 'groq'] },
+  { key: 'post', label: 'ライブ整形', can: ['gemini', 'claude'], grp: 'start' },
+  { key: 'post', label: '全体整形', can: ['gemini', 'claude'], grp: 'mid' },
+  { key: 'post', label: 'ライブ要約', can: ['gemini', 'claude'], grp: 'mid' },   // v0.24.93: Gemini でも作れる
+  { key: 'post', label: 'メモの整形', can: ['gemini', 'claude'], grp: 'mid' },
+  { key: 'post', label: 'タイトル生成', can: ['gemini', 'claude'], grp: 'mid' },
+  { key: 'post', label: '要約', can: ['gemini', 'claude'], grp: 'mid' },
+  { key: 'post', label: '質問', can: ['gemini', 'claude'], grp: 'end' },
+  { key: 'dia', label: '話者判別', can: ['gemini'] },
+];
+function formAiAvail() {
+  const on = (box) => !!(box && box.checked);
+  return {
+    gemini: on(els.inputGeminiEnabled) && !!(els.inputApiKey && els.inputApiKey.value.trim()),
+    groq: on(els.inputGroqEnabled) && !!(els.inputGroqKey && els.inputGroqKey.value.trim()),
+    claude: on(els.inputClaudeCode),
+  };
+}
+function renderAiTable() {
+  const body = els.aiTableBody;
+  if (!body || !aiPickWorking) return;
+  const avail = formAiAvail();
+  const ws = !(els.modeGemini && els.modeGemini.checked);   // Web Speech なら文字起こしに AI は使わない
+  const now = {
+    stt: ws ? null : pickAvailable(aiPickWorking.stt, avail, ['groq', 'gemini']),
+    post: pickAvailable(aiPickWorking.post, avail, ['claude', 'gemini']),
+    dia: avail.gemini ? 'gemini' : null,
+  };
+  body.innerHTML = AI_TABLE_ROWS.map((r) => {
+    // v0.24.93: 「7個セット」の札は外した（やっさん「説明しすぎの部類」）。一緒に動くことは、押せば分かる（左のうすい線でくくってある）
+    const tag = (r.key === 'stt' && ws) ? '<span class="ai-table-tag">Web Speech</span>' : '';
+    const cells = AI_TABLE_COLS.map((a) => {
+      if (!r.can.includes(a)) return '<td><span class="ai-pick-none" aria-hidden="true">—</span></td>';
+      const fixed = r.key === 'dia';   // 選ぶものが 1 つしか無い行は押せない（しるしだけ）
+      const disabled = !avail[a] || (r.key === 'stt' && ws) || fixed;
+      const checked = now[r.key] === a;
+      return `<td class="${r.grp ? 'ai-grp' : ''}" data-col="${a}"><button type="button" class="ai-pick" role="radio" data-k="${r.key}" data-a="${a}"`
+        + ` aria-checked="${checked}" aria-label="${r.label}: ${a}"${disabled ? ' disabled' : ''}><span class="ai-pick-dot"><span data-icon="sm-tick" data-icon-size="13"></span></span></button></td>`;
+    }).join('');
+    return `<tr class="${r.grp ? 'ai-grp-row ai-grp-' + r.grp : ''}"><th scope="row">${r.label}${tag}</th>${cells}</tr>`;
+  }).join('');
+  document.querySelectorAll('.ai-table thead th[data-col]').forEach((th) => th.classList.toggle('off', !avail[th.dataset.col]));
+  renderIcons(body);
+  // AI で聞き取るのに、文字起こしに使える AI が無ければ、モードの下に注意書き（設定の見本の 1 段目）
+  revealSettingRow(document.getElementById('stt-ai-caution'), !ws && !now.stt, true);
+  // v0.24.133: 使えるAI・選んだAIが変わると、プレビューの道（下書き → 処理 → 確定）も変わる
+  if (typeof restartFxPreview === 'function') restartFxPreview();
+}
+
 function applyGeminiOnlyVisibility(animated = true) {
   const el = document.getElementById('gemini-only-fields');
   if (!el) return;
   const isGemini = els.modeGemini && els.modeGemini.checked;
-  if (!animated) {
-    // モーダル開いた直後はトランジション無しで確定状態に
-    const prev = el.style.transition;
-    el.style.transition = 'none';
-    el.classList.toggle('is-hidden', !isGemini);
-    void el.offsetWidth; // reflow
-    el.style.transition = prev;
-  } else {
-    el.classList.toggle('is-hidden', !isGemini);
-  }
+  // v0.24.48: 「録音の保持」（話者判別）も Gemini モードのときだけ出す（やっさんの指定）
+  // v0.24.74: これも一瞬で出し入れしていたので、同じくばねで
+  // 「録音の保持」は区切り線のあるまとまり（下の余白 22px）。余白も一緒に縮める（中に移すと区切り線の位置が変わる）
+  revealSettingRow(document.getElementById('keep-recording-group'), isGemini, animated, true);
+  revealSettingRow(el, isGemini, animated);
+  // v0.24.87: デバイス・リアルタイム表示・チャンクは下の「音声入力」へ移した。出し入れは同じく AI で聞き取るときだけ
+  revealSettingRow(document.getElementById('gemini-only-input-fields'), isGemini, animated);
 }
 
 function applyWebSpeechOnlyVisibility(animated = true) {
   const el = document.getElementById('webspeech-only-fields');
   if (!el) return;
   const isWs = els.modeWebSpeech && els.modeWebSpeech.checked;
-  if (!animated) {
-    const prev = el.style.transition;
-    el.style.transition = 'none';
-    el.classList.toggle('is-hidden', !isWs);
-    void el.offsetWidth;
-    el.style.transition = prev;
-  } else {
-    el.classList.toggle('is-hidden', !isWs);
-  }
+  revealSettingRow(el, isWs, animated);
 }
 
 async function populateAudioDevices() {
@@ -1767,7 +5032,7 @@ function getChatHtml() {
   const chat = getActiveSession()?.chat || [];
   if (chat.length === 0) return '';
   const parts = chat.filter(m => !m.thinking).map(m => {
-    const who = m.role === 'user' ? 'あなた' : 'Gemini';
+    const who = chatSpeakerLabel(m);
     const body = m.role === 'assistant' ? renderMarkdown(m.content)
                                         : `<div>${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>`;
     return `<div class="chat-block"><p><strong>${who}</strong>: ${body}</p></div>`;
@@ -1779,20 +5044,22 @@ function getPaneText(id) {
   if (id === 'pane-transcript') return getConfirmedText();
   if (id === 'pane-memo') return getMemoText();
   if (id === 'pane-summary') return getSummaryText();
+  if (id === 'pane-live') return elementToPlainText(els.liveSummary);
   if (id === 'pane-chat') return getChatText();
   return '';
 }
 function getPaneHtml(id) {
-  if (id === 'pane-transcript') return els.confirmed.innerHTML;
-  if (id === 'pane-memo') return els.memo.innerHTML;
-  if (id === 'pane-summary') return els.summary.innerHTML;
+  if (id === 'pane-transcript') return savableHtml(els.confirmed.innerHTML);
+  if (id === 'pane-memo') return savableHtml(els.memo.innerHTML);
+  if (id === 'pane-summary') return savableHtml(els.summary.innerHTML);
+  if (id === 'pane-live') return savableHtml(els.liveSummary.innerHTML);
   if (id === 'pane-chat') return getChatHtml();
   return '';
 }
 
 function buildCombinedPlain() {
   const parts = [];
-  for (const id of state.settings.paneOrder) {
+  for (const id of visiblePaneOrder()) {
     const meta = PANE_META[id];
     const t = getPaneText(id);
     if (t) parts.push(`【${meta.label}】\n` + t);
@@ -1804,7 +5071,7 @@ function buildCombinedMarkdown() {
   const parts = [];
   const session = getActiveSession();
   if (session?.title) parts.push(`# ${session.title}`);
-  for (const id of state.settings.paneOrder) {
+  for (const id of visiblePaneOrder()) {
     const meta = PANE_META[id];
     const t = getPaneText(id);
     if (t) parts.push(`## ${meta.label}\n\n` + t);
@@ -1817,7 +5084,7 @@ function buildCombinedHtmlForNotion() {
   const session = getActiveSession();
   const title = session?.title ? `<h1>${escapeHtml(session.title)}</h1>` : '';
   const sections = [];
-  for (const id of state.settings.paneOrder) {
+  for (const id of visiblePaneOrder()) {
     const meta = PANE_META[id];
     const html = getPaneHtml(id);
     const plain = getPaneText(id);
@@ -1890,22 +5157,25 @@ function clearNotionUploadedMark(session) {
 /** セッション1件 → ノート内のトグル配列。空のペインは省略する */
 function buildNotionToggles(session) {
   const toggles = [];
-  for (const id of state.settings.paneOrder) {
+  for (const id of visiblePaneOrder()) {
     const meta = PANE_META[id];
     let blocks = [];
     if (id === 'pane-transcript')   blocks = notionBlocksFromHtml(session.transcript || '');
     else if (id === 'pane-memo')    blocks = notionBlocksFromHtml(session.memo || '');
     else if (id === 'pane-summary') blocks = notionBlocksFromHtml(session.summary || '');
+    else if (id === 'pane-live')    blocks = notionBlocksFromHtml(session.liveSummary || '');
     else if (id === 'pane-chat') {
       // 質問ペインは配列なので、Q/A を見出し無しの段落ペアとして組み立てる
       const chat = (session.chat || []).filter(m => !m.thinking && !m.error);
       for (const m of chat) {
-        const who = m.role === 'user' ? 'あなた' : 'Gemini';
+        const who = chatSpeakerLabel(m);
         blocks.push(notionBlock.paragraph(notionRichText(`${who}:`, { bold: true })));
         blocks.push(...notionBlocksFromText(m.content));
       }
     }
-    if (blocks.length) toggles.push({ label: meta.label, blocks });
+    // v0.24.22: 目次付きの要約なら、送ったあとに目次から見出しへのリンクを張る
+    const liveToc = id === 'pane-live' && /<h2[^>]*>\s*目次\s*<\/h2>/.test(session.liveSummary || '');
+    if (blocks.length) toggles.push({ label: meta.label, blocks, ...(liveToc ? { liveToc: true } : {}) });
   }
   return toggles;
 }
@@ -1916,10 +5186,264 @@ function sessionHasContentForNotion(session) {
     || (session.chat || []).some(m => !m.thinking && !m.error)));
 }
 
+/* ───────── Claude Code 連携 (v0.24.0) ─────────
+ *
+ * > 持ってる人は Claude のサブスク料金でおさまるならそれがいいよね
+ *
+ * Gemini は置き換えない。**後処理だけ**を利用者自身の Claude Code に回す。
+ * 分岐は gemini.js の _callGemini 1か所にあるので、ここは
+ * 設定を claude-bridge.js に渡すのと、接続確認を出すだけ。
+ */
+
+function applyClaudeBridgeSetting() {
+  if (typeof claudeBridgeSetEnabled === 'function') {
+    // v0.24.44: 振り分け（要約・質問などを Claude に回す）は「Claude Code 連携」と同時に有効
+    // （v0.24.39〜43 は「一部を Claude Code で処理する」という別のトグルがあった）
+    // v0.24.92: 使う AI の表で 7 個セットを Gemini にしたら、連携はオンのままでも振り分けない（ライブ要約は別。Claude だけで動く）
+    claudeBridgeSetEnabled(!!state.settings.claudeCode && postEngineNow() === 'claude');
+  }
+  // v0.24.58: 失敗したら Gemini に回すか（オフなら Claude で3回試し直す）
+  if (typeof claudeBridgeSetFallback === 'function') claudeBridgeSetFallback(!!state.settings.claudeFallbackGemini);
+}
+
+/**
+ * 中継が生きているか確かめて、画面に出す
+ *
+ * **claude 本体は起動しない。** 起動すると8〜10秒待たされるので、
+ * サーバーが居るかどうかだけを聞く。
+ */
+/**
+ * 中継とログインを確かめる (v0.24.9 でログインまで見るようにした)
+ *
+ * やっさんの指摘「で失敗して、どこでログインしたらいいか分からない」。
+ * 以前は「中継は動いています」を緱で出すだけで、**ログインが切れていても
+ * 「動いています」と出ていた**。確かめた意味が無い。
+ *
+ * @returns {Promise<{ok:boolean, needsLogin:boolean}>}
+ */
+async function testClaudeBridge() {
+  const el = els.claudeBridgeStatus;
+  if (!el) return { ok: false, needsLogin: false };
+  el.className = 'field-hint';
+  el.textContent = '確認中…';
+  const health = await claudeBridgeHealth();
+  const r = claudeBridgeHealthMessage(health);
+  el.className = 'field-hint ' + (r.ok ? 'is-ok' : 'is-ng');
+  el.textContent = r.text;
+  // 通ったら「もう駄目」の覚えを消す。直した直後に使えないと困る
+  if (r.ok && typeof claudeBridgeClearBroken === 'function') claudeBridgeClearBroken();
+  return r;
+}
+
+/**
+ * 中継に必要なファイルを保存する (v0.24.12)
+ *
+ * やっさんの要望:
+ * > start.bat とか login.bat とかはアプリの中に組み込めないの？
+ * > ゆくゆく公開することを考えると、含んでいてほしいかな
+ *
+ * ■ できないことをはっきりさせる
+ *
+ * **拡張からパソコンのプログラムを起動することはできない。**
+ * Chrome 拡張にはその手段が無い（ネイティブメッセージングを使えば起動できるが、
+ * それ自体にレジストリ登録という手作業が要るので、手間が減らない）。
+ * だから「ボタンを押したら中継が立ち上がる」は作れない。**そこは嗘をつかない。**
+ *
+ * ■ 代わりにできること
+ *
+ * 「リポジトリを clone している人しか使えない」状態は消せる。
+ * 必要な3つをアプリから出せば、拡張だけ入れた人でも揃う。
+ * （.bat は %~dp0 で自分の隣の serve.js を見るので、置く場所を問わない）
+ */
+// v0.24.21: serve.js は claude-runner.js を読むので、一緒に出さないと動かない
+const BRIDGE_FILES = ['serve.js', 'claude-runner.js', 'start.bat', 'login.bat'];
+
+async function saveBridgeFiles() {
+  const btn = els.btnSaveBridgeFiles;
+  const say = (msg, ng) => {
+    if (!els.claudeBridgeStatus) return;
+    els.claudeBridgeStatus.className = 'field-hint' + (ng ? ' is-ng' : '');
+    els.claudeBridgeStatus.textContent = msg;
+  };
+  if (btn) btn.disabled = true;
+  try {
+    const saved = [];
+    for (const name of BRIDGE_FILES) {
+      const res = await fetch(name);
+      if (!res.ok) throw new Error(`${name} を読めませんでした (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // すぐ revoke すると保存が間に合わないことがある
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      saved.push(name);
+      await new Promise((r) => setTimeout(r, 300));   // 立て続けに出すとブラウザが落とす
+    }
+    // ここは素のテキスト。** を書くとそのまま出る
+    say(`${saved.join(' / ')} を保存しました。同じフォルダに置いて start.bat を実行してください`);
+  } catch (e) {
+    say('保存できませんでした: ' + (e.message || e), true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/**
+ * Claude 連携のインストーラーを保存する (v0.24.21)
+ *
+ * やっさんの要望:
+ * > start.bat、黒いウインドウが出るし、見た目がちょっとマニアックなので、
+ * > 今後リリースすることも考えて、インストール式にしてくれないかな
+ * > 連携に関してはソフトの方で管理
+ *
+ * v0.24.12 では「拡張からパソコンのプログラムは起動できない」と書いたが、
+ * 正確には**登録さえあれば起動できる**（ネイティブメッセージング）。登録の手作業を
+ * アプリが作るインストーラーに任せることで、ダブルクリック1回にした。
+ * 組み立ては claude-installer.js、ホストの本体は claude-host.js。
+ */
+async function saveClaudeInstaller() {
+  const btn = els.btnClaudeInstall;
+  const say = (msg, ng) => {
+    if (!els.claudeBridgeStatus) return;
+    els.claudeBridgeStatus.className = 'field-hint' + (ng ? ' is-ng' : '');
+    els.claudeBridgeStatus.textContent = msg;
+  };
+  if (btn) btn.disabled = true;
+  try {
+    const read = async (name) => {
+      const res = await fetch(name);
+      if (!res.ok) throw new Error(`${name} を読めませんでした (${res.status})`);
+      return res.text();
+    };
+    const bat = buildClaudeInstaller({
+      extensionId: chrome.runtime.id,
+      browser: detectInstallerBrowser(),
+      version: chrome.runtime.getManifest().version,
+      hostSource: await read('claude-host.js'),
+      runnerSource: await read('claude-runner.js'),
+    });
+    const url = URL.createObjectURL(new Blob([bat], { type: 'application/octet-stream' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dictation-claude-setup.bat';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    say('dictation-claude-setup.bat を保存しました。ダブルクリックしたあと「接続を確認」を押してください');
+  } catch (e) {
+    say('インストーラーを作れませんでした: ' + (e.message || e), true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/**
+ * リアルタイム要約のタブを出し入れする (v0.24.25)
+ * 隠すとき、そのタブを開いていたら要約タブへ移る（見えないタブに居続けない）
+ */
+function applyLiveSummaryTab() {
+  renderInnerTabs();
+  if (!paneVisible(state.activePane)) switchInnerPane('pane-summary');
+}
+
+/**
+ * リアルタイム要約は Claude 連携がオンのときだけ選べる (v0.24.22)
+ * オフのときはチェックを外して押せなくし、なぜ押せないかを書く
+ */
+function applyLiveSummaryAvailability(animated = true) {
+  // v0.24.39: ライブ要約と「一部を Claude Code で処理する」は、どちらも「Claude Code」がオンのときだけ選べる
+  // v0.24.93: ライブ要約は Gemini でも作れるようにしたので、Gemini API（キーあり）か Claude Code のどちらかで選べる
+  const claudeOn = !!(els.inputClaudeCode && els.inputClaudeCode.checked);
+  const liveOn = claudeOn || (typeof formAiAvail === 'function' && formAiAvail().gemini);
+  // v0.24.58: 「失敗したら Gemini で処理する」は連携がオンのときだけ出す（オフなら意味が無い）。値は覚えたまま
+  // v0.24.77: 出し入れは高さと濃さをばねで（やっさん「Claude Code 連携をオンにして現れるメニューが唐突に出る」）。
+  // 設定を開いた直後（openSettings から呼ぶとき）は動かさずにその状態にする
+  revealSettingRow(els.claudeFallbackRow, claudeOn, animated, true);   // 外の余白（.field の 16px）も一緒に縮める
+  for (const [box, note, extra, ok] of [
+    [els.inputLiveSummary, els.liveSummaryNote, els.inputLiveSummaryMin, liveOn],
+    [els.inputClaudeBridge, els.claudeRouteNote, null, claudeOn],
+  ]) {
+    if (!box) continue;
+    // 押せなかったものを押せるようにするときは、覚えている値に戻す（オフにして戻したら元どおり）
+    if (ok && box.disabled) {
+      box.checked = box === els.inputLiveSummary ? !!state.settings.liveSummary : !!state.settings.useClaudeBridge;
+    }
+    box.disabled = !ok;
+    if (extra) extra.disabled = !ok;
+    if (!ok) box.checked = false;
+    // v0.24.77: 「オンにすると選べます」の断り書きも、ばねで出し入れ（前は一瞬）
+    // v0.24.132: ライブ要約の断り書きは入れ物（.field）ごと出し入れする。字だけ隠すと、入れ物の余白（11px）が残って行のあいだが空いた
+    const wrap = note && note.parentElement && note.parentElement.classList.contains('field') && note.parentElement.children.length === 1 ? note.parentElement : note;
+    revealSettingRow(wrap, !ok, animated, true);
+  }
+  // v0.24.132: 押せなくてチェックが外れたら、ライブ要約の間隔も隠す
+  revealSettingRow(document.getElementById('live-summary-min-field'), !!(els.inputLiveSummary && els.inputLiveSummary.checked), animated);
+}
+
+/**
+ * 拡張かブラウザ版かで、Claude 連携の案内を出し分ける (v0.24.21)
+ * 拡張 … インストール式。ブラウザ版 … これまでどおり start.bat（ウェブページは登録を使えない）
+ */
+function applyClaudeBridgeMode() {
+  const native = typeof claudeNativeAvailable === 'function' && claudeNativeAvailable();
+  document.querySelectorAll('[data-claude-native-only]').forEach((el) => { el.hidden = !native; });
+  document.querySelectorAll('[data-claude-web-only]').forEach((el) => { el.hidden = native; });
+}
+
+/**
+ * 連携をオンにしたときにその場で確かめる (v0.24.9)
+ *
+ * やっさんの要望:
+ * > 設定の時点でログインしてないと動かないようにしたほうがいいと思う
+ *
+ * オンにできてしまうと、次に録音を止めて要約を回して初めて失敗する。
+ * その場で分かるのが一番安いので、**チェックを入れた瞬間に見る**。
+ * 使えなければチェックを戻す（動かないものをオンにしておかない）。
+ */
+async function verifyClaudeBridgeToggle() {
+  // v0.24.39: 接続を確かめるのは「Claude Code」（連携を使う）をオンにしたとき
+  const box = els.inputClaudeCode;
+  if (!box || !box.checked) return;
+  const r = await testClaudeBridge();
+  // 途中で自分でオフに戻していたら、古い結果で上書きしない
+  if (!box.checked) return;
+  if (r.ok) return;
+
+  // **「確かめられない」で閉じ込めない** (v0.24.10)
+  //
+  // やっさん報告「オフにしたらオンにできない　トグルが動かないよう」。
+  // 古い serve.js が走っているだけのときまでチェックを戻していたので、
+  // **何も壊れていないのに永久にオンにできない**状態になっていた。
+  //
+  // 戻すのは**使えないとはっきり分かっているときだけ**にする。
+  // 分からないときはオンのまま残して、何が起きているかだけ言う。
+  // （実際に失敗すれば Gemini に落ちるので、使えなくても壊れはしない）
+  if (r.unknown) {
+    if (els.claudeBridgeStatus) {
+      els.claudeBridgeStatus.textContent = r.text + '（オンのままにしてあります）';
+    }
+    return;
+  }
+
+  box.checked = false;   // 使えないと分かっているものをオンにしたままにしない
+  if (els.claudeBridgeStatus) {
+    els.claudeBridgeStatus.textContent = r.text
+      + (r.needsLogin ? '（サインイン後にもう一度オンにしてください）'
+                      : '（直してからもう一度オンにしてください）');
+  }
+}
+
 /* ───────── 保存先ピッカー ───────── */
 
 let notionPickerResolve = null;
 let notionPickerSchema = null;   // 選択中 DB の { titleProp, dateProps }
+let notionPickerNotes = [];      // v0.23.0: 選択中 DB の既存ノート
 let notionSchemaSeq = 0;         // 取得の世代番号。古い応答が後から勝つのを防ぐ
 
 function closeNotionPicker(result) {
@@ -1935,6 +5459,65 @@ function setNotionPickerError(msg) {
 }
 
 /**
+ * 選択中の DB の中にある既存ノートを「保存のしかた」セレクトに並べる (v0.23.0)
+ *
+ * 既定は必ず**「新しいノートを作る」**。これまでの動作を変えないため、
+ * そして**うっかり他人のノートに追記する事故を起こさない**ため。
+ *
+ * 一覧が取れなくても止めない。新規作成はそれだけで成立するので、
+ * 「既存ノートが選べないだけ」に落とす。
+ */
+async function loadNotionPickerNotes(dsId, seq) {
+  const sel = els.notionPickerNote;
+  if (!sel) return;
+  sel.innerHTML = '<option value="">新しいノートを作る</option>';
+  sel.disabled = true;
+
+  let notes = [];
+  try {
+    notes = await notionListNotesInDataSource(state.settings.notionToken, dsId);
+  } catch (e) {
+    console.warn('[notion] 既存ノートの取得に失敗:', e.message);
+    if (seq !== notionSchemaSeq) return;
+    els.notionPickerNoteHint.textContent =
+      '既存ノートの一覧を取得できませんでした（新しいノートの作成はできます）';
+    sel.disabled = false;
+    return;
+  }
+  if (seq !== notionSchemaSeq) return;   // 待っている間に選択が変わっていたら捨てる
+
+  notionPickerNotes = notes;
+  const opts = ['<option value="">新しいノートを作る</option>'];
+  if (notes.length) {
+    opts.push('<optgroup label="既存のノートに追記">');
+    for (const n of notes) {
+      opts.push(`<option value="${escapeHtml(n.id)}">${escapeHtml(n.title)}</option>`);
+    }
+    opts.push('</optgroup>');
+  }
+  sel.innerHTML = opts.join('');
+  sel.value = '';
+  sel.disabled = false;
+  els.notionPickerNoteHint.textContent = notes.length
+    ? '既存のノートを選ぶと、そのノートの末尾に追記します'
+    : 'このデータベースにはまだノートがありません';
+  updateNotionPickerMode();
+}
+
+/**
+ * 追記を選んだら、日付列の指定を隠す (v0.23.0)
+ *
+ * 日付列は**新しいページを作るときにだけ**書き込む欄なので、追記では使わない。
+ * 出したままにすると「追記しても日付が入る」と誤解させる。
+ */
+function updateNotionPickerMode() {
+  const appending = !!(els.notionPickerNote && els.notionPickerNote.value);
+  // v0.24.77: 開いている保存先の窓の中で切り替わるので、ばねで出し入れ（閉じているあいだは動かさない）
+  revealSettingRow(els.notionPickerDateRow, !appending, !els.notionPicker.classList.contains('hidden'), true);
+  if (els.btnNotionPickerOk) els.btnNotionPickerOk.textContent = appending ? '追記' : '保存';
+}
+
+/**
  * 選択中の DB の列構成を取り、日付プロパティのセレクトを埋める。
  * 日付列が無い DB では「使わない」だけになる。
  */
@@ -1942,6 +5525,10 @@ async function loadNotionPickerSchema() {
   const seq = ++notionSchemaSeq;
   const dsId = els.notionPickerSelect.value;
   notionPickerSchema = null;
+  notionPickerNotes = [];
+  // v0.23.0: 既存ノートの一覧も読む。列構成と独立なので待ち合わせない
+  //（一覧が取れなくても新規作成はできる）
+  if (dsId) loadNotionPickerNotes(dsId, seq);
   els.notionPickerDate.innerHTML = '<option value="">読み込み中…</option>';
   els.notionPickerDate.disabled = true;
   els.btnNotionPickerOk.disabled = true;
@@ -1994,6 +5581,12 @@ async function openNotionPicker(summaryText) {
   els.notionPickerSelect.disabled = true;
   els.notionPickerDate.innerHTML = '';
   els.notionPickerDate.disabled = true;
+  if (els.notionPickerNote) {
+    els.notionPickerNote.innerHTML = '<option value="">新しいノートを作る</option>';
+    els.notionPickerNote.disabled = true;
+  }
+  notionPickerNotes = [];
+  updateNotionPickerMode();
   els.btnNotionPickerOk.disabled = true;
   els.notionPicker.classList.remove('hidden');
 
@@ -2027,11 +5620,17 @@ async function openNotionPicker(summaryText) {
     notionPickerResolve = (picked) => {
       if (!picked || !notionPickerSchema) return resolve(null);
       const id = els.notionPickerSelect.value;
+      // v0.23.0: 空なら今までどおり新規作成、入っていればそのノートへ追記
+      const noteId = els.notionPickerNote ? els.notionPickerNote.value : '';
+      const note = notionPickerNotes.find(n => n.id === noteId) || null;
       return resolve({
         id,
         title: list.find(d => d.id === id)?.title || '',
         titleProp: notionPickerSchema.titleProp,
         dateProp: els.notionPickerDate.value || '',
+        pageId: noteId || '',
+        pageUrl: note?.url || '',
+        pageTitle: note?.title || '',
       });
     };
   });
@@ -2050,14 +5649,104 @@ function notionProgressOpen(title, { cancellable = true } = {}) {
   els.notionProgressBody.textContent = '';
   els.notionProgressList.innerHTML = '';
   // 1件だけの保存は、区切りが来る前に終わるので中止できない。ボタンを出さない
+  // v0.24.80: 前の回の「薄くしてから隠す」が途中なら止める（止めないと、出したあとで隠してしまう）
+  if (window.Motion) for (const el of [els.notionAutoCloseRow, els.btnNotionKeepTabs, els.btnNotionCloseTabs]) if (el) { el.__fadingOut = false; Motion.clear(el); }
   els.btnNotionCancel.hidden = !cancellable;
   els.notionAutoCloseRow.hidden = false;
-  els.notionAutoClose.checked = !!state.settings.notionAutoClose;
+  // v0.21.4: **毎回オフから始める。** 状態を覚えない。
+  //
+  // 以前は設定として記憶していたが、そうすると一度オンにした人は
+  // 以後ずっとオンのままで、**聞かれずにタブが消える**ことになる。
+  // 1件だけ送るときは送信が数秒で終わるので、消したくないと気づいてから
+  // チェックを外すまでの猶予がほとんど無い（やっさんの指摘）。
+  //
+  // ここをオフに戻しておけば、自動で閉じるのは
+  // 「**その回に自分でチェックを入れたとき**」だけになり、不意打ちが原理的に起きない。
+  // まとめて送るときも、1回チェックするだけで済む。
+  els.notionAutoClose.checked = false;
   els.btnNotionCancel.disabled = false;
   els.btnNotionCancel.textContent = '中止';
   els.btnNotionCloseTabs.hidden = true;
   els.btnNotionKeepTabs.hidden = true;
-  els.notionProgress.classList.remove('hidden');
+  // v0.24.33: 前に動かした場所に出す（無ければ右下）
+  const pos = loadNotionFloatPos();
+  if (pos) {
+    els.notionProgress.classList.add('positioned');
+    els.notionProgress.style.left = `${pos.x}px`;
+    els.notionProgress.style.top = `${pos.y}px`;
+  }
+  // v0.24.64: 小さいところからぽんと出る（TODO「動きを SUMADO の仕様書に合わせる」の 5）
+  if (window.Motion) Motion.popIn(els.notionProgress, { from: 0.9, hiddenClass: 'hidden' });
+  else els.notionProgress.classList.remove('hidden');
+  if (pos) requestAnimationFrame(() => clampFloatEl(els.notionProgress));
+}
+
+/* v0.24.33: Notion 保存の小窓の位置。質問の小窓とは別に覚える */
+const NOTION_FLOAT_POS_KEY = 'dictation:notionFloatPos';
+function loadNotionFloatPos() {
+  try {
+    const p = JSON.parse(localStorage.getItem(NOTION_FLOAT_POS_KEY) || 'null');
+    return p && Number.isFinite(p.x) && Number.isFinite(p.y) ? p : null;
+  } catch { return null; }
+}
+function saveNotionFloatPos(x, y) {
+  try { localStorage.setItem(NOTION_FLOAT_POS_KEY, JSON.stringify({ x, y })); } catch {}
+}
+
+/** 画面の外に出ないように戻す（clampFloatWindow の、どの窓にも使える版） */
+function clampFloatEl(win) {
+  if (!win || !win.classList.contains('positioned')) return;
+  const z = getAppZoom();
+  const rect = win.getBoundingClientRect();
+  const margin = 4;
+  const maxX = (window.innerWidth - rect.width - margin) / z;
+  const maxY = (window.innerHeight - rect.height - margin) / z;
+  const x = Math.max(margin / z, Math.min(parseFloat(win.style.left) || 0, maxX));
+  const y = Math.max(margin / z, Math.min(parseFloat(win.style.top) || 0, maxY));
+  win.style.left = `${x}px`;
+  win.style.top = `${y}px`;
+}
+
+/**
+ * ヘッダーをつかんで窓を動かす（質問の小窓と同じ動き。v0.24.33 で Notion の小窓にも使う）
+ * 倍率（html の zoom）がかかっていても、つかんだ位置からずれないように /z で直す
+ */
+function enableFloatDrag(win, header, onEnd) {
+  if (!win || !header) return;
+  let startX = 0, startY = 0, originX = 0, originY = 0, dragging = false;
+  header.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button, input, a')) return;
+    const z = getAppZoom();
+    if (!win.classList.contains('positioned')) {
+      const rect = win.getBoundingClientRect();
+      win.classList.add('positioned');
+      win.style.left = `${rect.left / z}px`;
+      win.style.top = `${rect.top / z}px`;
+    }
+    startX = e.clientX; startY = e.clientY;
+    originX = parseFloat(win.style.left) || 0;
+    originY = parseFloat(win.style.top) || 0;
+    dragging = true;
+    header.classList.add('dragging');
+    try { header.setPointerCapture(e.pointerId); } catch {}
+    e.preventDefault();
+  });
+  header.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const z = getAppZoom();
+    win.style.left = `${originX + (e.clientX - startX) / z}px`;
+    win.style.top = `${originY + (e.clientY - startY) / z}px`;
+  });
+  const end = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    header.classList.remove('dragging');
+    try { header.releasePointerCapture(e.pointerId); } catch {}
+    clampFloatEl(win);
+    if (onEnd) onEnd(parseFloat(win.style.left) || 0, parseFloat(win.style.top) || 0);
+  };
+  header.addEventListener('pointerup', end);
+  header.addEventListener('pointercancel', end);
 }
 
 function notionProgressSet(text) {
@@ -2072,8 +5761,14 @@ function notionProgressAddRow(label, state_, detail) {
   els.notionProgressList.scrollTop = els.notionProgressList.scrollHeight;
 }
 
+/** Notion 保存の小窓の中で、出るものをふわっと出す・消えるものを薄くしてから隠す (v0.24.80・v0.24.81 で motion.js の部品に) */
+function notionFadeIn(el) { if (window.Motion) Motion.fadeShow(el); else if (el) el.hidden = false; }
+function notionFadeOut(el) { if (window.Motion) Motion.fadeHide(el); else if (el) el.hidden = true; }
+
 function notionProgressClose() {
-  els.notionProgress.classList.add('hidden');
+  // v0.24.64: 一瞬で消さず、少し縮みながらふわっと
+  if (window.Motion) Motion.popOut(els.notionProgress, { to: 0.94, hiddenClass: 'hidden' });
+  else els.notionProgress.classList.add('hidden');
 }
 
 /** 中止ボタン。押した瞬間は止まらない（今のノートは送り切る）のでその旨を出す */
@@ -2091,12 +5786,69 @@ function requestNotionCancel() {
  * @param {Array} sessions
  * @returns {Promise<{results:Array, cancelled:boolean}>}
  */
+/**
+ * 未確定の文字起こしが残っていないか確かめる (v0.17.3)
+ *
+ * Notion 保存のあと「閉じる」を押すとタブは削除される。
+ * このとき Gemini の返事待ちのチャンクが残っていると、
+ * **保存されないまま消える＝永久に失われる**。
+ * やっさんの普段の使い方（保存して閉じる）だと現実に起きうるので、先に止める。
+ *
+ * @returns {Promise<boolean>} 続行してよければ true
+ */
+async function ensureTranscriptSettled(sessions) {
+  /* v0.24.27: **保存するタブに録音中のタブが入っているときだけ**確かめる。
+   * やっさん「これ他のタブを録音中は関係ないよね？ 全てクラウドに保存するときだけでいいよね？」。
+   * 確定待ちの文字起こしは録音中のタブのものなので、別のタブを保存するだけなら関係ない。
+   * 止めた直後で録音中のタブがもう分からない（recordingSessionId が空）ときは、念のため従来どおり聞く */
+  const recId = state.recordingSessionId;
+  const list = Array.isArray(sessions) ? sessions : null;
+  if (list && recId && !list.some((x) => x && x.id === recId)) return true;
+  if (state.isRecording) {
+    // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+    return confirmDialog({
+      title: '録音中です。このまま保存しますか？',
+      message: 'いま保存すると、これから確定する分は含まれません。録音を止めてから保存することをおすすめします。',
+      ok: 'このまま保存',
+    });
+  }
+
+  if (state.audioInFlightCount > 0) {
+    const n = state.audioInFlightCount;
+    const wait = await confirmDialog({
+      title: `まだ確定していない文字起こしが ${n} 件あります`,
+      message: 'いま保存すると、その分は含まれません。確定を待ってから保存します（最大30秒）。',
+      ok: '待ってから保存', cancel: '保存をやめる',
+    });
+    if (!wait) return false;
+
+    const deadline = Date.now() + 30000;
+    while (state.audioInFlightCount > 0 && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+    if (state.audioInFlightCount > 0) {
+      return confirmDialog({
+        title: `30秒待ちましたが、まだ ${state.audioInFlightCount} 件が確定していません`,
+        message: 'このまま保存すると、その分は含まれません。',
+        ok: 'このまま保存',
+      });
+    }
+    // 待っている間に確定した分を取り込む
+    snapshotActiveToSession();
+    persistSessions();
+  }
+  return true;
+}
+
 async function uploadSessionsToNotion(sessions) {
   const targets = sessions.filter(sessionHasContentForNotion);
   if (targets.length === 0) {
     alert('Notion に保存する中身がありません。');
     return { results: [], cancelled: false };
   }
+
+  // 確定待ちを残したまま保存 → 閉じる、で内容が消えるのを防ぐ
+  if (!(await ensureTranscriptSettled(targets))) return { results: [], cancelled: false };
 
   const summary = targets.length === 1
     ? `「${targets[0].title}」を1ノートとして保存します。`
@@ -2111,8 +5863,22 @@ async function uploadSessionsToNotion(sessions) {
   state.settings.notionLastDatePropName = dest.dateProp || '';
   saveSettings();
 
+  return notionSendSessions(targets, dest);
+}
+
+/**
+ * 決まった保存先へ、タブを 1 つずつ送る (v0.24.142 で uploadSessionsToNotion から切り出した)
+ * 手で保存するとき（保存先の小窓のあと）と、録音を止めたあとの自動保存（autoSaveToNotion）で同じものを使う
+ */
+async function notionSendSessions(targets, dest) {
+  // v0.23.0: 既存ノートへの追記かどうかで、画面の言葉を変える。
+  // 「保存」と出したまま既存ノートに書き足すのは、起きたことと違う
+  const appending = !!dest.pageId;
+  const verb = appending ? '追記' : '保存';
   notionProgressOpen(
-    targets.length === 1 ? 'Notion に保存中…' : `Notion に保存中…（0/${targets.length}）`,
+    targets.length === 1
+      ? `Notion に${verb}中…`
+      : `Notion に${verb}中…（0/${targets.length}）`,
     { cancellable: targets.length > 1 },
   );
 
@@ -2121,28 +5887,46 @@ async function uploadSessionsToNotion(sessions) {
   let cancelled = false;
   for (const session of targets) {
     if (notionCancelRequested) { cancelled = true; break; }
-    notionProgressSet(`「${session.title}」を保存しています…`);
+    notionProgressSet(appending
+      ? `「${session.title}」を「${dest.pageTitle}」に追記しています…`
+      : `「${session.title}」を保存しています…`);
+    // v0.24.33: 送る直前の中身を覚えておく（保存中に書き足された分を見分けるため）
+    const sentSig = sessionContentSig(session);
     try {
-      await notionCreateNote({
-        token: state.settings.notionToken,
-        dataSourceId: dest.id,
-        titleProp: dest.titleProp,
-        dateProp: dest.dateProp,
-        dateTs: session.createdAt,
-        title: notionNoteTitle(session, dest.dateProp),
-        toggles: buildNotionToggles(session),
-      });
+      if (appending) {
+        await notionAppendToNote({
+          token: state.settings.notionToken,
+          pageId: dest.pageId,
+          pageUrl: dest.pageUrl,
+          dateTs: session.createdAt,
+          // 追記では日付列を使わないので、タイトルに日時を残す
+          title: notionNoteTitle(session, ''),
+          toggles: buildNotionToggles(session),
+        });
+      } else {
+        await notionCreateNote({
+          token: state.settings.notionToken,
+          dataSourceId: dest.id,
+          titleProp: dest.titleProp,
+          dateProp: dest.dateProp,
+          dateTs: session.createdAt,
+          title: notionNoteTitle(session, dest.dateProp),
+          toggles: buildNotionToggles(session),
+        });
+      }
       // アップ済み印。閉じずに残したタブをタブバーで見分けられるようにする
       session.notionUploadedAt = Date.now();
-      results.push({ session, ok: true });
+      results.push({ session, ok: true, sentSig });
       notionProgressAddRow(session.title, 'ok');
     } catch (e) {
       results.push({ session, ok: false, error: e.message });
       notionProgressAddRow(session.title, 'ng', e.message);
       // v0.15.2: どの保存先に送ろうとして失敗したかも残す。
       // 以前はタブ名と理由だけで、あとからログを見ても保存先が特定できなかった。
-      console.warn(`[notion] アップロード失敗: ${session.title}`,
-        `／保存先: ${dest.title} (${dest.id})`,
+      console.warn(`[notion] ${verb}に失敗: ${session.title}`,
+        appending
+          ? `／追記先: ${dest.pageTitle} (${dest.pageId})`
+          : `／保存先: ${dest.title} (${dest.id})`,
         `／日付列: ${dest.dateProp || 'なし'}`,
         `／理由: ${e.message}`);
     }
@@ -2151,7 +5935,20 @@ async function uploadSessionsToNotion(sessions) {
   }
   if (notionCancelRequested) cancelled = true;
   if (results.some(r => r.ok)) { persistSessions(); renderTabs(); }
-  return { results, cancelled, remaining: targets.length - done };
+  return { results, cancelled, remaining: targets.length - done , verb };
+}
+
+/**
+ * タブの中身の目印 (v0.24.33)
+ *
+ * v0.24.33 から Notion に保存している間もほかの操作ができる。保存中のタブに書き足すと、
+ * その分は送られていないのに、終わったあとの「閉じる」で**書き足した分ごと消える**。
+ * 送る直前と終わったときで中身を比べ、変わっていたら閉じる対象から外す。
+ */
+function sessionContentSig(session) {
+  if (!session) return '';
+  const chat = (session.chat || []).filter((m) => !m.thinking).map((m) => m.content).join('\u0001');
+  return [session.transcript || '', session.memo || '', session.summary || '', session.liveSummary || '', chat].join('\u0002');
 }
 
 /**
@@ -2170,24 +5967,33 @@ function notionNoteTitle(session, dateProp) {
  * アップロード結果を出して「閉じますか？」を聞く。
  * 成功したタブだけを閉じる対象にする（やっさん指示: 失敗した分は残す）。
  */
-function notionFinish({ results, cancelled, remaining }) {
+function notionFinish({ results, cancelled, remaining, verb }) {
+  // v0.23.0: 既存ノートへの追記のときは「保存」と言わない
+  const act = verb || '保存';
   const ok = results.filter(r => r.ok);
   const ng = results.filter(r => !r.ok);
 
-  // チェックの状態は次回のために覚える
+  // v0.21.4: チェックの状態は**覚えない**（notionProgressOpen の解説を参照）
   const autoClose = !!els.notionAutoClose.checked;
-  if (autoClose !== state.settings.notionAutoClose) {
-    state.settings.notionAutoClose = autoClose;
-    saveSettings();
-  }
 
+  // v0.24.33: 保存中に書き足されたタブは閉じない（書き足した分は送っていないので、閉じると消える）
+  snapshotActiveToSession();
+  const changed = ok.filter((r) => r.sentSig != null && sessionContentSig(r.session) !== r.sentSig);
+  for (const r of changed) {
+    r.session.notionUploadedAt = null;   // 最新は上がっていない
+  }
+  if (changed.length) { persistSessions(); renderTabs(); }
+  const closable = ok.filter((r) => !changed.includes(r));
+
+  // v0.24.80: 終わったときの入れ替え。前は「中止」や「確認せずに閉じる」の行が一瞬で消え、「残す」「閉じる」が一瞬で出ていた。
+  // 小窓の高さは smoothHeight が伸び縮みさせるので、ここでは消える行を薄くしてから隠し、出るボタンをふわっと出す
   els.btnNotionCancel.hidden = true;
-  els.notionAutoCloseRow.hidden = true;
-  els.btnNotionKeepTabs.hidden = false;
+  notionFadeOut(els.notionAutoCloseRow);
+  notionFadeIn(els.btnNotionKeepTabs);
 
   if (ok.length === 0) {
-    els.notionProgressTitle.textContent = cancelled ? 'Notion への保存を中止しました' : 'Notion への保存に失敗しました';
-    notionProgressSet('保存できたタブはありません。タブはそのまま残しています。');
+    els.notionProgressTitle.textContent = cancelled ? `Notion への${act}を中止しました` : `Notion への${act}に失敗しました`;
+    notionProgressSet(`${act}できたタブはありません。タブはそのまま残しています。`);
     els.btnNotionCloseTabs.hidden = true;
     els.btnNotionKeepTabs.textContent = '閉じる';
     els.btnNotionKeepTabs.onclick = notionProgressClose;
@@ -2196,16 +6002,17 @@ function notionFinish({ results, cancelled, remaining }) {
   }
 
   els.notionProgressTitle.textContent = cancelled
-    ? 'Notion への保存を中止しました' : 'Notion への保存が完了しました';
+    ? `Notion への${act}を中止しました` : `Notion への${act}が完了しました`;
 
   const label = ok.length === 1 ? `「${ok[0].session.title}」` : `${ok.length}個のタブ`;
   const notes = [];
   if (ng.length) notes.push(`${ng.length}個は失敗したので残します`);
+  if (changed.length) notes.push(`${changed.length === 1 ? `「${changed[0].session.title}」` : `${changed.length}個のタブ`}は${act}中に書き足されたので、閉じずに残します（書き足した分は送っていません）`);
   if (cancelled && remaining > 0) notes.push(`${remaining}個は中止したので送っていません`);
   const note = notes.length ? `\n（${notes.join('／')}）` : '';
 
   // Notion に上がっている前提なので、closeSession の削除確認は出さない（二重確認の回避）
-  const closeOkTabs = () => closeMultipleSessions(ok.map(r => r.session.id), { skipConfirm: true });
+  const closeOkTabs = () => closeMultipleSessions(closable.map(r => r.session.id), { skipConfirm: true });
 
   if (autoClose) {
     // 「自動的に閉じる」がオンなら聞かずに閉じ、結果だけ見せる
@@ -2213,14 +6020,24 @@ function notionFinish({ results, cancelled, remaining }) {
     els.btnNotionCloseTabs.hidden = true;
     els.btnNotionKeepTabs.textContent = '閉じる';
     els.btnNotionKeepTabs.onclick = notionProgressClose;
-    notionProgressSet(`${label}を保存して閉じました。${note}`);
+    notionProgressSet(`${label}を${act}して閉じました。${note}`);
     els.btnNotionKeepTabs.focus();
     return;
   }
 
-  els.btnNotionCloseTabs.hidden = false;
+  // 閉じてよいタブが無い（全部、保存中に書き足された）なら、閉じるかどうかは聞かない
+  if (closable.length === 0) {
+    els.btnNotionCloseTabs.hidden = true;
+    els.btnNotionKeepTabs.textContent = '閉じる';
+    els.btnNotionKeepTabs.onclick = notionProgressClose;
+    notionProgressSet(`${label}を${act}しました。${note}`);
+    els.btnNotionKeepTabs.focus();
+    return;
+  }
+
+  notionFadeIn(els.btnNotionCloseTabs);
   els.btnNotionKeepTabs.textContent = '残す';
-  notionProgressSet(`${label}を保存しました。タブを閉じますか？（閉じるとアプリ内の内容は削除されます）${note}`);
+  notionProgressSet(`${label}を${act}しました。タブを閉じますか？（閉じるとアプリ内の内容は削除されます）${note}`);
 
   els.btnNotionCloseTabs.onclick = () => {
     notionProgressClose();
@@ -2228,6 +6045,92 @@ function notionFinish({ results, cancelled, remaining }) {
   };
   els.btnNotionKeepTabs.onclick = notionProgressClose;
   els.btnNotionCloseTabs.focus();
+}
+
+/* ───────── 録音を止めたら Notion に自動で保存 (v0.24.142) ─────────
+ *
+ * やっさんの指定（2026-11-13）: 録音を止めたら Notion へのアップロードまで自動で。設定で、保存先（前回の保存先／決めた保存先）・
+ * 保存したらタブを閉じるか・録音を残すか（保管している録音に「残す」で入れる）を決める。
+ * 閉じないときは、今までどおり Notion 保存済みの印（雲）が付いたタブが残る。
+ * 失敗したら、タブは閉じず録音も消さず、右下の小窓で知らせる（手で保存し直せる）。
+ * 録音を止めたあとの要約・タイトル生成が終わってから動く（stopRecording の最後）。
+ */
+let notionAutoDestWorking = null;   // 設定の欄で選んだ保存先（保存を押すまで state.settings に入れない）
+
+/** 保存先の選ぶ欄の中身。「決めた保存先」は名前を出す（まだ選んでいなければ選べない） */
+function renderNotionAutoTargetOptions(value) {
+  const sel = els.inputNotionAutoTarget;
+  if (!sel) return;
+  const d = notionAutoDestWorking;
+  const fixedLabel = d
+    ? `決めた保存先：${d.pageId ? `${d.title} のノート「${d.pageTitle}」に追記` : d.title}`
+    : '決めた保存先（「保存先を選ぶ」で選びます）';
+  sel.innerHTML = `<option value="last">前回の保存先</option><option value="fixed"${d ? '' : ' disabled'}>${escapeHtml(fixedLabel)}</option>`;
+  sel.value = value === 'fixed' && d ? 'fixed' : 'last';
+}
+
+/** 自動保存の保存先を決める。前回の保存先は列の構成（タイトルの列）をその場で読む */
+async function resolveNotionAutoDest() {
+  const st = state.settings;
+  if (st.notionAutoTarget === 'fixed' && st.notionAutoDest) return st.notionAutoDest;
+  if (!st.notionLastDataSourceId) throw new Error('保存先がまだありません。設定 → Notion 連携 で「保存先を選ぶ」か、一度手で保存してください');
+  const schema = await notionGetSchema(st.notionToken, st.notionLastDataSourceId);
+  const dateProp = st.notionLastDatePropName && schema.dateProps.includes(st.notionLastDatePropName) ? st.notionLastDatePropName : '';
+  return { id: st.notionLastDataSourceId, title: st.notionLastDataSourceTitle || '', titleProp: schema.titleProp, dateProp, pageId: '', pageUrl: '', pageTitle: '' };
+}
+
+async function autoSaveToNotion(sessionId) {
+  const st = state.settings;
+  if (!st.notionAutoSave || !st.notionEnabled || !st.notionToken || typeof notionIsAvailable === 'function' && !notionIsAvailable()) return;
+  const session = state.sessions.find((s) => s.id === sessionId);
+  if (!session || !sessionHasContentForNotion(session)) return;
+  // 止めた直後なので、確定待ちの文字起こしは聞かずに待つ（最大 60 秒。手で保存するときのような確認は出さない）
+  const deadline = Date.now() + 60000;
+  while (state.audioInFlightCount > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 500));
+  if (sessionId === state.activeId) snapshotActiveToSession();
+
+  let dest;
+  try {
+    dest = await resolveNotionAutoDest();
+  } catch (e) {
+    notionProgressOpen('Notion への自動保存に失敗しました', { cancellable: false });
+    notionAutoFinish({ results: [{ session, ok: false, error: e.message }] });
+    return;
+  }
+  diagLog.info(`録音を止めたので Notion に自動で保存します（${dest.pageId ? `追記先: ${dest.pageTitle}` : `保存先: ${dest.title}`}）`);
+  const outcome = await notionSendSessions([session], dest);
+  notionAutoFinish(outcome);
+}
+
+/** 自動保存の結果。聞かずに設定どおりにする（閉じる・録音を残す）。失敗したらタブを残して知らせる */
+function notionAutoFinish({ results, verb }) {
+  const act = verb || '保存';
+  const r = results[0];
+  els.btnNotionCancel.hidden = true;
+  notionFadeOut(els.notionAutoCloseRow);
+  els.btnNotionCloseTabs.hidden = true;
+  els.btnNotionKeepTabs.textContent = '閉じる';
+  els.btnNotionKeepTabs.onclick = notionProgressClose;
+  notionFadeIn(els.btnNotionKeepTabs);
+  if (!r || !r.ok) {
+    els.notionProgressTitle.textContent = `Notion への自動${act}に失敗しました`;
+    notionProgressSet(`${r && r.error ? r.error + '\n' : ''}タブと録音はそのまま残しています。Notion のボタンから保存し直せます。`);
+    return;
+  }
+  // 録音を残すのは、閉じる前に（閉じると「タブを閉じたら消す」で消えるため）
+  if (state.settings.notionAutoKeepAudio) setAudioPinned(r.session.id, true, { title: r.session.title });
+  // 保存中に書き足されたら閉じない（書き足した分は送っていないので、閉じると消える。notionFinish と同じ）
+  snapshotActiveToSession();
+  const changed = r.sentSig != null && sessionContentSig(r.session) !== r.sentSig;
+  if (changed) { r.session.notionUploadedAt = null; persistSessions(); renderTabs(); }
+  els.notionProgressTitle.textContent = `Notion への自動${act}が完了しました`;
+  const keep = state.settings.notionAutoKeepAudio ? '録音は残しました。' : '';
+  if (state.settings.notionAutoCloseTab && !changed) {
+    closeMultipleSessions([r.session.id], { skipConfirm: true });
+    notionProgressSet(`「${r.session.title}」を${act}して閉じました。${keep}`);
+  } else {
+    notionProgressSet(`「${r.session.title}」を${act}しました。${keep}${changed ? `（${act}中に書き足されたので、閉じずに残します。書き足した分は送っていません）` : ''}`);
+  }
 }
 
 /** クリック = 今開いているタブだけ */
@@ -2277,24 +6180,25 @@ function buildExportHtml(session) {
   };
 
   const sections = [];
-  for (const id of state.settings.paneOrder) {
+  for (const id of visiblePaneOrder()) {
     const meta = PANE_META[id];
     let html = '';
     if (id === 'pane-transcript') html = session.transcript || '';
     else if (id === 'pane-memo') html = session.memo || '';
     else if (id === 'pane-summary') html = session.summary || '';
+    else if (id === 'pane-live') html = session.liveSummary || '';
     else if (id === 'pane-chat') {
       const chat = (session.chat || []).filter(m => !m.thinking);
       if (chat.length === 0) continue;
       html = chat.map(m => {
-        const who = m.role === 'user' ? 'あなた' : 'Gemini';
+        const who = chatSpeakerLabel(m);
         const body = m.role === 'assistant' ? renderMarkdown(m.content)
                     : '<p>' + escapeHtml(m.content).replace(/\n/g, '<br>') + '</p>';
         return `<div class="chat-block ${m.role}"><div class="chat-who">${who}</div>${body}</div>`;
       }).join('\n');
     }
     if (!html || !html.trim()) continue;
-    const iconGlyph = id === 'pane-transcript' ? '🎙' : id === 'pane-memo' ? '📝' : id === 'pane-summary' ? '📄' : '💬';
+    const iconGlyph = id === 'pane-transcript' ? '🎙' : id === 'pane-memo' ? '📝' : id === 'pane-summary' ? '📄' : id === 'pane-live' ? '🗂' : '💬';
     sections.push(`
 <section class="pane-section">
   <h2><span class="sec-icon">${iconGlyph}</span>${escapeHtml(meta.label)}</h2>
@@ -2483,11 +6387,28 @@ ${sections.join('\n')}
 `;
 }
 
-function saveSessionAsHtml() {
+/**
+ * 書き出し用に、画像を埋め込んだセッションのコピーを作る (v0.22.0)
+ *
+ * 元のセッションは触らない（保管庫を参照する形のまま残す）。
+ * ここで作るコピーだけが data: を持ち、**1枚で完結した HTML** になる。
+ */
+async function sessionsWithInlineImages(sessions) {
+  const out = [];
+  for (const s of sessions) {
+    if (!s.memo || s.memo.indexOf('data-img-id') < 0) { out.push(s); continue; }
+    out.push({ ...s, memo: await inlineImagesForExport(s.memo) });
+  }
+  return out;
+}
+
+async function saveSessionAsHtml() {
   snapshotActiveToSession();
   const session = getActiveSession();
   if (!session) return;
-  const html = buildExportHtml(session);
+  // v0.22.0: 画像は保管庫にあるので、書き出す直前に data: へ戻す
+  const [forExport] = await sessionsWithInlineImages([session]);
+  const html = buildExportHtml(forExport);
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
@@ -2501,33 +6422,35 @@ function saveSessionAsHtml() {
  * 全セッションを1つのHTMLファイルに。各セッションは <details> 折り畳みで
  * 独立して展開できる。pane はユーザー設定の並び順を尊重。
  */
-function buildAllSessionsExportHtml() {
+function buildAllSessionsExportHtml(sessions) {
+  const list = sessions || state.sessions;
   const fmt = (ts) => {
     const d = new Date(ts);
     const pad = n => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
 
-  const sessionsHtml = state.sessions.map((session, idx) => {
+  const sessionsHtml = list.map((session, idx) => {
     const sections = [];
-    for (const paneId of state.settings.paneOrder) {
+    for (const paneId of visiblePaneOrder()) {
       const meta = PANE_META[paneId];
       let innerHtml = '';
       if (paneId === 'pane-transcript') innerHtml = session.transcript || '';
       else if (paneId === 'pane-memo') innerHtml = session.memo || '';
       else if (paneId === 'pane-summary') innerHtml = session.summary || '';
+      else if (paneId === 'pane-live') innerHtml = session.liveSummary || '';
       else if (paneId === 'pane-chat') {
         const chat = (session.chat || []).filter(m => !m.thinking);
         if (chat.length === 0) continue;
         innerHtml = chat.map(m => {
-          const who = m.role === 'user' ? 'あなた' : 'Gemini';
+          const who = chatSpeakerLabel(m);
           const body = m.role === 'assistant' ? renderMarkdown(m.content)
                       : '<p>' + escapeHtml(m.content).replace(/\n/g, '<br>') + '</p>';
           return `<div class="chat-block ${m.role}"><div class="chat-who">${who}</div>${body}</div>`;
         }).join('\n');
       }
       if (!innerHtml || !innerHtml.trim()) continue;
-      const iconGlyph = paneId === 'pane-transcript' ? '🎙' : paneId === 'pane-memo' ? '📝' : paneId === 'pane-summary' ? '📄' : '💬';
+      const iconGlyph = paneId === 'pane-transcript' ? '🎙' : paneId === 'pane-memo' ? '📝' : paneId === 'pane-summary' ? '📄' : paneId === 'pane-live' ? '🗂' : '💬';
       sections.push(`<section class="pane-section">
     <h3><span class="sec-icon">${iconGlyph}</span>${escapeHtml(meta.label)}</h3>
     <div class="sec-body">${innerHtml}</div>
@@ -2549,19 +6472,19 @@ function buildAllSessionsExportHtml() {
   }).join('\n\n');
 
   // TOCリンク
-  const tocLinks = state.sessions.map((s, idx) =>
+  const tocLinks = list.map((s, idx) =>
     `<li><a href="#sess-${idx + 1}">${idx + 1}. ${escapeHtml(s.title || '(無題)')}</a></li>`
   ).join('\n      ');
 
   const now = new Date();
   const exportedAt = fmt(now.getTime());
-  const pageTitle = `dictation — 全セッション (${state.sessions.length}件) ${exportedAt}`;
+  const pageTitle = `dictation — 全セッション (${list.length}件) ${exportedAt}`;
 
   // 再インポート用の JSON データを末尾 <script> に埋め込む（単体版と同じ方式の複数版）
   const multiData = {
     format: 'dictation-multi/v1',
     exportedAt: now.toISOString(),
-    sessions: state.sessions.map(s => ({
+    sessions: list.map(s => ({
       title: s.title,
       aiTitle: s.aiTitle || null,
       titleIsManual: !!s.titleIsManual,
@@ -2724,7 +6647,7 @@ footer.doc-foot { margin-top: 36px; text-align: center; font-size: 11px; color: 
 <div class="wrap">
   <header class="doc-head">
     <span class="brand">dictation</span>
-    <h1 class="doc-title">全セッション一覧 (${state.sessions.length}件)</h1>
+    <h1 class="doc-title">全セッション一覧 (${list.length}件)</h1>
     <div class="doc-meta">書き出し: ${exportedAt}</div>
     <div class="doc-controls">
       <button type="button" onclick="document.querySelectorAll('details.sess').forEach(d => d.open = true)">すべて展開</button>
@@ -2732,7 +6655,7 @@ footer.doc-foot { margin-top: 36px; text-align: center; font-size: 11px; color: 
     </div>
   </header>
   <details class="toc" open>
-    <summary>目次 (${state.sessions.length}件)</summary>
+    <summary>目次 (${list.length}件)</summary>
     <ol>
       ${tocLinks}
     </ol>
@@ -2748,13 +6671,13 @@ footer.doc-foot { margin-top: 36px; text-align: center; font-size: 11px; color: 
 `;
 }
 
-function saveAllSessionsAsHtml() {
+async function saveAllSessionsAsHtml() {
   snapshotActiveToSession();
   if (state.sessions.length === 0) {
     alert('書き出すセッションがありません');
     return;
   }
-  const html = buildAllSessionsExportHtml();
+  const html = buildAllSessionsExportHtml(await sessionsWithInlineImages(state.sessions));
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
@@ -2794,12 +6717,13 @@ function importSessionData(s) {
 }
 
 /** 全セッション一括HTMLから読み取ったセッション配列を現状に追加インポート */
-function importMultipleSessions(sessions) {
+async function importMultipleSessions(sessions) {
   if (!Array.isArray(sessions) || sessions.length === 0) {
     alert('インポートするセッションがありません');
     return;
   }
-  if (!confirm(`${sessions.length}個のセッションをインポートします。現在のタブに追加されます。よろしいですか？`)) {
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  if (!(await confirmDialog({ title: `${sessions.length}個のセッションを読み込みますか？`, message: 'いまのタブに追加されます。', ok: '読み込む' }))) {
     return;
   }
   if (state.isRecording) stopRecording();
@@ -2945,27 +6869,33 @@ async function loadFromFile(file) {
   }
 }
 
-function clearPane(paneId, { confirmFirst = true, skipUndo = false } = {}) {
+async function clearPane(paneId, { confirmFirst = true, skipUndo = false } = {}) {
   const label = PANE_META[paneId]?.label || paneId;
   const hasContent = paneId === 'pane-transcript' ? !!getConfirmedText()
     : paneId === 'pane-memo' ? !!getMemoText()
     : paneId === 'pane-summary' ? !!getSummaryText()
+    : paneId === 'pane-live' ? !!elementToPlainText(els.liveSummary).trim()
     : paneId === 'pane-chat' ? !!getChatText()
     : false;
   if (!hasContent) return;
-  if (confirmFirst && !confirm(`「${label}」をクリアしますか？\n\nCtrl+Z で戻せます。`)) return;
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  // 確認が要らないとき（全部クリアから呼ぶとき）は待たずにその場で消す（呼び出し側は await しない）
+  if (confirmFirst && !(await confirmDialog({ title: `「${label}」をクリアしますか？`, message: 'Ctrl+Z で戻せます。', ok: 'クリア', destructive: true }))) return;
   if (!skipUndo && PANE_FIELD[paneId]) pushUndo(`クリア: ${label}`, paneId);
   if (paneId === 'pane-transcript') {
     els.confirmed.innerHTML = '';
     els.interim.textContent = '';
     state.pendingChunkEl = null;
     state.pendingChunkText = '';
-    if (els.emptyHint) els.emptyHint.hidden = false;
+    showHint(els.emptyHint, true);   // v0.24.79: クリアしたら、案内はばねで出す
   } else if (paneId === 'pane-memo') {
     els.memo.innerHTML = '';
   } else if (paneId === 'pane-summary') {
     els.summary.innerHTML = '';
-    if (els.summaryEmpty) els.summaryEmpty.hidden = false;
+    showHint(els.summaryEmpty, true);
+  } else if (paneId === 'pane-live') {
+    els.liveSummary.innerHTML = '';
+    showHint(els.liveSummaryEmpty, true);
   } else if (paneId === 'pane-chat') {
     const session = getActiveSession();
     if (session) session.chat = [];
@@ -2976,14 +6906,16 @@ function clearPane(paneId, { confirmFirst = true, skipUndo = false } = {}) {
   persistSessions();
 }
 
-function clearAllPanes() {
+async function clearAllPanes() {
   if (!hasAnyContent()) return;
-  if (!confirm('このセッションの4タブ（文字起こし・メモ・要約・質問）をすべてクリアしますか？\n\nCtrl+Z（Undo）で元に戻せます。')) return;
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  if (!(await confirmDialog({ title: 'このタブの中身をすべてクリアしますか？', message: '文字起こし・メモ・要約・ライブ要約・質問が消えます。Ctrl+Z で戻せます。', ok: 'すべてクリア', destructive: true }))) return;
   // 各ペインにスナップショット（chatは対象外）
   for (const pid of Object.keys(PANE_FIELD)) pushUndo('全タブクリア', pid);
   clearPane('pane-transcript', { confirmFirst: false, skipUndo: true });
   clearPane('pane-memo',       { confirmFirst: false, skipUndo: true });
   clearPane('pane-summary',    { confirmFirst: false, skipUndo: true });
+  clearPane('pane-live',       { confirmFirst: false, skipUndo: true });
   clearPane('pane-chat',       { confirmFirst: false, skipUndo: true });
 }
 
@@ -2997,6 +6929,7 @@ const PANE_FIELD = {
   'pane-transcript': 'transcript',
   'pane-memo':       'memo',
   'pane-summary':    'summary',
+  'pane-live':       'liveSummary',   // v0.24.25
 };
 const MAX_UNDO_ENTRIES = 15;
 
@@ -3095,13 +7028,58 @@ const paneLastStable = {
   'pane-transcript': '',
   'pane-memo': '',
   'pane-summary': '',
+  'pane-live': '',
 };
 const paneTypingTimers = {};
+/** ペインごとの「打ちかけを確定させる」関数。bindPaneTypingUndo が入れる */
+const paneTypingFlush = {};
+
+/**
+ * メモをプログラムから書き換える**直前**に呼ぶ (v0.24.15)
+ *
+ * v0.24.14 までは画像の操作が `pushUndo` を**書き換えた後**に呼んでいた。
+ * `pushUndo` は「いまの状態」を積むので、積まれるのは操作後の状態になり、
+ * 1回戻しても何も変わらない。さらに打ちかけの文字（2秒待ちの途中）が
+ * 確定していないと、次に積まれるのは打ち始める前の状態なので、
+ * もう1回戻すと**貼る前に打っていた文字までまとめて消える**
+ * （やっさん報告「元に戻そうとしたら、画像を入れる前の文字が消えてしまって」）。
+ *
+ * 順番: 打ちかけを確定 → 操作前の状態を積む → （呼び出し側が書き換える）→ memoUndoCommit
+ */
+function memoUndoCheckpoint(opLabel) {
+  if (paneTypingFlush['pane-memo']) paneTypingFlush['pane-memo']('編集');
+  pushUndo(opLabel, 'pane-memo');
+}
+
+/** 書き換えた**後**に呼ぶ。打鍵の基準を今の中身に合わせ、保存する */
+function memoUndoCommit() {
+  paneLastStable['pane-memo'] = paneHtml('pane-memo');
+  snapshotActiveToSession();
+  persistSessions();
+}
+
+/**
+ * 取り消し用に記録するペインの中身 (v0.24.15)
+ *
+ * メモの画像の src は blob: の一時 URL で、タブを切り替えたり戻したりするたびに
+ * `releaseMemoObjectUrls()` で解放される。v0.24.14 までは打鍵の取り消しが
+ * src ごと記録していたので、**戻すと死んだ URL が入って画像が壊れていた**。
+ * 保存（snapshotActiveToSession）と同じく id だけ残して記録し、戻したあとに差し込み直す。
+ */
+function paneHtml(paneId) {
+  // v0.24.70: 戻す・やり直すの記録にも、ばねの途中の値を入れない（戻したときにずれたまま残る）
+  if (paneId === 'pane-memo') return els.memo ? stripManagedImageSrc(savableHtml(els.memo.innerHTML)) : '';
+  if (paneId === 'pane-transcript') return els.confirmed ? savableHtml(els.confirmed.innerHTML) : '';
+  if (paneId === 'pane-summary') return els.summary ? savableHtml(els.summary.innerHTML) : '';
+  if (paneId === 'pane-live') return els.liveSummary ? savableHtml(els.liveSummary.innerHTML) : '';
+  return '';
+}
 
 function syncPaneBaselineFromDOM() {
-  if (els.confirmed) paneLastStable['pane-transcript'] = els.confirmed.innerHTML;
-  if (els.memo)      paneLastStable['pane-memo']       = els.memo.innerHTML;
-  if (els.summary)   paneLastStable['pane-summary']    = els.summary.innerHTML;
+  if (els.confirmed) paneLastStable['pane-transcript'] = paneHtml('pane-transcript');
+  if (els.memo)      paneLastStable['pane-memo']       = paneHtml('pane-memo');
+  if (els.summary)   paneLastStable['pane-summary']    = paneHtml('pane-summary');
+  if (els.liveSummary) paneLastStable['pane-live']     = paneHtml('pane-live');
 }
 
 function bindPaneTypingUndo() {
@@ -3109,6 +7087,7 @@ function bindPaneTypingUndo() {
     { paneId: 'pane-transcript', el: els.confirmed },
     { paneId: 'pane-memo',       el: els.memo },
     { paneId: 'pane-summary',    el: els.summary },
+    { paneId: 'pane-live',       el: els.liveSummary },
   ];
 
   /* スナップショット頻度の目安:
@@ -3131,7 +7110,7 @@ function bindPaneTypingUndo() {
   for (const { paneId, el } of targets) {
     if (!el || el.__typingUndoWired) continue;
     el.__typingUndoWired = true;
-    paneLastStable[paneId] = el.innerHTML;
+    paneLastStable[paneId] = paneHtml(paneId);
 
     // 現在のバーストを Undo スタックに確定させて baseline を更新するヘルパ
     const flushBurst = (opLabel = '編集') => {
@@ -3139,11 +7118,12 @@ function bindPaneTypingUndo() {
         clearTimeout(paneTypingTimers[paneId]);
         paneTypingTimers[paneId] = null;
       }
-      const current = el.innerHTML;
+      const current = paneHtml(paneId);
       if (current === paneLastStable[paneId]) return;
       pushUndoSnapshot(paneId, opLabel, paneLastStable[paneId]);
       paneLastStable[paneId] = current;
     };
+    paneTypingFlush[paneId] = flushBurst;
 
     el.addEventListener('input', (e) => {
       // 入力された文字列（IME 確定時も含む）
@@ -3176,7 +7156,13 @@ function bindPaneTypingUndo() {
       if (e.key === 'Enter' && !e.isComposing) {
         flushBurst('行編集');
         requestAnimationFrame(() => {
-          paneLastStable[paneId] = el.innerHTML;
+          // v0.24.15: 改行の直前の状態も積む。以前は基準を上書きするだけだったので、
+          // 戻すと改行の前に打っていた分を飛ばして、さらに前まで戻っていた
+          const now = paneHtml(paneId);
+          if (now !== paneLastStable[paneId]) {
+            pushUndoSnapshot(paneId, '改行', paneLastStable[paneId]);
+          }
+          paneLastStable[paneId] = now;
         });
       }
     });
@@ -3211,8 +7197,7 @@ function doPaneUndo(paneId) {
   const idx = _topForSession(s.undo, state.activeId);
   if (idx < 0) {
     setStatus('idle', '戻せる操作がありません');
-    setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
-                                state.isRecording ? '録音中' : '停止'), 1500);
+    setTimeout(() => restoreStatus(), 1500);
     return;
   }
   // 現在状態をRedoに退避
@@ -3232,8 +7217,7 @@ function doPaneUndo(paneId) {
   const paneLabel = PANE_META[paneId]?.label || paneId;
   diagLog.info(`Undo実行: ${paneId} / ${last.op}`);
   setStatus('idle', `[${paneLabel}] 戻しました: ${last.op}`);
-  setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
-                              state.isRecording ? '録音中' : '停止'), 2000);
+  setTimeout(() => restoreStatus(), 2000);
 }
 
 function doPaneRedo(paneId) {
@@ -3242,8 +7226,7 @@ function doPaneRedo(paneId) {
   const idx = _topForSession(s.redo, state.activeId);
   if (idx < 0) {
     setStatus('idle', 'やり直せる操作がありません');
-    setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
-                                state.isRecording ? '録音中' : '停止'), 1500);
+    setTimeout(() => restoreStatus(), 1500);
     return;
   }
   const current = _paneSnapshot(paneId, s.redo[idx].op);
@@ -3262,8 +7245,7 @@ function doPaneRedo(paneId) {
   const paneLabel = PANE_META[paneId]?.label || paneId;
   diagLog.info(`Redo実行: ${paneId} / ${next.op}`);
   setStatus('idle', `[${paneLabel}] やり直しました: ${next.op}`);
-  setTimeout(() => setStatus(state.isRecording ? 'listening' : 'idle',
-                              state.isRecording ? '録音中' : '停止'), 2000);
+  setTimeout(() => restoreStatus(), 2000);
 }
 
 function updatePaneUndoRedoButtons() {
@@ -3300,12 +7282,13 @@ function doUndo() { doPaneUndo(state.activePane || 'pane-transcript'); }
 function doRedo() { doPaneRedo(state.activePane || 'pane-transcript'); }
 
 function toggleAi() {
-  if (!state.settings.apiKey) { openSettings(); return; }
-  state.settings.aiEnabled = !state.settings.aiEnabled;
-  saveSettings();
+  if (!geminiKey()) { openSettings(); return; }
+  // v0.24.143: このタブだけ切り替える（設定は新しいタブの初めの値）
+  const session = getActiveSession();
+  setTabOpt(session, 'liveRefine', !tabOpt(session, 'liveRefine'));
   applyAiButtonState();
   // ONにした瞬間、ペインの生テキストがあれば即整形
-  if (state.settings.aiEnabled) {
+  if (tabOpt(session, 'liveRefine')) {
     refineUnstructuredInTranscript({ showFeedback: false });
   }
 }
@@ -3455,6 +7438,77 @@ function applyPaneOrder() {
   }
 }
 
+/**
+ * そのタブの働きに、いま使える AI があるか (v0.24.89)
+ * 無ければ理由を返す（タブのアイコンを注意のしるしにし、空のときの案内で AI 設定へ誘う）。
+ * メモは AI が無くても使えるので見ない。Web Speech の文字起こしも AI 無しで動く
+ */
+function paneAiProblem(id) {
+  // v0.24.91: 見出しと一言に分けた（やっさん「このくらいの説明がちょうどいい。他のタブもこの感じで」）。
+  const claude = !!state.settings.claudeCode;
+  // v0.24.93: やっさん「API を設定していても、トグルをオフにすると出る。『登録されていないか、有効になっていません』みたいな感じに」。
+  // 登録していない・トグルを切っている、のどちらでも嘘にならない一文にそろえた（設定の注意書きも同じ）
+  const off = () => 'API キーが登録されていないか、有効になっていません';
+  if (id === 'pane-transcript') {
+    if (state.settings.inputMode !== 'gemini-audio') return null;   // Web Speech は AI 無しで動く
+    if (geminiKey() || usesGroqTranscribe()) return null;
+    return { title: off(!!(state.settings.apiKey || state.settings.groqApiKey)), sub: '文字起こしには Gemini API か Groq Whisper のキーが要ります' };
+  }
+  if (id === 'pane-summary' || id === 'pane-chat' || id === 'pane-live') {
+    // v0.24.93: ライブ要約も Gemini で作れるようにしたので、要約・質問と同じ
+    if (geminiKey() || claude) return null;
+    const what = id === 'pane-summary' ? '要約' : id === 'pane-live' ? 'ライブ要約' : '質問';
+    return { title: off(!!state.settings.apiKey), sub: `${what}には Gemini API のキーか Claude Code が要ります` };
+  }
+  return null;
+}
+
+/** いまそのタブの働きを受け持つ AI の名前（空のときの案内の札に出す） (v0.24.89) */
+function paneAiName(id) {
+  if (id === 'pane-transcript') {
+    if (state.settings.inputMode !== 'gemini-audio') return 'Web Speech';
+    return usesGroqTranscribe() ? 'Groq Whisper' : 'Gemini';
+  }
+  return postEngineNow() === 'claude' ? 'Claude Code' : 'Gemini';
+}
+
+/**
+ * 空のときの案内を作る (v0.24.89)
+ * やっさん「いまのデザインだとなしなので、整えて。アイコンやシンボルを使ってビジュアルよく」。
+ * SUMADO の線の絵・短い一言・受け持つ AI の札。使える AI が無ければ注意のしるしと「AI 設定を開く」。
+ * 説明しすぎない（SUMADO の仕様書の 5 章）ので、一言だけにする
+ */
+const EMPTY_HINTS = {
+  'pane-transcript': { el: 'emptyHint', icon: 'sm-wave', role: '聞き取り', text: () => '録音を始めると、ここに文字が出ます' },
+  'pane-live': { el: 'liveSummaryEmpty', icon: 'sm-clock', role: '要約', text: () => `録音中、${clampLiveSummaryMinutes(state.settings.liveSummaryMin)}分ごとに目次つきの要約ができます` },
+  'pane-summary': { el: 'summaryEmpty', icon: 'sm-note', role: '要約', text: () => tabOpt(state.activeId, 'autoSummary') ? '録音を止めると、ここに要約ができます' : '「要約・タイトル生成」で作れます' },
+  'pane-chat': { el: 'chatEmpty', icon: 'sm-chat', role: '答える AI', text: () => '文字起こし・メモ・要約について質問できます' },
+};
+function renderEmptyHints() {
+  for (const [id, h] of Object.entries(EMPTY_HINTS)) {
+    const box = els[h.el];
+    if (!box) continue;
+    const problem = paneAiProblem(id);
+    box.classList.toggle('needs-ai', !!problem);
+    box.innerHTML = problem
+      ? `<span class="empty-icon" data-icon="sm-warn" data-icon-size="34"></span>`
+        + `<span class="empty-text">${escapeHtmlSimple(problem.title)}</span>`
+        + `<span class="empty-sub">${escapeHtmlSimple(problem.sub)}</span>`
+        + `<button type="button" class="btn btn-ghost btn-sm empty-open-ai">AI 設定を開く</button>`
+      : `<span class="empty-icon" data-icon="${h.icon}" data-icon-size="34"></span>`
+        + `<span class="empty-text">${escapeHtmlSimple(h.text())}</span>`
+        + `<span class="empty-chip">${escapeHtmlSimple(h.role)}・${escapeHtmlSimple(paneAiName(id))}</span>`;
+    renderIcons(box);
+  }
+}
+
+/** 設定を開いて「AI 設定」のところを見せる (v0.24.89) */
+function openAiSettings() {
+  openSettings();
+  const g = document.getElementById('ai-settings-group');
+  if (g) setTimeout(() => g.scrollIntoView({ block: 'start', behavior: 'smooth' }), 120);
+}
+
 function renderInnerTabs() {
   // 内側ラッパ .inner-tabs-list が無ければ作る（外側タブの #tabs-list と同構造）
   // これでアクティブ線 indicator が位置: relative の基準を持てる
@@ -3471,13 +7525,16 @@ function renderInnerTabs() {
   if (indicator && indicator.parentElement === listEl) indicator.remove();
 
   listEl.innerHTML = '';
-  for (const id of state.settings.paneOrder) {
+  for (const id of visiblePaneOrder()) {
     const meta = PANE_META[id];
     if (!meta) continue;
     const btn = document.createElement('button');
     btn.className = 'inner-tab' + (state.activePane === id ? ' active' : '');
     btn.dataset.pane = id;
-    btn.innerHTML = `<span class="inner-tab-icon" data-icon="${meta.icon}"></span>${meta.label}`;
+    // v0.24.89: そのタブに使える AI が無いときは、アイコンを注意のしるしに（やっさんの指定）
+    const problem = paneAiProblem(id);
+    btn.classList.toggle('needs-ai', !!problem);
+    btn.innerHTML = `<span class="inner-tab-icon" data-icon="${problem ? 'sm-warn' : meta.icon}"></span>${meta.label}`;
     btn.addEventListener('click', () => switchInnerPane(id));
     listEl.appendChild(btn);
   }
@@ -3491,6 +7548,7 @@ function renderInnerTabs() {
   listEl.appendChild(indicator);
 
   renderIcons(listEl);
+  renderEmptyHints();   // v0.24.89: AI の設定が変わると、案内の札・注意のしるしも変わる
   enablePointerDragSort(listEl, {
     itemSelector: '.inner-tab',
     idAttr: 'pane',
@@ -3513,6 +7571,18 @@ function updateInnerTabsIndicator() {
   const x = activeTab.offsetLeft;
   const w = activeTab.offsetWidth;
   const firstShow = !bar.classList.contains('visible');
+  // v0.24.67: 線はばねで移る（外側のタブの線と同じ。TODO「動きを SUMADO の仕様書に合わせる」の 8）
+  if (window.Motion) {
+    if (!bar.__widthDriver) {
+      bar.__widthDriver = document.createElement('span');
+      Motion.onFrame(bar.__widthDriver, ({ x: bw }) => { bar.style.width = `${bw}px`; });
+    }
+    const go = firstShow ? Motion.set : (e, v) => Motion.animate(e, v, { spring: Motion.SPRINGS.sheet });
+    go(bar, { x });
+    go(bar.__widthDriver, { x: w });
+    if (firstShow) requestAnimationFrame(() => bar.classList.add('visible'));
+    return;
+  }
   if (firstShow) {
     const saved = bar.style.transition;
     bar.style.transition = 'none';
@@ -3528,8 +7598,14 @@ function updateInnerTabsIndicator() {
 }
 
 function reorderPaneOrder(newOrder) {
-  if (!Array.isArray(newOrder) || newOrder.length !== state.settings.paneOrder.length) return;
-  state.settings.paneOrder = newOrder;
+  if (!Array.isArray(newOrder)) return;
+  // v0.24.25: 隠れているタブ（リアルタイム要約がオフ）はドラッグの並びに入ってこない。
+  // 元の位置に戻して並びを保つ（無いと長さが合わず、並べ替えが効かなくなる）
+  const full = state.settings.paneOrder;
+  const merged = newOrder.slice();
+  full.forEach((id, i) => { if (!merged.includes(id)) merged.splice(Math.min(i, merged.length), 0, id); });
+  if (merged.length !== full.length) return;
+  state.settings.paneOrder = merged;
   saveSettings();
   applyPaneOrder();
 }
@@ -3540,16 +7616,23 @@ function renderChatInto(container, emptyHint, scrollContainer) {
   if (!container) return;
   const session = getActiveSession();
   const chat = session?.chat || [];
+  // v0.24.71: 描き直すたびに全部の吹き出しが一斉に出直していた（CSS の keyframes が、差し込むたびに走るため）。
+  // 前に描いた数を覚えておき、新しく増えた吹き出しだけをふわっと出す。「考え中」が答えに変わったものは、中身だけふわっと。
+  // タブを切り替えたとき（別のセッション）は、動かさずにそのまま出す（TODO「動きを SUMADO の仕様書に合わせる」の 10）
+  const prev = container.__chatDrawn || null;
+  const same = !!(prev && session && prev.sid === session.id);
+  container.__chatDrawn = session ? { sid: session.id, n: chat.length, thinkingAt: chat.findIndex((m) => m.thinking) } : null;
   container.innerHTML = '';
   if (chat.length === 0) {
-    if (emptyHint) emptyHint.hidden = false;
+    showHint(emptyHint, true, same);   // v0.24.79: 同じセッションで描き直したときだけ動かす
     return;
   }
-  if (emptyHint) emptyHint.hidden = true;
+  showHint(emptyHint, false, same);
   for (const msg of chat) {
     const div = document.createElement('div');
     div.className = 'chat-msg ' + msg.role + (msg.thinking ? ' thinking' : '') + (msg.error ? ' error' : '');
-    const who = msg.role === 'user' ? 'あなた' : 'Gemini';
+    // 考え中は、いま回る先の見込みを出す（答えが返ったら実際に答えたほうに置き換わる）
+    const who = msg.thinking ? aiEngineName('chat') : chatSpeakerLabel(msg);
     const body = document.createElement('div');
     body.className = 'chat-msg-body';
     if (msg.thinking) {
@@ -3565,10 +7648,38 @@ function renderChatInto(container, emptyHint, scrollContainer) {
     div.appendChild(header);
     div.appendChild(body);
     container.appendChild(div);
+    if (window.Motion && same) {
+      const i = container.children.length - 1;
+      if (i >= prev.n) {
+        Motion.set(div, { opacity: 0, scale: 0.97 });
+        Motion.animate(div, { opacity: 1, scale: 1 }, { spring: Motion.SPRINGS.fade }).then((d) => { if (d) Motion.clear(div); });
+      } else if (i === prev.thinkingAt && !msg.thinking) {
+        Motion.set(body, { opacity: 0 });
+        Motion.animate(body, { opacity: 1 }, { spring: Motion.MOTION.morph.contentIn }).then((d) => { if (d) Motion.clear(body); });
+      }
+    }
   }
   if (scrollContainer) {
     requestAnimationFrame(() => { scrollContainer.scrollTop = scrollContainer.scrollHeight; });
   }
+}
+
+/**
+ * 質問ペインの吹き出しの名前 (v0.24.17)
+ *
+ * v0.24.16 までは答えの側を**いつも「Gemini」**と書いていた。v0.24.0 で質問を
+ * Claude に回せるようにしたのに、名前のほうを直していなかった
+ * （やっさんの確認「Claude 連携してるけど、吹き出しに Gemini って書いてある」）。
+ *
+ * 答えたときに記録した `engine` を使う。**記録の無い古い答えは「AI」**にする。
+ * v0.24.0 以降の答えは Claude だった可能性があり、どちらとも言えないため。
+ * 保存・コピー・Notion にもこの名前が載る。
+ */
+function chatSpeakerLabel(m) {
+  if (!m || m.role === 'user') return 'あなた';
+  if (m.engine === 'claude') return 'Claude';
+  if (m.engine === 'gemini') return 'Gemini';
+  return 'AI';
 }
 
 function renderChat() {
@@ -3586,7 +7697,7 @@ function resizeChatInput() {
 async function sendChatMessageFrom(inputEl, sendBtn) {
   const text = inputEl.value.trim();
   if (!text) return;
-  if (!state.settings.apiKey) {
+  if (!geminiKey()) {
     alert('Gemini API キーが未設定です。設定から登録してください。');
     openSettings();
     return;
@@ -3605,9 +7716,11 @@ async function sendChatMessageFrom(inputEl, sendBtn) {
   renderChat();
   if (sendBtn) sendBtn.disabled = true;
 
+  let engine = '';
   try {
     const answer = await chatWithGemini({
-      apiKey: state.settings.apiKey,
+      onEngine: (e) => { engine = e; },
+      apiKey: geminiKey(),
       contextSources: {
         transcript: getConfirmedText(),
         memo: getMemoText(),
@@ -3617,7 +7730,7 @@ async function sendChatMessageFrom(inputEl, sendBtn) {
       question: text,
     });
     session.chat = session.chat.filter(m => m !== thinking);
-    session.chat.push({ role: 'assistant', content: answer, ts: Date.now() });
+    session.chat.push({ role: 'assistant', content: answer, ts: Date.now(), engine });
     persistSessions();
     updateActionButtons();
     renderChat();
@@ -3643,6 +7756,8 @@ async function sendQuickChatMessage() {
 /* ───────── Auto title ───────── */
 
 function formatDatePart(ts) {
+  // v0.24.146: 日本時間で（notion.js の jstParts。環境の時刻帯が UTC でも 9 時間ずれないように・カルディから）
+  if (typeof jstParts === 'function') { const p = jstParts(ts); return `${p.month}/${p.day} ${p.hour}:${p.minute}`; }
   const d = new Date(ts);
   const pad = x => String(x).padStart(2, '0');
   return `${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -3656,7 +7771,8 @@ function htmlToPlain(html) {
   if (!html) return '';
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
-  return (tmp.innerText || tmp.textContent || '').trim();
+  // document に繋がっていない div なので innerText は常に改行を落とす (v0.24.3)
+  return elementToPlainText(tmp);
 }
 
 async function autoGenerateTitle({ silent = true, force = false, sessionId = null } = {}) {
@@ -3665,12 +7781,12 @@ async function autoGenerateTitle({ silent = true, force = false, sessionId = nul
   let session = state.sessions.find(s => s.id === targetId);
   if (!session) return;
   if (!force && session.titleIsManual) return;
-  if (!state.settings.apiKey) {
+  if (!geminiKey()) {
     if (!silent) { alert('Gemini API キーが未設定です。設定から登録してください。'); openSettings(); }
     return;
   }
-  // auto（録音停止時等）は aiEnabled に従う。手動再生成（force）は常に実行。
-  if (!force && !state.settings.aiEnabled) return;
+  // v0.24.39: ここでライブ整形（aiEnabled）を見るのをやめた。呼ぶかどうかは呼び出し側が決める
+  // （録音停止時は「要約・タイトル生成」、手で要約を作ったあと、タイトルの作り直しボタン）
   // 対象セッションが現在表示中ならDOMから、そうでなければストアHTMLから読む
   const transcript = (targetId === state.activeId)
     ? getConfirmedText()
@@ -3684,7 +7800,7 @@ async function autoGenerateTitle({ silent = true, force = false, sessionId = nul
   }
   try {
     const aiTitle = await generateTitleWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       summary,
       transcript,
     });
@@ -3712,19 +7828,34 @@ async function autoGenerateTitle({ silent = true, force = false, sessionId = nul
 /* ───────── Summary generation ───────── */
 
 async function generateSummary({ silent = false, sessionId = null } = {}) {
-  if (state.isSummarizing) return;
   // 対象セッションをIDで固定（非同期中にタブ切替されても安全に）
   const targetId = sessionId || state.activeId;
+  // v0.24.27: 二重起動の歯止めもタブごと（別のタブの要約は待たずに作れる）
+  if (isBusy('summary', targetId)) return;
   let session = state.sessions.find(s => s.id === targetId);
   if (!session) return;
   const transcript = (targetId === state.activeId)
     ? getConfirmedText()
     : htmlToPlain(session.transcript);
+  // メモも要約の素材にする (v0.24.3)
+  //
+  // やっさんの確認「要約の中にノートの内容は反映されるんだっけ」。
+  // されていなかった。質問ペインは最初から 3種（要約・メモ・文字起こし）を
+  // 渡していたのに、要約だけが文字起こしとタイトルしか見ていなかった。
+  //
+  // 設定で切れる形にしないのは、メモは自分で書いたものだけで切りたい場面が無いから。
+  // 粒度（詳細・バランス・概要）の横にトグルが増えると、v0.21.4 の
+  // 「自動的に閉じる」と同じで**押したかどうか分からなくなる**種類のスイッチになる。
+  const memo = (targetId === state.activeId)
+    ? getMemoText()
+    : htmlToPlain(session.memo);
   if (!transcript) {
+    // メモだけで要約するのは別の機能なのでここではやらない。
+    // 文言を変えると「メモがあればいける」と読めるので、そのままにする
     if (!silent) alert('文字起こしが空です。要約を生成できません。');
     return;
   }
-  if (!state.settings.apiKey) {
+  if (!geminiKey()) {
     if (!silent) { alert('Gemini API キーが未設定です。設定から登録してください。'); openSettings(); }
     return;
   }
@@ -3732,21 +7863,23 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
   if (targetId === state.activeId && (session.summary || '').trim()) {
     pushUndo(silent ? '要約自動生成' : '要約生成', 'pane-summary');
   }
-  state.isSummarizing = true;
   // 表示中のセッションだった場合のみ UI にローディング表示
   const wasActive = (targetId === state.activeId);
-  if (wasActive) {
-    els.summary.classList.add('generating');
-    els.summaryEmpty.hidden = true;
-    if (els.btnSummaryCombo) els.btnSummaryCombo.classList.add('firing');
-  }
-  setStatus('listening', '要約生成中');
+  if (wasActive) showHint(els.summaryEmpty, false);   // v0.24.79
+  markBusy('summary', targetId, true);
+  // v0.24.12: どちらの AI で回しているかを出す（やっさんの要望）
+  // v0.24.56: 走っている間に別のお知らせが引っ込んでも「停止」に戻らないよう、処理として登録する
+  beginStatusTask(`summary:${targetId}`, `要約生成中（${typeof aiEngineName === 'function' ? aiEngineName('summary') : 'Gemini'}）`);
   try {
     const summary = await summarizeWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       transcript,
+      memo,
       title: session?.title,
       detail: state.settings.summaryDetail || 'medium',
+      // v0.24.57: やっさん報告「Claude が時間内に返さないので…で Gemini での要約になったのに、要約中（Claude）って出てた」。
+      // 表示は始める前に「回る予定のほう」で出していて、Gemini に戻っても書き換えていなかった
+      onEngine: (e) => beginStatusTask(`summary:${targetId}`, `要約生成中（${e === 'claude' ? 'Claude' : 'Gemini'}）`),
     });
     // 非同期戻り後にセッションが生きているか再確認
     session = state.sessions.find(s => s.id === targetId);
@@ -3759,7 +7892,7 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
     // 対象セッションが今も表示中ならDOMにも反映
     if (targetId === state.activeId) {
       els.summary.innerHTML = summaryHtml;
-      els.summaryEmpty.hidden = true;
+      showHint(els.summaryEmpty, false);
       updateActionButtons();
       if (!silent) {
         switchInnerPane('pane-summary');
@@ -3772,12 +7905,8 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
     console.error('Summary generation failed:', e);
     if (!silent) alert('要約生成に失敗しました: ' + e.message);
   } finally {
-    state.isSummarizing = false;
-    if (wasActive && targetId === state.activeId) {
-      els.summary.classList.remove('generating');
-      if (els.btnSummaryCombo) els.btnSummaryCombo.classList.remove('firing');
-    }
-    setStatus(state.isRecording ? 'listening' : 'idle', state.isRecording ? '録音中' : '停止');
+    markBusy('summary', targetId, false);
+    endStatusTask(`summary:${targetId}`);
   }
 }
 
@@ -3990,68 +8119,40 @@ function enablePointerDragSort(list, opts) {
     if (target && group.includes(target)) target = null;
 
     if (target && list.contains(target)) {
-      // FLIP: First ── 並べ替え前の位置を記録
-      const itemsBefore = Array.from(list.querySelectorAll(itemSelector));
-      const firstRects = new Map();
-      itemsBefore.forEach(el => firstRects.set(el, el.getBoundingClientRect()));
-
       const horiz = detectHorizontal();
       const r = target.getBoundingClientRect();
       const before = horiz
         ? e.clientX < r.left + r.width / 2
         : e.clientY < r.top + r.height / 2;
-
-      // グループを一旦外して、ターゲット位置に挿入（グループの並び順は保持）
-      group.forEach(el => el.remove());
-      const insertRef = before ? target : target.nextSibling;
-      // insertBefore(item, ref) は item を ref の直前に挿入。
-      // グループを順番に insertBefore すると、各要素が ref の直前に積み重なる形で
-      // 結果として group[0], group[1], ..., ref の順に並ぶ。
-      for (const el of group) {
-        list.insertBefore(el, insertRef);
-      }
-
-      // FLIP: Last/Invert ── 新しい位置を測り、差分だけ過去位置へ飛ばす
-      const itemsAfter = Array.from(list.querySelectorAll(itemSelector));
-      itemsAfter.forEach(el => {
-        const first = firstRects.get(el);
-        if (!first) return;
-        const last = el.getBoundingClientRect();
-        const dx = first.left - last.left;
-        const dy = first.top - last.top;
-        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
-        el.style.transition = 'none';
-        el.style.transform = `translate(${dx}px, ${dy}px)`;
-      });
-      // FLIP: Play ── 次フレームで transform を戻すとトランジションでスライド
-      requestAnimationFrame(() => {
-        itemsAfter.forEach(el => {
-          if (!el.style.transform) return;
-          el.style.transition = 'transform 0.28s cubic-bezier(0.16, 1, 0.3, 1)';
-          el.style.transform = '';
-        });
-        setTimeout(() => {
-          itemsAfter.forEach(el => {
-            el.style.transition = '';
-            el.style.transform = '';
-          });
-        }, 320);
-      });
-
       const key = dataKeyFor(idAttr);
-      const newOrder = itemsAfter.map(el => el.dataset[key]);
-      didReorder = true;
-      const cb = getOpts().onReorder;
-      if (cb) cb(newOrder);
+      // v0.24.72: 並べ替えのあとの動きを、ばねで（TODO「動きを SUMADO の仕様書に合わせる」の 11）。
+      // 前は CSS の transition（cubic-bezier）で FLIP していたが、onReorder がその場で一覧を描き直す
+      // （設定のペインの並び順・中のタブ）と、動かしていた要素ごと捨てられて、新しい並びへ一瞬で跳んでいた。
+      // 並べ替えと描き直しをまとめて Motion.flipList で包み、描き直したあとの要素を、前の場所からばねで動かす
+      const reorder = () => {
+        // グループを一旦外して、ターゲット位置に挿入（グループの並び順は保持）
+        group.forEach(el => el.remove());
+        const insertRef = before ? target : target.nextSibling;
+        // insertBefore(item, ref) は item を ref の直前に挿入。
+        // グループを順番に insertBefore すると、各要素が ref の直前に積み重なる形で
+        // 結果として group[0], group[1], ..., ref の順に並ぶ。
+        for (const el of group) {
+          list.insertBefore(el, insertRef);
+        }
+        const newOrder = Array.from(list.querySelectorAll(itemSelector)).map(el => el.dataset[key]);
+        didReorder = true;
+        const cb = getOpts().onReorder;
+        if (cb) cb(newOrder);
+      };
+      if (window.Motion) {
+        Motion.flipList(list, reorder, { selector: itemSelector, key: (el) => el.dataset[key], fadeIn: false });
+      } else {
+        reorder();
+      }
 
-      // ドラッグで並び順が変わったら、アクティブ線（下のスライド指示線）の
-      // 位置が古いままになるので、FLIPアニメ完了後に再計算
-      if (typeof updateActiveTabIndicator === 'function') {
-        setTimeout(() => updateActiveTabIndicator(), 340);
-      }
-      if (typeof updateInnerTabsIndicator === 'function') {
-        setTimeout(() => updateInnerTabsIndicator(), 340);
-      }
+      // 並び順が変わったら、アクティブ線（下のスライド指示線）を新しい場所へ（線もばねで動く）
+      if (typeof updateActiveTabIndicator === 'function') updateActiveTabIndicator();
+      if (typeof updateInnerTabsIndicator === 'function') updateInnerTabsIndicator();
     }
     clearHighlights();
     try { list.releasePointerCapture(pointerId); } catch {}
@@ -4210,6 +8311,414 @@ function enableDragSort(list, { itemSelector, idAttr = 'pane-id', onReorder }) {
   });
 }
 
+/* ───────── 録音の文脈（語彙ヒント） v0.16.0 ─────────
+ *
+ * 講義や会議は分野の語彙がほぼ決まっている。同音異義語と固有名詞は音だけでは
+ * 決められないので、先に語を渡して選ばせる。
+ * 実測例: Web Speech が「Gemini」を「ジムニー」と書いた。これは語彙で防げる誤り。
+ *
+ * 渡す先は音声文字起こし（transcribeAudioWithGemini）と整形（refineWithGemini）の両方。
+ * Web Speech モードでも整形の段で誤変換を直せることがあるため。
+ */
+
+/** 「改行/カンマ/読点」区切りの文字列 → 語の配列 */
+function splitTerms(text) {
+  return String(text || '').split(/[\n,、]/).map(t => t.trim()).filter(Boolean);
+}
+
+/**
+ * Gemini に渡す文脈。手入力と自動抽出をまとめる。
+ * 中身が空なら undefined を返し、プロンプトに何も足さない（従来と同じ挙動になる）。
+ *
+ * 手入力を先に並べる。やっさんが書いた語が最終権限で、
+ * 自動抽出はその補いという位置づけ（v0.16.1）。
+ */
+/* ───────── 語彙辞書のフッター (v0.20.0) ─────────
+ *
+ * 「いま何の語彙が効いているか」が常に見えていないと、間違ったまま録り続けてしまう。
+ * 右下の拡大ルーラーと対になる左下のピルに出す。
+ *
+ * 辞書を選んでも**自動辞書は消さない**。20分喋ったあとの自動辞書は
+ * 実際に話された語からできているので価値が高く、捨てるのは損。
+ * 「いまの自動辞書 ＋ 選んだ辞書」で合成する（mergeTermSources）。
+ */
+
+/** いま適用中の辞書 id（プリセット・自作の混在） */
+function getActiveDictIds() {
+  return getActiveSession()?.context?.dictIds || [];
+}
+
+/** フッターのピルを描き直す */
+function renderDictBar() {
+  if (!els.dictLabel) return;
+  const s = getActiveSession();
+  const ids = getActiveDictIds();
+  const names = ids
+    .map(id => findTermDict(id, state.settings.termDicts))
+    .filter(Boolean)
+    .map(d => d.name);
+  const manualCount = splitTerms(s?.context?.terms).length;
+  const autoCount = (s?.autoContext?.terms || []).length;
+
+  els.dictLabel.textContent = describeTermState({ dictNames: names, manualCount, autoCount });
+  if (els.dictBar) {
+    els.dictBar.classList.toggle('has-dict', names.length > 0 || manualCount > 0);
+  }
+}
+
+/** メニューの中身を描き直す */
+function renderDictMenu() {
+  if (!els.dictMenuList) return;
+  const ids = getActiveDictIds();
+  const user = state.settings.termDicts || [];
+  els.dictMenuList.innerHTML = '';
+
+  const add = (d, isUser) => {
+    const on = ids.includes(d.id);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dict-item' + (on ? ' on' : '');
+    btn.innerHTML = `<span class="dict-check">${on ? '✓' : ''}</span>`
+      + `<span class="dict-item-body">`
+      + `<span class="dict-item-name"></span>`
+      + `<span class="dict-item-sub"></span></span>`;
+    btn.querySelector('.dict-item-name').textContent = d.name;
+    btn.querySelector('.dict-item-sub').textContent =
+      `${(d.terms || []).length}語${d.hint ? ' ・ ' + d.hint : ''}${isUser ? ' ・ 自作' : ''}`;
+    btn.addEventListener('click', () => toggleDict(d.id));
+    els.dictMenuList.appendChild(btn);
+  };
+
+  for (const d of TERM_PRESETS) add(d, false);
+  for (const d of user) add(d, true);
+
+  const autoCount = (getActiveSession()?.autoContext?.terms || []).length;
+  if (els.dictMenuAuto) {
+    els.dictMenuAuto.textContent = autoCount
+      ? `自動辞書: ${autoCount}語（録音中に育ちます）`
+      : '自動辞書: まだありません';
+  }
+}
+
+/** 辞書のオン/オフ。録音中でも即座に効く */
+function toggleDict(id) {
+  const s = getActiveSession();
+  if (!s) return;
+  if (!s.context) s.context = {};
+  const ids = (s.context.dictIds || []).slice();
+  const i = ids.indexOf(id);
+  if (i >= 0) ids.splice(i, 1); else ids.push(id);
+  s.context.dictIds = ids;
+  persistSessions();
+  renderDictBar();
+  renderDictMenu();
+  const d = findTermDict(id, state.settings.termDicts);
+  diagLog.info(`辞書を${i >= 0 ? '外した' : '適用した'}: ${d ? d.name : id}`);
+}
+
+// v0.24.63: 左下の辞書の札から、小さいところから少し行き過ぎてぽんと出る。しまうときは下へ戻って消える
+// （TODO「動きを SUMADO の仕様書に合わせる」の 4。前は出るのも消えるのも一瞬だった）
+function openDictMenu() {
+  if (!els.dictMenu) return;
+  renderDictMenu();
+  if (window.Motion) Motion.popIn(els.dictMenu, { y: 12 });
+  else els.dictMenu.hidden = false;
+}
+function closeDictMenu() {
+  if (!els.dictMenu) return;
+  if (window.Motion) Motion.popOut(els.dictMenu, { y: 12 });
+  else els.dictMenu.hidden = true;
+}
+/** 辞書メニューが出ているか（しまう途中は出ていない扱い。押し直したら出し直す） */
+function dictMenuOpen() {
+  return !!els.dictMenu && (window.Motion ? Motion.popIsOpen(els.dictMenu) : !els.dictMenu.hidden);
+}
+
+/**
+ * いまの自動辞書を、名前を付けて自作辞書として保存する (v0.20.0)
+ *
+ * 自動で育った語をその場限りで捨てず、次の録音でも使えるようにする。
+ * 手入力の語も一緒に入れる（どちらも「この分野で出る語」なので）。
+ */
+async function saveAutoAsDict() {
+  const s = getActiveSession();
+  if (!s) return;
+  const terms = mergeTermSources({
+    manual: splitTerms(s.context?.terms),
+    auto: s.autoContext?.terms || [],
+  }).terms;
+  if (!terms.length) {
+    alert('保存できる語がまだありません。\n録音するか「よく出る語」に書き足してください。');
+    return;
+  }
+  const suggested = (s.autoContext?.topicPath || [])[0] || s.context?.field || s.title || '新しい辞書';
+  const name = prompt(`辞書の名前（${terms.length}語を保存します）`, String(suggested).slice(0, 20));
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+
+  const dicts = state.settings.termDicts || (state.settings.termDicts = []);
+  const existing = dicts.find(d => d.name === trimmed);
+  if (existing) {
+    // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+    if (!(await confirmDialog({ title: `「${trimmed}」は既にあります。語を足しますか？`, message: '今ある語は消えません。', ok: '語を足す' }))) return;
+    // 既存に足す。重複は mergeTermSources が落とす
+    existing.terms = mergeTermSources({ manual: existing.terms, dict: terms }).terms;
+  } else {
+    dicts.push({ id: 'user:' + Date.now().toString(36), name: trimmed, terms });
+  }
+  saveSettings();
+  // 保存した辞書をこのタブに適用しておく（保存したのに効かない、を避ける）
+  const saved = dicts.find(d => d.name === trimmed);
+  if (saved && !(s.context.dictIds || []).includes(saved.id)) {
+    s.context.dictIds = (s.context.dictIds || []).concat(saved.id);
+    persistSessions();
+  }
+  renderDictBar();
+  renderDictMenu();
+  renderContextDicts();
+  diagLog.info(`辞書「${trimmed}」を保存しました（${terms.length}語）`);
+}
+
+/** 文脈モーダル内の辞書一覧（管理用） */
+function renderContextDicts() {
+  const box = document.getElementById('context-dict-list');
+  if (!box) return;
+  const ids = getActiveDictIds();
+  const user = state.settings.termDicts || [];
+  box.innerHTML = '';
+  const rows = TERM_PRESETS.map(d => [d, false]).concat(user.map(d => [d, true]));
+  for (const [d, isUser] of rows) {
+    const row = document.createElement('div');
+    row.className = 'context-dict-row';
+    const on = ids.includes(d.id);
+    // v0.24.102: 名前・語の数・トグル（右）の順に（設定と同じ形。前はトグルが左で小さかった）
+    row.innerHTML = `<label class="context-dict-name"><span class="context-dict-label"></span>`
+      + `<span class="field-hint context-dict-count"></span><input type="checkbox" ${on ? 'checked' : ''}></label>`;
+    row.querySelector('.context-dict-label').textContent = d.name + (isUser ? '（自作）' : '');
+    row.querySelector('.context-dict-count').textContent = `${(d.terms || []).length}語`;
+    row.querySelector('input').addEventListener('change', () => {
+      toggleDict(d.id);
+      renderContextDicts();
+    });
+    if (isUser) {
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'pane-btn';
+      del.textContent = '削除';
+      del.addEventListener('click', async () => {
+        // v0.24.102: ブラウザの confirm をやめ、自前の確認の小窓に
+        if (!(await confirmDialog({ title: `自作辞書「${d.name}」を削除しますか？`, message: 'この辞書の語の一覧が消えます。', ok: '削除', destructive: true }))) return;
+        state.settings.termDicts = user.filter(x => x.id !== d.id);
+        saveSettings();
+        renderContextDicts();
+        renderDictBar();
+      });
+      row.appendChild(del);
+    }
+    box.appendChild(row);
+  }
+}
+
+function getSessionContextForAi() {
+  const s = getActiveSession();
+  const c = s?.context;
+  if (!c) return undefined;
+
+  // v0.20.0: 手入力 → 辞書 → 自動 の順で合成する（優先順位は mergeTermSources 参照）
+  const merged = mergeTermSources({
+    manual: splitTerms(c.terms),
+    dict: collectDictTerms(c.dictIds, state.settings.termDicts),
+    auto: s.autoContext?.terms || [],
+  });
+  const terms = merged.terms;
+
+  const ctx = {
+    field: (c.field || '').trim(),
+    speakers: (c.speakers || '').trim(),
+    terms: terms.join('、'),
+    topicPath: s.autoContext?.topicPath || [],
+    flow: s.autoContext?.flow || '',
+  };
+  const has = ctx.field || ctx.speakers || ctx.terms || ctx.topicPath.length || ctx.flow;
+  return has ? ctx : undefined;
+}
+
+/* ───────── 文脈の自動抽出 (v0.16.1) ─────────
+ *
+ * メモが空でも文脈を効かせるため、記録が溜まってきたら語彙と議題を拾い直す。
+ * 録音中に一定間隔で走らせ、停止時にも1回走らせる。
+ */
+
+const CONTEXT_EXTRACT_INTERVAL_MS = 120 * 1000;   // 2分ごと
+let contextExtractInFlight = false;
+
+/** メモの見出し・箇条書きだけを取り出す（抽出の手がかりとして最優先で渡す） */
+function getMemoOutlineText() {
+  const lines = [];
+  els.memo.querySelectorAll('h1, h2, h3, li, .task-item').forEach(el => {
+    const t = (el.innerText || '').trim();
+    if (t && t.length <= 60) lines.push(t);
+  });
+  return lines.slice(0, 40).join('\n');
+}
+
+/**
+ * 記録から語彙と議題を拾って session.autoContext を更新する。
+ * @param {object} [opts]
+ * @param {boolean} [opts.force] - 間隔を無視して実行（録音停止時など）
+ */
+async function refreshAutoContext(opts = {}) {
+  if (contextExtractInFlight) return;
+  if (!liveRefineReady()) return;   // v0.24.55: 連携がオンなら Claude が拾うので、Gemini のキーが無くてもよい
+
+  const session = getActiveSession();
+  if (!session) return;
+  const auto = session.autoContext || (session.autoContext = { terms: [], topicPath: [], flow: '', updatedAt: 0 });
+  if (!opts.force && Date.now() - (auto.updatedAt || 0) < CONTEXT_EXTRACT_INTERVAL_MS) return;
+
+  // 末尾側だけ渡す。全文を毎回送ると長くなるうえ、いま何の話かは直近で決まる
+  const full = getConfirmedText();
+  if (!full || full.length < 200) return;
+  const tail = full.slice(-4000);
+
+  contextExtractInFlight = true;
+  try {
+    const out = await extractContextWithGemini({
+      apiKey: geminiKey(),
+      transcript: tail,
+      memoOutline: getMemoOutlineText(),
+      knownTerms: splitTerms(session.context?.terms),
+    });
+    // 非同期の間にセッションが閉じられている可能性がある
+    const still = state.sessions.find(x => x.id === session.id);
+    if (!still) return;
+    still.autoContext = {
+      terms: out.terms,
+      topicPath: out.topicPath,
+      flow: out.flow,
+      updatedAt: Date.now(),
+    };
+    persistSessions();
+    diagLog.info(`文脈を更新: 語${out.terms.length}件 / 議題「${out.topicPath.join(' > ') || '—'}」`);
+    renderDictBar();   // v0.20.0: 自動辞書が育ったらフッターにも出す
+    // 文脈モーダルを開いていたら表示も更新する
+    if (els.contextModal && !els.contextModal.classList.contains('hidden')) renderAutoContext(still);
+  } catch (e) {
+    console.warn('[context] 自動抽出に失敗:', e.message);
+  } finally {
+    contextExtractInFlight = false;
+  }
+}
+
+/** 文脈モーダルの「自動で拾った内容」欄を描く */
+function renderAutoContext(session) {
+  if (!els.autoContextBox) return;
+  const a = session?.autoContext;
+  const hasAny = a && (a.terms?.length || a.topicPath?.length || a.flow);
+  if (!hasAny) {
+    els.autoContextBox.textContent = '（まだありません。録音が2〜3分進むと自動で埋まります）';
+    els.btnContextAdoptAuto.disabled = true;
+    return;
+  }
+  const lines = [];
+  if (a.topicPath?.length) lines.push(`いまの議題: ${a.topicPath.join(' > ')}`);
+  if (a.flow) lines.push(`流れ: ${a.flow}`);
+  if (a.terms?.length) lines.push(`拾った語: ${a.terms.join('、')}`);
+  els.autoContextBox.textContent = lines.join('\n');
+  els.btnContextAdoptAuto.disabled = !a.terms?.length;
+}
+
+/** 自動で拾った語を、手入力の欄に移す（以後そちらが最終権限になる） */
+function adoptAutoTerms() {
+  const s = getActiveSession();
+  const auto = s?.autoContext?.terms || [];
+  if (!auto.length) return;
+  const existing = splitTerms(els.inputContextTerms.value);
+  const added = auto.filter(t => !existing.includes(t));
+  els.inputContextTerms.value = existing.concat(added).join('\n');
+  els.contextMemoResult.textContent = added.length
+    ? `自動で拾った語から ${added.length}件を追加しました。ここで直せます`
+    : 'すでにすべて登録済みでした';
+  els.contextMemoResult.className = 'field-hint notion-test-result ' + (added.length ? 'is-ok' : 'is-note');
+}
+
+function openContextModal() {
+  const s = getActiveSession();
+  if (!s) return;
+  if (!s.context) s.context = { field: '', speakers: '', terms: '' };
+  els.inputContextField.value = s.context.field || '';
+  els.inputContextSpeakers.value = s.context.speakers || '';
+  els.inputContextTerms.value = s.context.terms || '';
+  els.inputContextDefault.checked = false;
+  els.contextMemoResult.textContent = '';
+  els.contextMemoResult.className = 'field-hint';
+  renderAutoContext(s);
+  renderContextDicts();          // v0.20.0
+  els.contextModal.classList.remove('hidden');
+  els.inputContextField.focus();
+}
+
+function closeContextModal() {
+  els.contextModal.classList.add('hidden');
+  renderDictBar();   // v0.20.0: 手入力を直したらフッターの表示も追随させる
+}
+
+function saveContextModal() {
+  const s = getActiveSession();
+  if (!s) return closeContextModal();
+  s.context = {
+    field: els.inputContextField.value.trim(),
+    speakers: els.inputContextSpeakers.value.trim(),
+    terms: els.inputContextTerms.value.trim(),
+  };
+  if (els.inputContextDefault.checked) {
+    state.settings.defaultContextField = s.context.field;
+    state.settings.defaultContextSpeakers = s.context.speakers;
+    state.settings.defaultContextTerms = s.context.terms;
+    saveSettings();
+  }
+  persistSessions();
+  closeContextModal();
+}
+
+/**
+ * メモペインから語彙を拾う。
+ * 見出し・箇条書き・チェック項目の「行」を候補にして、既存の語と重複しないものを足す。
+ * 文章まるごとではなく短い語だけを拾う（長文を語彙として渡しても効かないうえ、
+ * 台本として読まれる危険が増すため）。
+ */
+function importContextFromMemo() {
+  const lines = [];
+  els.memo.querySelectorAll('h1, h2, h3, li, .task-item').forEach(el => {
+    const t = (el.innerText || '').trim();
+    if (t) lines.push(t);
+  });
+
+  // 1行が長いものは語彙ではなく文なので除く。記号だけの行も捨てる
+  const picked = [];
+  for (const raw of lines) {
+    const t = raw.replace(/\s+/g, ' ').trim();
+    if (!t || t.length > 30) continue;
+    if (!/[\u3040-\u30ff\u4e00-\u9fff a-zA-Z0-9]/.test(t)) continue;
+    if (!picked.includes(t)) picked.push(t);
+  }
+
+  if (picked.length === 0) {
+    els.contextMemoResult.textContent = 'メモに拾える見出し・箇条書きがありませんでした';
+    els.contextMemoResult.className = 'field-hint notion-test-result is-ng';
+    return;
+  }
+
+  const existing = els.inputContextTerms.value.split(/[\n,、]/).map(x => x.trim()).filter(Boolean);
+  const added = picked.filter(t => !existing.includes(t));
+  els.inputContextTerms.value = existing.concat(added).join('\n');
+  els.contextMemoResult.textContent = added.length
+    ? `${added.length}件を追加しました（重複は除いています）`
+    : 'メモの内容はすべて登録済みでした';
+  els.contextMemoResult.className = 'field-hint notion-test-result ' + (added.length ? 'is-ok' : 'is-note');
+}
+
 /* ───────── Notion 連携の設定 UI (v0.14.1) ───────── */
 
 /** 接続テスト欄の色を design-system の変数で塗り分ける（style.css の .notion-test-result） */
@@ -4224,7 +8733,14 @@ function setNotionTestResult(msg, kind = 'note') {
 function syncNotionSettingsUi() {
   if (!els.inputNotionToken) return;
   els.inputNotionToken.value = state.settings.notionToken || '';
-  setNotionTestResult('');
+  if (els.inputNotionEnabled) els.inputNotionEnabled.checked = !!state.settings.notionEnabled;
+  // v0.24.142: 録音を止めたら自動で保存
+  notionAutoDestWorking = state.settings.notionAutoDest || null;
+  if (els.inputNotionAutoSave) els.inputNotionAutoSave.checked = !!state.settings.notionAutoSave;
+  renderNotionAutoTargetOptions(state.settings.notionAutoTarget || 'last');
+  if (els.inputNotionAutoClose) els.inputNotionAutoClose.checked = !!state.settings.notionAutoCloseTab;
+  if (els.inputNotionAutoKeepAudio) els.inputNotionAutoKeepAudio.checked = !!state.settings.notionAutoKeepAudio;
+  revealSettingRow(document.getElementById('notion-auto-fields'), !!state.settings.notionAutoSave, false);
 
   if (els.notionLastTarget) {
     const t = state.settings.notionLastDataSourceTitle;
@@ -4238,37 +8754,57 @@ function syncNotionSettingsUi() {
   // HTML 版では api.notion.com が CORS で叩けない。設定はできるが使えない旨を出す。
   if (!notionIsAvailable()) {
     setNotionTestResult('HTML版では利用できません（Chrome拡張版で使えます）', 'note');
-    if (els.btnNotionTest) els.btnNotionTest.disabled = true;
-  } else if (els.btnNotionTest) {
-    els.btnNotionTest.disabled = false;
+  } else if (els.inputNotionEnabled && !els.inputNotionEnabled.checked) {
+    setNotionTestResult('');
   }
+  // オンのときの状態は、立ち上げたときの自動の確認（またはオンにしたとき）の結果をそのまま残す
 }
 
-async function testNotionConnection() {
-  const token = els.inputNotionToken.value.trim();
-  if (!token) {
-    setNotionTestResult('トークンを入力してください', 'ng');
+/**
+ * Notion に繋がるか確かめて、「Notion 連携」トグルの横に出す
+ *
+ * v0.24.50: 「接続テスト」ボタンをやめ、オンにしたとき・アクセストークンを入れ直したとき・
+ * アプリを立ち上げたとき（連携がオンなら）に自動で確かめる（Claude Code 連携と同じ形。やっさんの指定）。
+ * @param {string} [tokenArg] 省略時は設定画面の入力欄の値
+ */
+let notionTestSeq = 0;   // v0.24.50: いちばん新しい確認の番号。古い確認の結果では上書きしない
+async function testNotionConnection(tokenArg) {
+  const my = ++notionTestSeq;
+  if (!notionIsAvailable()) {
+    setNotionTestResult('HTML版では利用できません（Chrome拡張版で使えます）', 'note');
     return;
   }
-  els.btnNotionTest.disabled = true;
+  const token = (typeof tokenArg === 'string' ? tokenArg : (els.inputNotionToken.value || '')).trim();
+  if (!token) {
+    setNotionTestResult('アクセストークンを入力してください', 'ng');
+    return;
+  }
   setNotionTestResult('確認中…', 'note');
   try {
     const name = await notionTestConnection(token);
     const list = await notionListDataSources(token);
+    // 確かめている間にオフにされた・入れ直された（もっと新しい確認が始まった）なら、何も書かない。
+    // 書くと、消したはずの表示があとから戻ってくる（テストで見つけた）
+    if (my !== notionTestSeq) return;
     if (list.length === 0) {
       setNotionTestResult(`${name} に接続できましたが、保存先に使えるデータベースが 0 件です。Notion 側でデータベースを「コネクト」してください`, 'ng');
     } else {
       setNotionTestResult(`OK: ${name} — 保存先に使えるデータベース ${list.length} 件`, 'ok');
     }
   } catch (e) {
+    if (my !== notionTestSeq) return;
     setNotionTestResult('NG: ' + e.message, 'ng');
     console.warn('[notion] 接続テスト失敗:', e.message); // console.warn は diagLog に記録される
-  } finally {
-    els.btnNotionTest.disabled = false;
   }
 }
 
-function forgetNotionTarget() {
+async function forgetNotionTarget() {
+  // v0.24.94: 赤い丸の × にしたので、押したら一度確かめる（やっさんの指定）
+  if (!(await confirmDialog({
+    title: '前回の保存先を忘れますか？',
+    message: '次に Notion へ保存するとき、保存先を選び直します。Notion のノートは消えません。',
+    ok: '忘れる', destructive: true,
+  }))) return;
   state.settings.notionLastDataSourceId = '';
   state.settings.notionLastDataSourceTitle = '';
   state.settings.notionLastDatePropName = '';
@@ -4280,7 +8816,12 @@ function openSettings() {
   els.inputApiKey.value = state.settings.apiKey;
   syncNotionSettingsUi();
   els.inputSilenceSec.value = state.settings.silenceSec;
+  if (els.inputMidConsolidateSec) els.inputMidConsolidateSec.value = midConsolidateMs() / 1000;   // v0.24.51
+  if (els.inputLiveSummary) els.inputLiveSummary.checked = !!state.settings.liveSummary;
+  if (els.inputClaudeFallback) els.inputClaudeFallback.checked = !!state.settings.claudeFallbackGemini;   // v0.24.58
+  if (els.inputLiveSummaryMin) els.inputLiveSummaryMin.value = clampLiveSummaryMinutes(state.settings.liveSummaryMin);
   els.inputAiEnabled.checked = state.settings.aiEnabled;
+  if (els.inputRefineWithWs) els.inputRefineWithWs.checked = !!state.settings.refineWithWebSpeech;   // v0.24.144
   els.inputAutoStop.checked = state.settings.autoStopEnabled;
   els.inputAutoStopSec.value = state.settings.autoStopSec;
   els.inputAutoSummarize.checked = state.settings.autoSummarize;
@@ -4295,7 +8836,35 @@ function openSettings() {
     els.modeWebSpeech.checked = true;
   }
   els.inputChunkSec.value = state.settings.audioChunkSec || 12;
+  if (els.inputGroqKey) els.inputGroqKey.value = state.settings.groqApiKey || '';
+  // v0.24.92: 使う AI の表は、保存するまで手元の写しで動かす
+  aiPickWorking = { stt: state.settings.transcribeEngine || 'groq', post: state.settings.postEngine || 'claude' };
+  if (els.inputGeminiEnabled) els.inputGeminiEnabled.checked = !!state.settings.geminiEnabled;   // v0.24.88
+  if (els.inputGroqEnabled) els.inputGroqEnabled.checked = !!state.settings.groqEnabled;
+  if (els.inputSilenceCut) els.inputSilenceCut.checked = state.settings.audioSilenceCut !== false;
+  if (els.inputChunkMaxSec) els.inputChunkMaxSec.value = state.settings.audioChunkMaxSec || 20;
+  if (els.inputAudioBitrate) els.inputAudioBitrate.value = String(state.settings.audioBitrate || 64000);
+  if (els.inputKeepRecording) els.inputKeepRecording.checked = !!state.settings.audioKeepRecording;
+  if (els.inputSumadoMeter) els.inputSumadoMeter.checked = !!state.settings.sumadoIslandMeter;
+  if (els.inputAudioRetention) els.inputAudioRetention.value = state.settings.audioRetention || 'close';
+  if (els.inputClaudeCode) els.inputClaudeCode.checked = !!state.settings.claudeCode;              // v0.24.39
+  if (els.inputClaudeBridge) els.inputClaudeBridge.checked = !!state.settings.useClaudeBridge;   // v0.24.0
+  // v0.24.22: Claude 連携のチェックを入れた**あと**で見る。先に見ると、連携オフと読み違えて
+  // リアルタイム要約のチェックを外してしまい、そのまま保存するとオフになる（テストで見つけた）
+  applyLiveSummaryAvailability(/* animated */ false);   // v0.24.77: 開いた直後は動かさない
+  refreshAudioUsage();
+  if (els.inputGeminiLiveDisplay) els.inputGeminiLiveDisplay.checked = state.settings.geminiLiveDisplay !== false;
   if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = state.settings.audioMinChunkBytes ?? 400;
+  {
+    // 選択肢に無い値（古い版で消した選択肢など）なら既定にする
+    const pick = (sel, list, v, d) => { if (sel) sel.value = (window.ConfirmFx && ConfirmFx[list].some((o) => o.value === v)) ? v : d; };
+    pick(els.inputConfirmFx, 'CONFIRM_FX', state.settings.confirmEffect, DEFAULT_SETTINGS.confirmEffect);
+    pick(els.inputDraftFx, 'DRAFT_FX', state.settings.draftEffect, DEFAULT_SETTINGS.draftEffect);
+    pick(els.inputDraftStyle, 'DRAFT_STYLE', state.settings.draftStyle, DEFAULT_SETTINGS.draftStyle);
+    pick(els.inputProcFx, 'CONFIRM_FX', state.settings.procEffect, DEFAULT_SETTINGS.procEffect);
+    pick(els.inputProcStyle, 'DRAFT_STYLE', state.settings.procStyle, DEFAULT_SETTINGS.procStyle);
+    pick(els.inputFinalStyle, 'DRAFT_STYLE', state.settings.finalStyle, DEFAULT_SETTINGS.finalStyle);
+  }
   if (els.inputWsCommitSec) {
     // v0.13.29: localStorage に古い値（3/4/5 等、v0.13.26 で削除した選択肢）が
     // 残っていると、UI のセレクトが空欄表示になる（option に value マッチがない）。
@@ -4323,6 +8892,9 @@ function openSettings() {
   populateAudioDevices();
   applyGeminiOnlyVisibility(/* animated */ false);
   applyWebSpeechOnlyVisibility(/* animated */ false);
+  applyAiSettingsVisibility(/* animated */ false);
+  renderAiTable();   // v0.24.92
+  renderUsageCard();   // v0.24.104
   els.fontTranscript.value = state.settings.transcriptFont;
   els.sizeTranscript.value = state.settings.transcriptSize;
   els.fontMemo.value = state.settings.memoFont;
@@ -4345,8 +8917,25 @@ function closeSettings() {
 function saveSettingsFromForm() {
   state.settings.apiKey = els.inputApiKey.value.trim();
   if (els.inputNotionToken) state.settings.notionToken = els.inputNotionToken.value.trim();
+  if (els.inputNotionEnabled) state.settings.notionEnabled = els.inputNotionEnabled.checked;   // v0.24.50
+  // v0.24.142: 録音を止めたら自動で保存
+  if (els.inputNotionAutoSave) state.settings.notionAutoSave = els.inputNotionAutoSave.checked;
+  if (els.inputNotionAutoTarget) state.settings.notionAutoTarget = els.inputNotionAutoTarget.value === 'fixed' && notionAutoDestWorking ? 'fixed' : 'last';
+  state.settings.notionAutoDest = notionAutoDestWorking;
+  if (els.inputNotionAutoClose) state.settings.notionAutoCloseTab = els.inputNotionAutoClose.checked;
+  if (els.inputNotionAutoKeepAudio) state.settings.notionAutoKeepAudio = els.inputNotionAutoKeepAudio.checked;
+  updateActionButtons();   // v0.24.50: Notion 連携のオン/オフで保存ボタンの押せる/押せないが変わる
   state.settings.silenceSec = Math.max(1, Math.min(30, Number(els.inputSilenceSec.value) || 3));
+  if (els.inputMidConsolidateSec) {
+    state.settings.midConsolidateSec = Math.max(30, Math.min(1800, Number(els.inputMidConsolidateSec.value) || 300));
+  }
+  // v0.24.39: 「Claude Code」がオフで押せないときは、前の値を残す（オンに戻したら元どおり）
+  if (els.inputLiveSummary && !els.inputLiveSummary.disabled) state.settings.liveSummary = els.inputLiveSummary.checked;
+  if (els.inputClaudeFallback) state.settings.claudeFallbackGemini = els.inputClaudeFallback.checked;   // v0.24.58
+  if (els.inputLiveSummaryMin) state.settings.liveSummaryMin = clampLiveSummaryMinutes(els.inputLiveSummaryMin.value);
+  applyLiveSummaryTab();   // v0.24.25: オン/オフでタブを出し入れする
   state.settings.aiEnabled = els.inputAiEnabled.checked;
+  if (els.inputRefineWithWs) state.settings.refineWithWebSpeech = els.inputRefineWithWs.checked;   // v0.24.144
   state.settings.autoStopEnabled = els.inputAutoStop.checked;
   state.settings.autoStopSec = Math.max(30, Math.min(600, Number(els.inputAutoStopSec.value) || 120));
   state.settings.autoSummarize = els.inputAutoSummarize.checked;
@@ -4354,9 +8943,57 @@ function saveSettingsFromForm() {
     els.summaryDetailLow.checked ? 'low' :
     els.summaryDetailHigh.checked ? 'high' : 'medium';
   state.settings.inputMode = els.modeGemini.checked ? 'gemini-audio' : 'web-speech';
+  if (els.inputGroqKey) state.settings.groqApiKey = els.inputGroqKey.value.trim();
+  if (aiPickWorking) {   // v0.24.92: 使う AI の表
+    state.settings.transcribeEngine = aiPickWorking.stt;
+    state.settings.postEngine = aiPickWorking.post;
+  }
+  if (els.inputGeminiEnabled) state.settings.geminiEnabled = els.inputGeminiEnabled.checked;   // v0.24.88
+  if (els.inputGroqEnabled) state.settings.groqEnabled = els.inputGroqEnabled.checked;
   state.settings.audioDeviceId = els.inputAudioDevice ? els.inputAudioDevice.value : '';
   state.settings.audioChunkSec = Math.max(5, Math.min(60, Number(els.inputChunkSec.value) || 12));
+  if (els.inputSilenceCut) state.settings.audioSilenceCut = els.inputSilenceCut.checked;
+  if (els.inputAudioBitrate) {
+    const br = Number(els.inputAudioBitrate.value);
+    state.settings.audioBitrate = Number.isFinite(br) && br >= 16000 ? br : 64000;
+  }
+  if (els.inputKeepRecording) {
+    const wasOn = !!state.settings.audioKeepRecording;
+    state.settings.audioKeepRecording = els.inputKeepRecording.checked;
+    // オフに切り替えたら、残っている分をその場で消す（次の起動を待たない）
+    if (wasOn && !state.settings.audioKeepRecording) {
+      audioStoreClearAll({ keep: pinnedAudioIds() })   // v0.24.103: 「残す」にした録音は残す
+        .then(n => { if (n > 0) diagLog.info(`保持をオフにしたので音声 ${n} 件を消しました`); })
+        .catch(() => {})
+        .finally(refreshAudioUsage);
+    }
+  }
+  if (els.inputAudioRetention) state.settings.audioRetention = els.inputAudioRetention.value || 'close';
+  if (els.inputSumadoMeter) state.settings.sumadoIslandMeter = els.inputSumadoMeter.checked;
+  // v0.24.0: Claude Code 連携。gemini.js 側はこの値を claude-bridge.js 経由で見る
+  if (els.inputClaudeCode) {
+    state.settings.claudeCode = els.inputClaudeCode.checked;   // v0.24.39
+    // v0.24.44: 「一部を Claude Code で処理する」は画面から外し、連携と同時に有効にした（やっさんの指定）。
+    // 保存のキー useClaudeBridge は残し、連携と同じ値にそろえておく（前の版に戻しても食い違わないように）
+    state.settings.useClaudeBridge = state.settings.claudeCode;
+    applyClaudeBridgeSetting();
+  }
+  if (els.inputChunkMaxSec) {
+    // 最長は最短より短くできない（短いと無音を探す余地が消える）
+    state.settings.audioChunkMaxSec = Math.max(
+      state.settings.audioChunkSec + 2,
+      Math.min(90, Number(els.inputChunkMaxSec.value) || 20),
+    );
+  }
+  if (els.inputGeminiLiveDisplay) state.settings.geminiLiveDisplay = els.inputGeminiLiveDisplay.checked;
   if (els.inputMinChunkBytes) state.settings.audioMinChunkBytes = Math.max(100, Math.min(5000, Number(els.inputMinChunkBytes.value) || 400));
+  if (els.inputConfirmFx) state.settings.confirmEffect = els.inputConfirmFx.value || 'none';
+  if (els.inputDraftFx) state.settings.draftEffect = els.inputDraftFx.value || 'none';
+  if (els.inputDraftStyle) state.settings.draftStyle = els.inputDraftStyle.value || 'none';
+  if (els.inputProcFx) state.settings.procEffect = els.inputProcFx.value || 'none';
+  if (els.inputProcStyle) state.settings.procStyle = els.inputProcStyle.value || 'none';
+  if (els.inputFinalStyle) state.settings.finalStyle = els.inputFinalStyle.value || 'none';
+  applyStageStyles();
   if (els.inputWsCommitSec) {
     const newSec = Math.max(0, Math.min(20, Number(els.inputWsCommitSec.value) || 0));
     if (newSec !== state.settings.webspeechCommitSec) {
@@ -4381,7 +9018,9 @@ function saveSettingsFromForm() {
   state.settings.memoSize = Math.max(10, Math.min(36, Number(els.sizeMemo.value) || 15));
   state.settings.summaryFont = els.fontSummary.value;
   state.settings.summarySize = Math.max(10, Math.min(36, Number(els.sizeSummary.value) || 15));
-  if (settingsWorkingOrder && settingsWorkingOrder.length === 3) {
+  // v0.24.25: 以前は「3つのとき」と決め打ちしていて、質問タブを足して4つになってから
+  // 設定画面での並べ替えが保存されていなかった。いまのタブの数と同じなら保存する
+  if (settingsWorkingOrder && settingsWorkingOrder.length === state.settings.paneOrder.length) {
     state.settings.paneOrder = settingsWorkingOrder.slice();
   }
   saveSettings();
@@ -4400,13 +9039,35 @@ function switchInnerPane(paneId) {
   const wasChat = document.body.classList.contains('chat-active');
   const willBeChat = paneId === 'pane-chat';
   if (wasChat !== willBeChat) {
-    const zb = els.zoomBar;
-    if (zb) {
-      zb.classList.add('fading');
+    const bars = [els.zoomBar, els.dictBar].filter(Boolean);
+    if (bars.length && window.Motion) {
+      // v0.24.81: 薄くする・戻すをばねで（前は CSS の transition の ease 0.5 秒）。透明になったところで場所を入れ替える
+      const token = {};
+      switchInnerPane.__barsToken = token;
+      // 札には、指を乗せたときに濃くする transition（opacity）がある。ばねで動かしている間は止める
+      // （止めないと、ばねが毎フレーム書く濃さを CSS がさらに遅らせる）
+      bars.forEach((b) => { b.style.transition = 'none'; });
+      Promise.all(bars.map((b) => Motion.animate(b, { opacity: 0 }, { spring: Motion.SPRINGS.fade }))).then(() => {
+        if (switchInnerPane.__barsToken !== token) return;   // その間にまた切り替えた
+        document.body.classList.toggle('chat-active', willBeChat);
+        for (const b of bars) {
+          // 戻す先は CSS の濃さ（ふだんは薄め・辞書を使っているときは濃い）。書いた値を外して測る
+          Motion.clear(b);
+          const to = parseFloat(getComputedStyle(b).opacity) || 1;
+          Motion.set(b, { opacity: 0 });
+          Motion.animate(b, { opacity: to }, { spring: Motion.SPRINGS.fade }).then((d) => {
+            if (!d) return;
+            Motion.clear(b);
+            b.style.transition = '';
+          });
+        }
+      });
+    } else if (bars.length) {
+      bars.forEach(b => b.classList.add('fading'));
       // 0.5s フェード: 480ms で透明、位置切替、480ms でフェードイン
       setTimeout(() => {
         document.body.classList.toggle('chat-active', willBeChat);
-        zb.classList.remove('fading');
+        bars.forEach(b => b.classList.remove('fading'));
       }, 480);
     } else {
       document.body.classList.toggle('chat-active', willBeChat);
@@ -4425,14 +9086,20 @@ function switchInnerPane(paneId) {
   if (typeof updateInnerTabsIndicator === 'function') updateInnerTabsIndicator();
   // 検索バー等のリスナーに通知
   document.dispatchEvent(new CustomEvent('dictation:paneSwitched', { detail: { paneId } }));
-  const panes = [els.paneTranscript, els.paneMemo, els.paneSummary, els.paneChat];
+  const panes = [els.paneTranscript, els.paneMemo, els.paneSummary, els.paneLive, els.paneChat].filter(Boolean);
+  const oldPane = panes.find((p) => p.classList.contains('active'));
   panes.forEach(p => {
     p.classList.toggle('active', p.id === paneId);
     p.classList.remove('enter-from-right', 'enter-from-left');
   });
 
   const newPane = document.getElementById(paneId);
-  if (newPane && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
+  // v0.24.67: 横に送る（SUMADO の仕様書 2.2「ページ・タブの切り替え：横に送る（page）」）。
+  // 前は入ってくる側だけ keyframes（ease）で動き、出ていく側は一瞬で消えていた（TODO の 8）。
+  // 出ていく側は、動き終わるまで重ねて描いておく（押せない・読み上げない）。その間も state.activePane は新しいほう
+  if (window.Motion && newPane && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
+    slideInnerPanes(oldPane, newPane, direction);
+  } else if (newPane && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
     // reflow で animation を確実に再発火
     void newPane.offsetWidth;
     newPane.classList.add(direction === 'right' ? 'enter-from-right' : 'enter-from-left');
@@ -4442,11 +9109,46 @@ function switchInnerPane(paneId) {
   }
 
   if (paneId === 'pane-summary') {
-    els.summaryEmpty.hidden = !!getSummaryText();
+    showHint(els.summaryEmpty, !getSummaryText(), false);   // タブの切り替え（ペインごと横に送る）では動かさない
+  }
+  if (paneId === 'pane-live' && els.liveSummaryEmpty) {
+    showHint(els.liveSummaryEmpty, !elementToPlainText(els.liveSummary).trim(), false);
   }
   if (paneId === 'pane-chat') {
     setTimeout(() => { els.chatBody.scrollTop = els.chatBody.scrollHeight; }, 0);
   }
+}
+
+/**
+ * 中のタブの切り替えで、ペインを横に送る (v0.24.67)
+ * 出ていくほうは .pane-leaving（重ねて描くだけ・押せない）にして、反対へ少し動きながら消える。
+ * 入ってくるほうは、送る向きから少し動きながら出る。続けて切り替えたら、いまの位置から続ける
+ */
+function slideInnerPanes(oldPane, newPane, direction) {
+  const S = Motion.SPRINGS;
+  const w = (els.mainArea || newPane.parentElement || document.body).clientWidth || 400;
+  const dist = Math.min(120, w * 0.3);
+  const sign = direction === 'right' ? 1 : -1;
+  // 出ていく途中だったものが、また入ってくる（すばやく行ったり来たり）ときは、その場から戻す
+  if (newPane.classList.contains('pane-leaving')) {
+    newPane.classList.remove('pane-leaving');
+    newPane.__leaving = null;
+  } else {
+    Motion.set(newPane, { x: sign * dist, opacity: 0 });
+  }
+  Motion.animate(newPane, { x: 0 }, { spring: S.page });
+  Motion.animate(newPane, { opacity: 1 }, { spring: S.fade }).then((d) => { if (d) Motion.clear(newPane); });
+  if (!oldPane || oldPane === newPane) return;
+  oldPane.classList.add('pane-leaving');
+  const token = {};
+  oldPane.__leaving = token;
+  Motion.animate(oldPane, { x: -sign * dist }, { spring: S.page });
+  Motion.animate(oldPane, { opacity: 0 }, { spring: S.fade }).then((d) => {
+    if (!d || oldPane.__leaving !== token) return;   // 途中で戻ってきた
+    oldPane.__leaving = null;
+    oldPane.classList.remove('pane-leaving');
+    Motion.clear(oldPane);
+  });
 }
 
 /* ───────── Sessions (outer tabs) ───────── */
@@ -4461,14 +9163,36 @@ function initSessions() {
   }
   // Migrate legacy format (session.html → session.transcript)
   for (const s of state.sessions) {
+    // v0.24.70: v0.24.60〜69 で、ばねの途中の値が付いたまま保存された段落がありうる。読むときに取り除く
+    for (const k of ['transcript', 'memo', 'summary', 'liveSummary']) {
+      if (typeof s[k] === 'string') s[k] = savableHtml(s[k]);
+    }
     if (s.html !== undefined && s.transcript === undefined) {
       s.transcript = s.html;
       delete s.html;
     }
     if (s.memo === undefined) s.memo = '';
     if (s.summary === undefined) s.summary = '';
+    /* v0.24.25: リアルタイム要約を要約タブから自分のタブへ移す。
+     * v0.24.22〜24 は目次付きの要約を**要約タブに**書いていた。目次の印
+     * （class="live-summary-toc"。linkLiveSummaryToc が付ける）があるものだけを移す。
+     * 普通の要約には印が無いので触らない。移すだけで消さない。
+     * ※ class="live-summary" は外側の入れ物に付く印で、**保存される HTML には入っていない**
+     *   （最初これで判定して、テストも実物と違う形で通っていた）*/
+    if (s.liveSummary === undefined) {
+      s.liveSummary = '';
+      if (/class="live-summary-toc"/.test(s.summary || '')) {
+        s.liveSummary = s.summary;
+        s.summary = '';
+      }
+    }
     if (s.transcript === undefined) s.transcript = '';
     if (!Array.isArray(s.chat)) s.chat = [];
+    // v0.16.0: 文脈が無い古いセッションに空の器を足す
+    if (!s.context || typeof s.context !== 'object') s.context = { field: '', speakers: '', terms: '' };
+    if (!s.autoContext || typeof s.autoContext !== 'object') {
+      s.autoContext = { terms: [], topicPath: [], flow: '', updatedAt: 0 };
+    }
   }
   state.activeId = localStorage.getItem(ACTIVE_TAB_KEY);
   if (!Array.isArray(state.sessions) || state.sessions.length === 0) {
@@ -4480,16 +9204,39 @@ function initSessions() {
   }
 }
 
+/**
+ * セッションを localStorage に保存する
+ *
+ * v0.21.2: 失敗を黙らなくした。ここは全セッションを1つのキーに入れているので、
+ * 容量超過で落ちると**その回の変更が丸ごと消える**。console にしか出していないと、
+ * 利用者は保存できていないことに気づかないまま書き続けることになる。
+ * （話者判別の結果を残すようにして保存量が増えたので、なおさら黙っていられない）
+ */
+let _persistFailedAt = 0;
 function persistSessions() {
   try {
     localStorage.setItem(SESSIONS_KEY, JSON.stringify(state.sessions));
     if (state.activeId) localStorage.setItem(ACTIVE_TAB_KEY, state.activeId);
+    _persistFailedAt = 0;
   } catch (e) {
     console.error('persistSessions failed', e);
+    // 保存のたびに出すとうるさいので、1分に1回だけ知らせる
+    const now = Date.now();
+    if (now - _persistFailedAt > 60000) {
+      _persistFailedAt = now;
+      const quota = e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || ''));
+      const msg = quota
+        ? '保存領域がいっぱいで、いまの内容を保存できませんでした。古いタブを削除するか、HTMLで保存してください'
+        : '内容を保存できませんでした: ' + (e.message || e);
+      diagLog.info(msg);
+      setStatus('error', quota ? '保存領域がいっぱいです' : '保存に失敗しました');
+    }
   }
 }
 
 function defaultTitle() {
+  // v0.24.146: 日本時間で（formatDatePart と同じ）
+  if (typeof jstParts === 'function') return formatDatePart(Date.now());
   const n = new Date();
   const pad = x => String(x).padStart(2, '0');
   return `${pad(n.getMonth()+1)}/${pad(n.getDate())} ${pad(n.getHours())}:${pad(n.getMinutes())}`;
@@ -4505,7 +9252,21 @@ function createSession({ activate = true, title = null, skipSave = false } = {})
     transcript: '',
     memo: '',
     summary: '',
+    liveSummary: '',   // v0.24.25: リアルタイム要約（要約とは別のタブ）
     chat: [],
+    // v0.16.0: 文字起こしの語彙ヒント。既定値を引き継いで開始する
+    context: {
+      field: state.settings.defaultContextField || '',
+      speakers: state.settings.defaultContextSpeakers || '',
+      terms: state.settings.defaultContextTerms || '',
+      // v0.20.0: 適用中の辞書。直前のタブで使っていたものを引き継ぐ
+      // （同じ分野の録音が続くのが普通なので、毎回選び直させない）
+      dictIds: (getActiveSession()?.context?.dictIds || []).slice(),
+    },
+    // v0.16.1: 記録から自動で拾った語彙と議題。手入力とは別に持ち、手入力を優先する
+    autoContext: { terms: [], topicPath: [], flow: '', updatedAt: 0 },
+    // v0.24.143: タブごとのオン・オフ。設定の値で始める（設定は新しいタブの初めの値）
+    opts: { liveRefine: !!state.settings.aiEnabled, autoSummary: !!state.settings.autoSummarize, liveSummary: !!state.settings.liveSummary },
   };
   state.sessions.push(session);
   if (activate) state.activeId = id;
@@ -4528,18 +9289,24 @@ function getActiveSession() {
 function snapshotActiveToSession(opts = {}) {
   const s = getActiveSession();
   if (!s) return;
-  const nextTranscript = els.confirmed.innerHTML;
-  const nextMemo       = els.memo.innerHTML;
-  const nextSummary    = els.summary.innerHTML;
+  // v0.24.70: ばねで動いている途中の値（transform / opacity）は保存しない（savableHtml）
+  const nextTranscript = savableHtml(els.confirmed.innerHTML);
+  // v0.22.0: 貼った画像の src は blob: の URL で、**保存しても次回は死んでいる**。
+  // id だけ残し、表示のたびに差し込み直す（image-store.js の冒頭を参照）
+  const nextMemo       = stripManagedImageSrc(savableHtml(els.memo.innerHTML));
+  const nextSummary    = savableHtml(els.summary.innerHTML);
+  const nextLive       = els.liveSummary ? savableHtml(els.liveSummary.innerHTML) : (s.liveSummary || '');   // v0.24.25
   // v0.15.1: Notion に上げたあとで中身が変わったら、アップ済み印を外す。
   // 「印は付いているが最新版は上がっていない」状態を作らないため。
   if (s.notionUploadedAt &&
-      (s.transcript !== nextTranscript || s.memo !== nextMemo || s.summary !== nextSummary)) {
+      (s.transcript !== nextTranscript || s.memo !== nextMemo || s.summary !== nextSummary
+       || (s.liveSummary || '') !== nextLive)) {
     clearNotionUploadedMark(s);
   }
   s.transcript = nextTranscript;
   s.memo = nextMemo;
   s.summary = nextSummary;
+  s.liveSummary = nextLive;
   s.updatedAt = Date.now();
   // タイピングUndoの baseline も同期（autosave 由来の場合はスキップ：
   // ユーザーが入力中の可能性があり、baseline を上書きすると履歴が流れるため）
@@ -4547,6 +9314,7 @@ function snapshotActiveToSession(opts = {}) {
     paneLastStable['pane-transcript'] = s.transcript;
     paneLastStable['pane-memo']       = s.memo;
     paneLastStable['pane-summary']    = s.summary;
+    paneLastStable['pane-live']       = s.liveSummary;
   }
 }
 
@@ -4562,17 +9330,691 @@ function migrateMemoTaskItems() {
   });
 }
 
+/* ───────── メモに貼った画像 (v0.22.0) ─────────
+ *
+ * メモは画像を入れるメニューを**あえて置いていない**が、contenteditable の
+ * 標準機能で Ctrl+V の画像が貼れる。これを裏技として残す。
+ *
+ * 仕組みと、なぜこの形にしたのかは image-store.js の冒頭に書いた。
+ * ここは画面側だけ:
+ *
+ *   貼る   … 縮小して IndexedDB に入れ、<img data-img-id> を差し込む
+ *   出す   … 保存された HTML には src が無いので、表示のたびに blob: を差し込む
+ *   しまう … 保存の直前に src を外す（blob: の URL を保存しない）
+ */
+
+/** この画面で作った blob: の URL。タブを切り替えるときに解放する */
+let _memoObjectUrls = [];
+
+function releaseMemoObjectUrls() {
+  for (const u of _memoObjectUrls) { try { URL.revokeObjectURL(u); } catch {} }
+  _memoObjectUrls = [];
+}
+
+/**
+ * 保存された HTML の <img data-img-id> に、実物を差し込む (v0.22.0)
+ *
+ * 見つからない画像は**消さずに、消えていることが分かる形にする**。
+ * 黙って空の枠を残すと「読み込み中なのか、失われたのか」が分からない。
+ */
+async function hydrateMemoImages(root) {
+  const imgs = Array.from((root || document).querySelectorAll('img[data-img-id]'));
+  if (!imgs.length) return;
+  for (const img of imgs) {
+    if (img.getAttribute('src')) continue;   // すでに入っている
+    const id = img.dataset.imgId;
+    try {
+      const blob = await imageStoreGet(id);
+      if (!blob) { markMissingImage(img); continue; }
+      const url = URL.createObjectURL(blob);
+      _memoObjectUrls.push(url);
+      img.src = url;
+      img.classList.remove('img-missing');
+    } catch (e) {
+      markMissingImage(img);
+    }
+  }
+}
+
+function markMissingImage(img) {
+  img.classList.add('img-missing');
+  img.alt = '（画像が見つかりません）';
+  // 1x1 の透明 GIF。src を空にすると Chrome が壊れた画像アイコンを出す
+  img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+}
+
+/**
+ * 画像を1枚、保管して <img> にする (v0.22.0)
+ *
+ * **失敗しても例外を投げない。** 貼り付け操作の途中で落ちると、
+ * その時点で書いていたものごと巻き添えになる。
+ *
+ * @returns {Promise<HTMLImageElement|null>} 作れなければ null
+ */
+async function storePastedImage(blob) {
+  try {
+    if (!blob || !blob.size) return null;
+    if (blob.size > IMAGE_MAX_INPUT_BYTES) {
+      setStatus('error', `画像が大きすぎます（${formatBytes(blob.size)}）`);
+      diagLog.info(`メモ: 画像が大きすぎるので貼りませんでした ${formatBytes(blob.size)}`);
+      return null;
+    }
+    const r = await downscaleImage(blob);
+    if (r.blob.size > IMAGE_MAX_STORED_BYTES) {
+      setStatus('error', `画像が大きすぎます（縮小しても ${formatBytes(r.blob.size)}）`);
+      return null;
+    }
+    const id = newImageId();
+    await imageStorePut(id, r.blob);
+    const img = document.createElement('img');
+    img.dataset.imgId = id;
+    img.className = 'memo-img';
+    const url = URL.createObjectURL(r.blob);
+    _memoObjectUrls.push(url);
+    img.src = url;
+    diagLog.info(`メモに画像を貼りました ${formatBytes(r.from)}`
+      + (r.scaled ? ` → ${formatBytes(r.to)}（縮小）` : '（そのまま）'));
+    return img;
+  } catch (e) {
+    // 容量不足・IndexedDB が使えない等。**貼れないだけで、メモは壊さない**
+    setStatus('error', '画像を保存できませんでした: ' + (e.message || e));
+    diagLog.info('メモ: 画像の保存に失敗 ' + (e.message || e));
+    return null;
+  }
+}
+
+/**
+ * メモの貼り付けを受ける (v0.22.0)
+ *
+ * 画像なら横取りして保管し、それ以外は**ブラウザの標準の貼り付けに任せる**。
+ * 知らない種類が来たときに独自処理を挟むほうが、かえって壊れやすい。
+ * 受け取れないファイル（PDF など）は、黙って無視せず一言出す。
+ */
+/* ───────── 貼り付けのオプション（書式ごと／文字だけ） (v0.24.98) ─────────
+ *
+ * やっさん「メモに Ctrl+V でコピペした時、スタイルごとペーストされる。Word のように、スタイルごとか文字だけか、
+ * 貼り付けた後に選べるようにしてほしい」。
+ *
+ * 貼り付けそのものは今までどおりブラウザに任せる（書式ごと）。v0.24.2 で分かったとおり、Chrome が text/html を
+ * どんな入れ子で入れるかは推測すると外すので、こちらで組み立て直さない。
+ * そのかわり、貼る前のメモの中身とカーソルの場所を覚えておき、「文字だけ」を選んだら、
+ * 貼る前に戻してから text/plain を insertText で入れ直す（打鍵と同じ入り方になるので、箇条書きなどの変換も効く）。
+ * もう一度「書式ごと」を押せば、書式つきの結果に戻す。
+ * 書式の無い貼り付け（text/html が無い）では出さない（選ぶ意味がない）
+ */
+let _pasteOpt = null;   // { before, beforeSel, rich, richSel, plain, mode }
+let _pasteApplying = false;
+function nodePathIn(root, node) {
+  const path = [];
+  while (node && node !== root) {
+    const par = node.parentNode;
+    if (!par) return null;
+    path.unshift(Array.prototype.indexOf.call(par.childNodes, node));
+    node = par;
+  }
+  return node === root ? path : null;
+}
+function nodeAtPath(root, path) {
+  let n = root;
+  for (const i of path || []) { n = n && n.childNodes[i]; if (!n) return null; }
+  return n;
+}
+function saveMemoSelection() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  const sp = nodePathIn(els.memo, r.startContainer), ep = nodePathIn(els.memo, r.endContainer);
+  if (!sp || !ep) return null;
+  return { sp, so: r.startOffset, ep, eo: r.endOffset };
+}
+function restoreMemoSelection(saved) {
+  if (!saved) return false;
+  const sn = nodeAtPath(els.memo, saved.sp), en = nodeAtPath(els.memo, saved.ep);
+  if (!sn || !en) return false;
+  const r = document.createRange();
+  try { r.setStart(sn, saved.so); r.setEnd(en, saved.eo); } catch { return false; }
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+  return true;
+}
+function showPasteOptions() {
+  const box = document.getElementById('paste-options');
+  if (!box) return;
+  box.querySelectorAll('[data-paste]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.paste === _pasteOpt.mode)));
+  placePasteOptions();
+  if (window.Motion) Motion.popIn(box); else box.hidden = false;
+}
+/** カーソルのすぐ下に置く（無ければメモの下）。貼った分でメモが流れたときも、ついていく */
+function placePasteOptions() {
+  const box = document.getElementById('paste-options');
+  if (!box) return;
+  const sel = window.getSelection();
+  let rect = null;
+  if (sel && sel.rangeCount) {
+    const rs = sel.getRangeAt(0).getClientRects();
+    rect = rs.length ? rs[rs.length - 1] : null;
+  }
+  if (!rect || (!rect.width && !rect.height)) rect = els.memo.getBoundingClientRect();
+  const z = parseFloat(document.documentElement.style.zoom) || 1;
+  box.style.left = (Math.max(8, Math.min(window.innerWidth - 170, rect.left)) / z) + 'px';
+  box.style.top = (Math.min(window.innerHeight - 40, rect.bottom + 6) / z) + 'px';
+}
+function hidePasteOptions() {
+  const box = document.getElementById('paste-options');
+  _pasteOpt = null;
+  if (!box || box.hidden) return;
+  if (window.Motion) Motion.popOut(box); else box.hidden = true;
+}
+function applyPasteMode(mode) {
+  if (!_pasteOpt || _pasteOpt.mode === mode) return;
+  els.memo.focus();
+  if (mode === 'plain') {
+    els.memo.innerHTML = _pasteOpt.before;
+    restoreMemoSelection(_pasteOpt.beforeSel);
+    _pasteApplying = true;   // この insertText で引っ込めない
+    try { document.execCommand('insertText', false, _pasteOpt.plain); } finally { _pasteApplying = false; }
+  } else {
+    els.memo.innerHTML = _pasteOpt.rich;
+    restoreMemoSelection(_pasteOpt.richSel);
+  }
+  _pasteOpt.mode = mode;
+  memoUndoCommit();
+  const box = document.getElementById('paste-options');
+  if (box) box.querySelectorAll('[data-paste]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.paste === mode)));
+  diagLog.info(`メモ: 貼り付けを${mode === 'plain' ? '文字だけ' : '書式ごと'}にしました`);
+}
+
+async function handleMemoPaste(e) {
+  const dt = e.clipboardData;
+  if (!dt) return;
+  const decision = classifyPaste(dt.items);
+
+  if (decision.action === 'text') {
+    // 標準に任せる（書式ごと）。書式つきなら、貼ったあとに「文字だけ」を選べるようにする (v0.24.98)
+    hidePasteOptions();
+    const types = Array.from(dt.types || []);
+    const plain = dt.getData('text/plain');
+    if (types.includes('text/html') && plain) {
+      memoUndoCheckpoint('貼り付け');
+      const before = els.memo.innerHTML, beforeSel = saveMemoSelection();
+      setTimeout(() => {
+        _pasteOpt = { before, beforeSel, rich: els.memo.innerHTML, richSel: saveMemoSelection(), plain, mode: 'rich' };
+        showPasteOptions();
+      }, 0);
+    }
+    return;
+  }
+
+  if (decision.action === 'reject') {
+    e.preventDefault();
+    const msg = describePasteReject(decision);
+    setStatus('error', msg);
+    diagLog.info('メモ: ' + msg);
+    setTimeout(() => restoreStatus(), 5000);
+    return;
+  }
+
+  // 画像。標準の貼り付け（data: の巨大な img が入る）を止めてから差し替える
+  e.preventDefault();
+  const file = Array.from(dt.items)
+    .filter(i => i.kind === 'file' && /^image\//.test(i.type || ''))
+    .map(i => i.getAsFile())
+    .find(Boolean);
+  if (!file) return;
+
+  // 貼る位置を、非同期の待ちに入る前に捕まえておく
+  const sel = window.getSelection();
+  const range = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+
+  const img = await storePastedImage(file);
+  if (!img) return;
+
+  memoUndoCheckpoint('画像を貼り付け');
+  if (range) {
+    range.deleteContents();
+    range.insertNode(img);
+    range.setStartAfter(img);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } else {
+    els.memo.appendChild(img);
+  }
+  memoUndoCommit();
+}
+
+/**
+ * 使われていない画像を片付ける。**起動時に呼ぶ。**
+ *
+ * メモから消しただけでは保管庫に残す（取り消しで戻せるようにするため）。
+ * 参照されなくなったものを、あとからまとめて消す。
+ */
+async function sweepStoredImages() {
+  try {
+    const used = new Set();
+    for (const s of state.sessions) {
+      for (const id of collectImageIds(s.memo || '')) used.add(id);
+    }
+    const n = await imageStoreSweep(used);
+    if (n > 0) diagLog.info(`使われていない画像を掃除: ${n}件`);
+  } catch (e) {
+    console.warn('[image] 掃除に失敗:', e.message || e);
+  }
+}
+
+/**
+ * HTML で保存するとき用に、画像を data: に戻す (v0.22.0)
+ *
+ * **保存した HTML はそれ1枚で完結していないと意味がない。**
+ * 保管庫を参照する形のままだと、別の端末で開いたときに画像が出ない。
+ */
+async function inlineImagesForExport(html) {
+  if (!html || html.indexOf('data-img-id') < 0) return html || '';
+  const doc = new DOMParser().parseFromString(`<div id="r">${html}</div>`, 'text/html');
+  const root = doc.getElementById('r');
+  for (const img of Array.from(root.querySelectorAll('img[data-img-id]'))) {
+    try {
+      const blob = await imageStoreGet(img.dataset.imgId);
+      if (blob) img.setAttribute('src', await blobToDataUrl(blob));
+      else markMissingImageForExport(img);
+    } catch {
+      markMissingImageForExport(img);
+    }
+  }
+  return root.innerHTML;
+}
+
+function markMissingImageForExport(img) {
+  img.setAttribute('alt', '（画像が見つかりません）');
+  img.removeAttribute('src');
+}
+
+/* ───────── 貼った画像を触る (v0.22.1) ─────────
+ *
+ * やっさんの要望:
+ * > 裏技として画像クリックでハンドル出現、サイズ変更と移動
+ * > 右クリックで word のように、行内か前面　重なり順の変更
+ *
+ * ■ 自前で作る理由
+ *
+ * Chrome は contenteditable の画像にリサイズハンドルを出さない
+ * （Firefox は出す。`enableObjectResizing` は Chrome では効かない）。
+ * なので選択枠とハンドルを自分で重ねて描く。
+ *
+ * ■ 「前面」は Word と同じにはならない
+ *
+ * メモは文章を流し込む領域なので、絶対配置にすると**文章を書き換えたときに
+ * 位置関係が保てない**（Word は段落にアンカーを持つが、そこまで作ると
+ * メモの軽さが失われる）。さらに:
+ *
+ *   HTML保存 … 再現される（インラインの style ごと書き出すため）
+ *   Notion   … そもそも画像を送れない
+ *   コピー   … 消える
+ *
+ * **再現できるのは HTML保存だけ**なので、メニューにそう書いてある。
+ */
+
+/** 幅の下限・上限。0px や画面外の巨大サイズを作らせない */
+const IMG_MIN_WIDTH = 40;
+const IMG_MAX_WIDTH = 4000;
+
+/**
+ * ハンドルを引いたときの新しい幅 (v0.22.1)
+ *
+ * 純関数。左側の角を掴んだときは**引く向きが逆**になるので、そこを間違えると
+ * 「左に引くと大きくなる」という気持ち悪い操作になる。
+ */
+function resizeImageWidth({ startWidth, dx, corner, min, max }) {
+  const lo = Number.isFinite(min) ? min : IMG_MIN_WIDTH;
+  const hi = Number.isFinite(max) ? max : IMG_MAX_WIDTH;
+  const left = corner === 'nw' || corner === 'sw';
+  const next = (Number(startWidth) || 0) + (left ? -dx : dx);
+  return Math.round(Math.min(hi, Math.max(lo, next)));
+}
+
+/**
+ * 重なり順を決める (v0.22.1)
+ *
+ * 純関数。いま使われている値の外側に置くだけ。番号を詰め直さないのは、
+ * 詰め直すと**他の画像の style を書き換える**ことになり、取り消しの単位が
+ * 分かりにくくなるため。
+ */
+function computeZIndex(existing, direction) {
+  const nums = (existing || []).map(Number).filter(Number.isFinite);
+  if (!nums.length) return direction === 'back' ? -1 : 1;
+  return direction === 'back' ? Math.min(...nums) - 1 : Math.max(...nums) + 1;
+}
+
+let _selectedImg = null;
+
+function memoImageBox() {
+  return document.getElementById('img-handles');
+}
+
+/**
+ * 画面の拡大率（設定の「表示倍率」）(v0.24.15)
+ *
+ * `applyAppZoom` は html に CSS の zoom をかけている。このとき
+ * `getBoundingClientRect()` と `clientX` は**拡大後**の見た目の px で返り、
+ * `style.left` などに書く値は**拡大前**の px として解釈される（実機の Chromium で
+ * 測った: 90% で 120px の画像の rect が 108px）。両者を混ぜると、
+ * 枠や移動量が倍率の分だけずれる。v0.24.14 までは 100% 以外で枠がずれていた。
+ */
+function appZoomFactor() {
+  return parseFloat(document.documentElement.style.zoom) || 1;
+}
+
+/** 選択枠を画像に合わせる。画像が消えていたら枠も消す */
+function positionImageBox() {
+  const box = memoImageBox();
+  if (!box) return;
+  const img = _selectedImg;
+  if (!img || !img.isConnected || !els.memo.contains(img)) { clearImageSelection(); return; }
+  const host = els.memo.parentElement;          // .pane-body（position: relative）
+  const z = appZoomFactor();
+  const r = img.getBoundingClientRect();
+  const h = host.getBoundingClientRect();
+  box.style.left   = `${(r.left - h.left) / z + host.scrollLeft}px`;
+  box.style.top    = `${(r.top  - h.top)  / z + host.scrollTop}px`;
+  box.style.width  = `${r.width  / z}px`;
+  box.style.height = `${r.height / z}px`;
+  // v0.24.81: 選んだときにふわっと出す（前は一瞬）。位置の追いかけ（スクロールなど）は今までどおりその場で
+  if (window.Motion && (box.hidden || box.__fadingOut)) Motion.fadeShow(box);
+  else box.hidden = false;
+}
+
+function selectMemoImage(img) {
+  _selectedImg = img;
+  let box = memoImageBox();
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'img-handles';
+    box.hidden = true;
+    // 角だけにしてある。辺のハンドルを付けると縦横比が崩せてしまい、
+    // メモに貼る画像でそれを望むことはまず無い
+    for (const c of ['nw', 'ne', 'sw', 'se']) {
+      const h = document.createElement('div');
+      h.className = `img-handle img-handle-${c}`;
+      h.dataset.corner = c;
+      box.appendChild(h);
+    }
+    els.memo.parentElement.appendChild(box);
+    box.addEventListener('pointerdown', onImageHandleDown);
+  }
+  positionImageBox();
+}
+
+function clearImageSelection() {
+  _selectedImg = null;
+  const box = memoImageBox();
+  if (box) { if (window.Motion) Motion.fadeHide(box); else box.hidden = true; }   // v0.24.81: 薄くしてから隠す
+  closeImageMenu();
+}
+
+/** ハンドルを引いてサイズを変える */
+function onImageHandleDown(e) {
+  const corner = e.target && e.target.dataset ? e.target.dataset.corner : null;
+  if (!corner || !_selectedImg) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const img = _selectedImg;
+  const z = appZoomFactor();
+  const startX = e.clientX;
+  const startWidth = img.getBoundingClientRect().width / z;
+  memoUndoCheckpoint('画像のサイズ変更');
+
+  const move = (ev) => {
+    img.style.width = resizeImageWidth({
+      startWidth, dx: (ev.clientX - startX) / z, corner,
+    }) + 'px';
+    img.style.height = 'auto';   // 縦横比を保つ
+    positionImageBox();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    memoUndoCommit();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
+/** 「前面」の画像をドラッグで動かす */
+function onFloatingImageDown(e) {
+  const img = _selectedImg;
+  if (!img || img.dataset.float !== '1') return;
+  e.preventDefault();
+  const z = appZoomFactor();
+  const startX = e.clientX, startY = e.clientY;
+  const startLeft = parseFloat(img.style.left) || 0;
+  const startTop  = parseFloat(img.style.top)  || 0;
+  let moved = false;
+
+  const move = (ev) => {
+    if (!moved) { memoUndoCheckpoint('画像の移動'); moved = true; }
+    img.style.left = `${startLeft + (ev.clientX - startX) / z}px`;
+    img.style.top  = `${startTop  + (ev.clientY - startY) / z}px`;
+    positionImageBox();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    if (moved) memoUndoCommit();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
+/** これより小さい動きはクリックとみなす（手の震えで画像が1文字ずれないように） */
+const IMG_DRAG_THRESHOLD = 4;
+
+/**
+ * 「行内」の画像をドラッグで文中の別の位置へ移す (v0.24.14)
+ *
+ * ■ 標準のドラッグに任せていたのをやめた理由
+ *
+ * やっさん報告「画像をドラッグすると Chrome のタブで画像が開かれる」。
+ * 標準のドラッグには `text/uri-list` で画像の blob: URL が乗る（実機の Chromium で
+ * dragstart の dataTransfer.types を見て確認）。編集できる場所の外に落ちると
+ * Chrome はそれをリンクとして開く。サイドパネルはその場で遷移できないので
+ * 新しいタブになる。開いた blob: はメモと無関係の一時 URL で、そこから戻る意味も無い。
+ *
+ * ■ 置く位置は「離した場所のいちばん近い文字の間」
+ *
+ * `caretRangeFromPoint` は、クリックしたときにカーソルが立つ位置と同じものを返す。
+ * 動かしている間もそこにカーソルを立てるので、どこに入るかが見える。
+ */
+function onInlineImageDown(e) {
+  const img = _selectedImg;
+  if (!img || img.dataset.float === '1' || e.button !== 0) return;
+  // 標準のドラッグ（＝URL を運ぶドラッグ）を始めさせない
+  e.preventDefault();
+  const startX = e.clientX, startY = e.clientY;
+  let dragging = false;
+
+  const caretAt = (x, y) => {
+    const r = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
+    // メモの外、または画像そのものの中は置き場所にしない
+    if (!r || !els.memo.contains(r.startContainer) || r.startContainer === img) return null;
+    return r;
+  };
+
+  const move = (ev) => {
+    if (!dragging) {
+      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < IMG_DRAG_THRESHOLD) return;
+      dragging = true;
+      img.classList.add('memo-img-dragging');
+    }
+    const r = caretAt(ev.clientX, ev.clientY);
+    if (r) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+  };
+  const up = (ev) => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    img.classList.remove('memo-img-dragging');
+    if (!dragging) return;   // ただのクリック。枠を出しただけで終わり
+    const r = caretAt(ev.clientX, ev.clientY);
+    if (!r) { positionImageBox(); return; }   // メモの外で離したら動かさない
+    memoUndoCheckpoint('画像の移動');
+    try {
+      r.insertNode(img);
+      r.setStartAfter(img);
+      r.collapse(true);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch (err) {
+      // 自分のすぐ隣に落としたときなどに位置の計算が合わないことがある。動かさないだけにする
+      console.warn('[memo image] move skipped:', err.message || err);
+      positionImageBox();
+      memoUndoCommit();   // 何も変わっていなければ、積んだ「戻す」は同じ中身になるだけ
+      return;
+    }
+    positionImageBox();
+    memoUndoCommit();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
+/* ───────── 右クリックのメニュー ───────── */
+
+function closeImageMenu() {
+  const m = document.getElementById('img-menu');
+  if (!m) return;
+  // v0.24.65: 縮みながらふわっと消してから外す。id はすぐ外す（消える途中のものを、次に開いたメニューや
+  // 「メニューの中を押したか」の判定が拾わないように）
+  if (!window.Motion) { m.remove(); return; }
+  m.removeAttribute('id');
+  m.style.pointerEvents = 'none';
+  Motion.popOut(m, { to: 0.92 }).then(() => m.remove());
+}
+
+function openImageMenu(img, x, y) {
+  closeImageMenu();
+  const floating = img.dataset.float === '1';
+  const items = floating
+    ? [
+        ['行内に戻す', () => setImageFloat(img, false)],
+        ['最前面へ', () => setImageZ(img, 'front')],
+        ['最背面へ', () => setImageZ(img, 'back')],
+        ['幅を原寸に戻す', () => resetImageWidth(img)],
+        ['削除', () => removeImage(img)],
+      ]
+    : [
+        ['前面にする（HTML保存でのみ再現）', () => setImageFloat(img, true)],
+        ['幅を原寸に戻す', () => resetImageWidth(img)],
+        ['削除', () => removeImage(img)],
+      ];
+
+  const menu = document.createElement('div');
+  menu.id = 'img-menu';
+  menu.className = 'img-menu';
+  for (const [label, fn] of items) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'img-menu-item';
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      closeImageMenu();
+      memoUndoCheckpoint('画像の操作（' + label + '）');
+      fn();
+      memoUndoCommit();
+      positionImageBox();
+    });
+    menu.appendChild(b);
+  }
+  document.body.appendChild(menu);
+  // 画面からはみ出さない位置に置く
+  const r = menu.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - r.width - 8);
+  const top = Math.min(y, window.innerHeight - r.height - 8);
+  menu.style.left = `${left}px`;
+  menu.style.top  = `${top}px`;
+  // v0.24.65: 押したところの小さい大きさから、少し行き過ぎてぽんと（前は一瞬で出ていた）
+  if (window.Motion) {
+    menu.style.transformOrigin = `${(x - left) / Motion.zoom()}px ${(y - top) / Motion.zoom()}px`;
+    menu.hidden = true;
+    Motion.popIn(menu);
+  }
+}
+
+/**
+ * 行内 ⇄ 前面 を切り替える
+ *
+ * 前面にするとき、**いま見えている場所にそのまま置く**。
+ * 座標を 0,0 にすると画像が画面外に飛んで「消えた」と思われる。
+ */
+function setImageFloat(img, floating) {
+  if (!floating) {
+    delete img.dataset.float;
+    img.style.position = '';
+    img.style.left = '';
+    img.style.top = '';
+    img.style.zIndex = '';
+    return;
+  }
+  const host = els.memo.parentElement;
+  const z = appZoomFactor();
+  const r = img.getBoundingClientRect();
+  const h = host.getBoundingClientRect();
+  img.dataset.float = '1';
+  img.style.position = 'absolute';
+  img.style.left = `${Math.round((r.left - h.left) / z + host.scrollLeft)}px`;
+  img.style.top  = `${Math.round((r.top  - h.top)  / z + host.scrollTop)}px`;
+  img.style.zIndex = String(computeZIndex(collectImageZIndexes(), 'front'));
+}
+
+function collectImageZIndexes() {
+  return Array.from(els.memo.querySelectorAll('img[data-float="1"]'))
+    .map(i => i.style.zIndex)
+    .filter(Boolean);
+}
+
+function setImageZ(img, direction) {
+  const others = Array.from(els.memo.querySelectorAll('img[data-float="1"]'))
+    .filter(i => i !== img)
+    .map(i => i.style.zIndex)
+    .filter(Boolean);
+  img.style.zIndex = String(computeZIndex(others, direction));
+}
+
+function resetImageWidth(img) {
+  img.style.width = '';
+  img.style.height = '';
+}
+
+function removeImage(img) {
+  img.remove();
+  clearImageSelection();
+}
+
 function loadActiveSessionIntoDOM() {
+  renderDictBar();   // v0.20.0: タブごとに辞書が違うので、切り替えたら描き直す
+  updateDiarizeButton();   // v0.21.2: 保存済みの結果もタブごとに違う
+  refreshBusyIndicators(); // v0.24.27: 動いている処理の印も、そのタブのものに付け直す
+  applyAiButtonState();    // v0.24.143: タブのトグルは、そのタブのオン・オフ
+  if (typeof applyLiveSummaryTab === 'function') applyLiveSummaryTab();   // v0.24.143: ライブ要約のタブを出すかも、タブごとに変わる
   const s = getActiveSession();
   els.confirmed.innerHTML = s?.transcript || '';
+  clearImageSelection();            // v0.22.1: 前のタブの画像の枠を消す
+  releaseMemoObjectUrls();          // v0.22.0: 前のタブの blob: を解放してから
   els.memo.innerHTML = s?.memo || '';
   migrateMemoTaskItems();
+  hydrateMemoImages(els.memo);      // v0.22.0: 画像の実物を差し込む（非同期）
   els.summary.innerHTML = s?.summary || '';
+  if (els.liveSummary) { els.liveSummary.innerHTML = s?.liveSummary || ''; decorateLiveSummaryToc(els.liveSummary); }   // v0.24.25 / v0.24.54
+  showHint(els.liveSummaryEmpty, !(s?.liveSummary || '').replace(/<[^>]*>/g, '').trim(), false);   // セッションの切り替え（中身ごと横に送る）では動かさない
   els.interim.textContent = '';
   state.pendingChunkEl = null;
   state.pendingChunkText = '';
-  if (els.emptyHint) els.emptyHint.hidden = !!els.confirmed.innerHTML;
-  if (els.summaryEmpty) els.summaryEmpty.hidden = !!getSummaryText();
+  showHint(els.emptyHint, !els.confirmed.innerHTML, false);
+  showHint(els.summaryEmpty, !getSummaryText(), false);
   updateMemoCheatsheetVisibility();
   renderChat();
   updateActionButtons();
@@ -4582,7 +10024,7 @@ function loadActiveSessionIntoDOM() {
   // タイピングUndoの基準状態をDOMから再同期（プログラム変更で baseline が古くなるのを防ぐ）
   if (typeof syncPaneBaselineFromDOM === 'function') syncPaneBaselineFromDOM();
   state.userScrolledUp = false;
-  requestAnimationFrame(() => autoScroll(true));
+  requestAnimationFrame(() => autoScroll(true, { instant: true }));   // タブを開いたときは、最初から最下部に
 }
 
 function switchSession(id) {
@@ -4660,7 +10102,16 @@ function switchSession(id) {
   requestAnimationFrame(scrollActiveTabIntoView);
 
   // main-area 全体をスライドで切替
-  if (els.mainArea && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
+  // v0.24.78: 横に送る動きをばねで（SUMADO の仕様書 2.2「ページ・タブの切り替え：横に送る（page）」）。前は keyframes の ease
+  if (window.Motion && els.mainArea && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
+    const dist = Math.min(120, (els.mainArea.clientWidth || 400) * 0.3);
+    // 中身はもう新しいセッションに入れ替わっているので、位置は送る向きの端から始める。
+    // 濃さは、続けて切り替えたときに一瞬濃くならないよう、いまの濃さより上げない
+    const cur = Motion.current(els.mainArea);
+    Motion.place(els.mainArea, { x: (direction === 'right' ? 1 : -1) * dist, opacity: Math.min(cur.opacity, 0.2) });
+    Motion.animate(els.mainArea, { x: 0 }, { spring: Motion.SPRINGS.page });
+    Motion.animate(els.mainArea, { opacity: 1 }, { spring: Motion.SPRINGS.fade }).then((d) => { if (d) Motion.clear(els.mainArea); });
+  } else if (els.mainArea && oldIdx >= 0 && newIdx >= 0 && oldIdx !== newIdx) {
     els.mainArea.classList.remove('enter-from-right', 'enter-from-left');
     void els.mainArea.offsetWidth;
     els.mainArea.classList.add(direction === 'right' ? 'enter-from-right' : 'enter-from-left');
@@ -4670,15 +10121,69 @@ function switchSession(id) {
   }
 }
 
-function closeSession(id) {
+/**
+ * 確認の小窓（ブラウザの confirm のかわり） (v0.24.94)
+ * やっさん「タブを閉じようとしたときのモーダルがブラウザ依存なので、オリジナルのモーダルに」。
+ * SUMADO の confirmDialog と同じ使い方（{ title, message, ok, destructive }）で、OK なら true。
+ * Esc・暗い背景・キャンセルは false。消すものは赤いボタン。出入りのばねは installModalMotion が付ける
+ */
+function confirmDialog({ title, message = '', ok = 'OK', cancel = 'キャンセル', destructive = false } = {}) {
+  const box = document.getElementById('confirm-dialog');
+  if (!box) return Promise.resolve(window.confirm([title, message].filter(Boolean).join('\n\n')));
+  if (box._resolve) box._resolve(false);   // 前の確認が残っていたら、キャンセル扱いで閉じる
+  document.getElementById('confirm-title').textContent = title || '';
+  document.getElementById('confirm-message').textContent = message || '';
+  const okBtn = document.getElementById('confirm-ok');
+  okBtn.textContent = ok;
+  okBtn.classList.toggle('btn-danger', !!destructive);
+  okBtn.classList.toggle('btn-primary', !destructive);
+  document.getElementById('confirm-cancel').textContent = cancel;
+  return new Promise((resolve) => {
+    const finish = (v) => {
+      box._resolve = null;
+      box.classList.add('hidden');
+      box.removeEventListener('click', onClick);
+      document.removeEventListener('keydown', onKey, true);
+      resolve(v);
+    };
+    const onClick = (e) => {
+      const a = e.target.closest('[data-confirm]');
+      if (a) finish(a.dataset.confirm === 'ok');
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); finish(false); }
+      else if (e.key === 'Enter' && document.activeElement !== document.getElementById('confirm-cancel')) { e.preventDefault(); finish(true); }
+    };
+    box._resolve = finish;
+    box.addEventListener('click', onClick);
+    document.addEventListener('keydown', onKey, true);
+    box.classList.remove('hidden');
+    // 消す確認は、うっかり Enter で消さないよう「キャンセル」に指を置いておく
+    setTimeout(() => (destructive ? document.getElementById('confirm-cancel') : okBtn).focus(), 30);
+  });
+}
+
+async function closeSession(id) {
+  const idx0 = state.sessions.findIndex(s => s.id === id);
+  if (idx0 < 0) return;
+  const session = state.sessions[idx0];
+  const hasContent = session.transcript || session.memo || session.summary;
+  // v0.24.94: ブラウザの confirm をやめ、自前の小窓に
+  if (hasContent && !(await confirmDialog({
+    title: `「${session.title}」を閉じますか？`,
+    message: 'このタブの内容は削除されます。',
+    ok: '閉じる', destructive: true,
+  }))) return;
+  // 待っているあいだに並びが変わっているかもしれないので、場所は確認のあとで探し直す
   const idx = state.sessions.findIndex(s => s.id === id);
   if (idx < 0) return;
-  const session = state.sessions[idx];
-  const hasContent = session.transcript || session.memo || session.summary;
-  if (hasContent && !confirm(`「${session.title}」を閉じます。この内容は削除されます。よろしいですか？`)) return;
   const wasActive = state.activeId === id;
   // 録音対象セッションが閉じられるなら（BGでも）録音を止める
   if (state.isRecording && state.recordingSessionId === id) stopRecording();
+  // v0.19.0: タブが消えるなら、その音声も消す（設定に関係なく）
+  // v0.24.103: ただし「残す」にした録音は消さない（名前だけ今のものに更新しておく）
+  if (isAudioPinned(id)) rememberPinnedTitle(session);
+  else audioStoreDeleteSession(id).catch(() => {});
   state.sessions.splice(idx, 1);
   if (state.sessions.length === 0) {
     createSession({ activate: true, skipSave: true });
@@ -4693,15 +10198,20 @@ function closeSession(id) {
 /* ───────── タブの一括閉じ（Chrome タブ風） ───────── */
 
 /** 指定したIDのリストを一括削除。中身ありは件数付きまとめ確認 */
-function closeMultipleSessions(ids, { skipConfirm = false } = {}) {
+async function closeMultipleSessions(ids, { skipConfirm = false } = {}) {
   const targets = ids.map(id => state.sessions.find(s => s.id === id)).filter(Boolean);
   if (targets.length === 0) return;
   const withContent = targets.filter(s => s.transcript || s.memo || s.summary);
   if (!skipConfirm && withContent.length > 0) {
-    const msg = withContent.length === targets.length
-      ? `${targets.length}個のタブを閉じます。内容はすべて削除されます。よろしいですか？`
-      : `${targets.length}個のタブを閉じます（うち${withContent.length}個に内容あり、削除されます）。よろしいですか？`;
-    if (!confirm(msg)) return;
+    // v0.24.94: 自前の確認の小窓に
+    const ok = await confirmDialog({
+      title: `${targets.length}個のタブを閉じますか？`,
+      message: withContent.length === targets.length
+        ? '内容はすべて削除されます。'
+        : `うち${withContent.length}個に内容があり、削除されます。`,
+      ok: '閉じる', destructive: true,
+    });
+    if (!ok) return;
   }
   // 録音対象が含まれるなら先に停止
   if (state.isRecording && targets.some(s => s.id === state.recordingSessionId)) {
@@ -4709,6 +10219,11 @@ function closeMultipleSessions(ids, { skipConfirm = false } = {}) {
   }
   const activeIsTarget = targets.some(s => s.id === state.activeId);
   const idSet = new Set(targets.map(s => s.id));
+  // v0.19.0: 消えるタブの音声も消す（v0.24.103: 「残す」にした録音は除く）
+  for (const t of targets) {
+    if (isAudioPinned(t.id)) rememberPinnedTitle(t);
+    else audioStoreDeleteSession(t.id).catch(() => {});
+  }
   state.sessions = state.sessions.filter(s => !idSet.has(s.id));
   if (state.sessions.length === 0) {
     createSession({ activate: true, skipSave: true });
@@ -4751,7 +10266,10 @@ function closeAllTabs() {
 
 function hideTabContextMenu() {
   const menu = document.getElementById('tab-context-menu');
-  if (menu) menu.classList.add('hidden');
+  if (!menu) return;
+  // v0.24.65: 一瞬で消さず、行き過ぎずに縮みながらふわっと（TODO「動きを SUMADO の仕様書に合わせる」の 6）
+  if (window.Motion) Motion.popOut(menu, { to: 0.92, hiddenClass: 'hidden' });
+  else menu.classList.add('hidden');
 }
 
 // メニューを開いた瞬間の event がそのまま document まで伝播して
@@ -4779,7 +10297,7 @@ function showTabContextMenu(sessionId, clientX, clientY) {
       if (!menu.contains(e.target)) hideTabContextMenu();
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !menu.classList.contains('hidden')) hideTabContextMenu();
+      if (e.key === 'Escape' && (window.Motion ? Motion.popIsOpen(menu, { hiddenClass: 'hidden' }) : !menu.classList.contains('hidden'))) hideTabContextMenu();
     });
   }
   const idx = state.sessions.findIndex(s => s.id === sessionId);
@@ -4820,6 +10338,8 @@ function showTabContextMenu(sessionId, clientX, clientY) {
   renderIcons(menu);
 
   // 画面端を超えないよう位置を調整
+  // v0.24.65: 大きさは測るときだけ 1 に戻す（しまう途中に開き直すと、縮んだ大きさで測ってしまう）
+  if (window.Motion) Motion.clear(menu);
   menu.style.visibility = 'hidden';
   menu.classList.remove('hidden');
   requestAnimationFrame(() => {
@@ -4831,6 +10351,12 @@ function showTabContextMenu(sessionId, clientX, clientY) {
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
     menu.style.visibility = '';
+    // v0.24.65: 押したところの小さい大きさから、少し行き過ぎてぽんと（端に寄せたときも押したところから）
+    if (window.Motion) {
+      menu.style.transformOrigin = `${(clientX - x) / Motion.zoom()}px ${(clientY - y) / Motion.zoom()}px`;
+      menu.classList.add('hidden');
+      Motion.popIn(menu, { hiddenClass: 'hidden' });
+    }
   });
 }
 
@@ -4850,6 +10376,9 @@ function renderTabs() {
     state.sessions.some(s => s.id === id)
   ));
 
+  // v0.24.61: 増える・閉じるで全部作り直すと、残りのタブが一瞬で跳んでいた（TODO「動きを SUMADO の仕様書に合わせる」の 2）。
+  // 作り直す前の位置を覚えておき、前の位置から新しい位置へばねで（FLIP）。新しいタブはふわっと、閉じたタブは写しがふわっと消える
+  const rebuild = () => {
   els.tabsList.innerHTML = '';
   for (const session of state.sessions) {
     const tab = document.createElement('div');
@@ -4946,6 +10475,9 @@ function renderTabs() {
     tab.appendChild(closeBtn);
     els.tabsList.appendChild(tab);
   }
+  };
+  if (window.Motion) Motion.flipList(els.tabsList, rebuild, { selector: '.tab', key: (n) => n.dataset.id, ghost: true });
+  else rebuild();
   // アクティブ線（再利用するため renderTabs を跨いで保持）
   let indicator = els.tabsList.__activeIndicator;
   if (!indicator) {
@@ -4996,7 +10528,18 @@ function updateActiveTabIndicator() {
   const w = activeTab.offsetWidth;
 
   const firstShow = !bar.classList.contains('visible');
-  if (firstShow) {
+  // v0.24.61: 線の移り先へは、ばねで（SUMADO の仕様書 2.2「選んだしるしは 1 つだけ置き、新しい場所へばねで移る」。
+  // 切り替え（segmented）と同じく、位置も幅も SPRINGS.sheet）。前は CSS の transition（cubic-bezier）だった
+  if (window.Motion) {
+    if (!bar.__widthDriver) {
+      bar.__widthDriver = document.createElement('span');
+      Motion.onFrame(bar.__widthDriver, ({ x: bw }) => { bar.style.width = `${bw}px`; });
+    }
+    const go = firstShow ? Motion.set : (e, v) => Motion.animate(e, v, { spring: Motion.SPRINGS.sheet });
+    go(bar, { x });
+    go(bar.__widthDriver, { x: w });
+    if (firstShow) requestAnimationFrame(() => bar.classList.add('visible'));
+  } else if (firstShow) {
     // 初回は transition 切ってジャンプ → rAF で visible にしてフェードイン
     const savedTransition = bar.style.transition;
     bar.style.transition = 'none';
@@ -5197,8 +10740,16 @@ if (els.btnNotionUpload) {
   els.btnNotionPickerOk.addEventListener('click', () => closeNotionPicker(true));
   // 保存先を変えたら、その DB の日付プロパティを取り直す
   els.notionPickerSelect.addEventListener('change', loadNotionPickerSchema);
+  // v0.23.0: 新規作成 ⇄ 追記 の切り替え
+  if (els.notionPickerNote) {
+    els.notionPickerNote.addEventListener('change', updateNotionPickerMode);
+  }
   els.btnNotionCancel.addEventListener('click', requestNotionCancel);
 }
+// v0.24.33: Notion 保存の小窓をヘッダーで動かす。**起動時に1回だけ登録する**
+// （tests/browser/t-notion-float-browser.js で実際につかんで動かして確かめている）
+enableFloatDrag(els.notionProgress, els.notionProgress && els.notionProgress.querySelector('.notion-float-header'),
+  (x, y) => saveNotionFloatPos(x, y));
 els.btnLoadJson.addEventListener('click', () => els.fileLoad.click());
 els.fileLoad.addEventListener('change', (e) => {
   const f = e.target.files?.[0];
@@ -5207,52 +10758,112 @@ els.fileLoad.addEventListener('change', (e) => {
 });
 els.btnClearAll.addEventListener('click', clearAllPanes);
 els.btnSettings.addEventListener('click', openSettings);
-if (els.btnNotionTest) els.btnNotionTest.addEventListener('click', testNotionConnection);
+if (els.btnContext) {
+  els.btnContext.addEventListener('click', openContextModal);
+
+  /* v0.20.0: フッターの辞書ピル */
+  if (els.dictToggle) {
+    els.dictToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!dictMenuOpen()) openDictMenu(); else closeDictMenu();
+    });
+  }
+  if (els.dictMenuClose) els.dictMenuClose.addEventListener('click', closeDictMenu);
+  if (els.dictMenuDetail) {
+    els.dictMenuDetail.addEventListener('click', () => { closeDictMenu(); openContextModal(); });
+  }
+  // メニューの外を押したら閉じる（メニュー内のクリックは止める）
+  if (els.dictMenu) els.dictMenu.addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', () => closeDictMenu());
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && dictMenuOpen()) closeDictMenu();
+  });
+  const btnSaveAutoDict = document.getElementById('btn-save-auto-dict');
+  if (btnSaveAutoDict) btnSaveAutoDict.addEventListener('click', saveAutoAsDict);
+  els.btnContextSave.addEventListener('click', saveContextModal);
+  els.btnContextFromMemo.addEventListener('click', importContextFromMemo);
+  els.btnContextAdoptAuto.addEventListener('click', adoptAutoTerms);
+  els.contextModal.querySelectorAll('[data-dismiss]').forEach(b => {
+    b.addEventListener('click', closeContextModal);
+  });
+}
+if (els.btnNotionTest) els.btnNotionTest.addEventListener('click', () => testNotionConnection());
+// v0.24.50: 「Notion 連携」をオンにしたら、その場で確かめる。オフにしたら横の表示を消す
+if (els.inputNotionEnabled) {
+  els.inputNotionEnabled.addEventListener('change', () => {
+    if (els.inputNotionEnabled.checked) testNotionConnection();
+    else {
+      notionTestSeq++;   // 走りかけの確認を取り消す（あとから結果が届いても書かない）
+      setNotionTestResult(notionIsAvailable() ? '' : 'HTML版では利用できません（Chrome拡張版で使えます）', 'note');
+    }
+  });
+}
+// アクセストークンを入れ直したら、連携がオンなら確かめ直す（ボタンが無いので、ここで確かめる）
+if (els.inputNotionToken) {
+  els.inputNotionToken.addEventListener('change', () => {
+    if (els.inputNotionEnabled && els.inputNotionEnabled.checked) testNotionConnection();
+  });
+}
+
 if (els.btnNotionForget) els.btnNotionForget.addEventListener('click', forgetNotionTarget);
 
 /* ───────── Onboarding ───────── */
+/*
+ * v0.24.97: 今の画面に合わせて書き直した（やっさん「ヘルプメニューが古くなっている」）。
+ * 前の文は「Gemini が段落分け」「Gemini に質問」「詳細度は低/中/高」など、AI を選べるようになる前のままだった。
+ * ガイドは「何ができるか」を説明する場所なので、行のまわりの字（説明しすぎない）より少し詳しく書いてよい（SUMADO の仕様書の 5 章・heroCard と同じ考え）。
+ * optional: その場所が今の画面に無ければ飛ばす（ライブ要約のタブは、オンのときだけ出る）
+ */
 const ONBOARDING_STEPS = [
   {
     target: '#btn-toggle',
-    title: '録音開始',
-    text: 'ここを押すと文字起こしが始まります。認識中も本文を直接編集できます。新しい認識結果は末尾に自動追加されます。',
+    title: '録音',
+    text: '押すと文字起こしが始まり、もう一度押すと止まります。録音中も本文を直接直せます。新しく聞き取った文は末尾に足されます。',
   },
   {
     target: '.inner-tab[data-pane="pane-transcript"]',
     title: '文字起こし',
-    text: 'リアルタイムで音声がテキスト化されます。「文字起こし整形」をONにすると Gemini が段落分け・句読点を自動調整します。',
+    text: '話した内容がここに出ます。聞き取り方は設定の「文字起こしのモード」で選べます（Web Speech／AI で聞き取る）。「ライブ整形」をオンにすると、AI が句読点・段落・見出しを整えます。',
   },
   {
     target: '.inner-tab[data-pane="pane-memo"]',
     title: 'メモ',
-    text: 'Markdown ショートカット対応（# 見出し / - 箇条書き / [] チェック等）。講義・会議中の気づきを自由に書けます。',
+    text: 'Markdown のショートカットが使えます（# 見出し／- 箇条書き／[] チェックなど）。講義や会議中の気づきを自由に書けます。メモも要約や質問の資料になります。',
+  },
+  {
+    target: '.inner-tab[data-pane="pane-live"]',
+    optional: true,
+    title: 'ライブ要約',
+    text: '録音中、決めた間隔ごとに目次つきの要約ができます。目次を押すと、その話題の場所へ飛べます。オン・オフと間隔は設定の「詳細設定 → AI の動き」で変えられます。',
   },
   {
     target: '.inner-tab[data-pane="pane-summary"]',
     title: '要約',
-    text: '録音停止後に自動生成されます。「要約を生成」ボタンで手動生成も可能。詳細度は低/中/高から選択できます。',
+    text: '録音を止めると自動で作られます。「要約・タイトル生成」で作り直せます。詳しさは「詳細・バランス・概要」から選べます。',
   },
   {
     target: '.inner-tab[data-pane="pane-chat"]',
     title: '質問',
-    text: '資料（文字起こし・メモ・要約）について Gemini に質問できます。「この会議で決まったことは？」「◯◯について言及は？」など。推測はせず、資料に無いことは「分かりません」と答えます。',
+    text: '文字起こし・メモ・要約について質問できます（「この会議で決まったことは？」など）。資料に書かれていないことは、無いと答えます。',
   },
   {
     target: '#btn-quick-chat',
     title: 'クイック質問',
-    text: '文字起こしを見ながらすぐに質問したい時はこのボタン。下からモーダルが出て、タブを切替えずに問えます。',
+    text: '文字起こしを見ながらすぐに質問したいときはこのボタン。タブを切り替えずに質問できます。',
   },
   {
     target: '#btn-settings',
     title: '設定',
-    text: 'Gemini API キー、フォント・サイズ、要約の詳細度、音声入力モード（Web Speech / Gemini Audio）などをここで調整します。',
+    text: 'AI の API キーと連携（Gemini API・Groq Whisper・Claude Code）、使用するAI（文字起こし・整形・要約などをどの AI で動かすか）、文字起こしのモードはここで決めます。細かい設定は「詳細設定」にまとめてあります。',
   },
   {
     target: '#btn-captions',
-    title: '字幕設定',
-    text: 'OS レベルの透過字幕オーバーレイ（ネイティブヘルパー dictation-overlay と連携）。Zoom や Meet・他アプリの上に直接字幕が乗ります。フォント・色・縁取り・影・背景・パディング・行間・改行ルール・AI整形などをここで調整。**Windows 専用**で、初回のみインストーラが必要です。',
+    title: '字幕設定（開発中）',
+    text: 'ほかのアプリの上に字幕を重ねて出す機能の設定です。Windows 専用で、はじめにインストーラが必要です。',
   },
 ];
+/** v0.24.97: 今の画面にある手順だけ（optional で場所が無いものは飛ばす）。startOnboarding で決める */
+let onboardingSteps = ONBOARDING_STEPS;
 
 let onboardingIdx = 0;
 let onboardingLiftedTarget = null;
@@ -5284,16 +10895,16 @@ function onboardingUnliftTarget() {
 }
 
 function onboardingPosition() {
-  const step = ONBOARDING_STEPS[onboardingIdx];
+  const step = onboardingSteps[onboardingIdx];
   if (!step) { closeOnboarding(); return; }
   const target = document.querySelector(step.target);
   const spot = document.getElementById('onboarding-spot');
   const bubble = document.getElementById('onboarding-bubble');
   document.getElementById('onboarding-title').textContent = step.title;
   document.getElementById('onboarding-text').textContent = step.text;
-  document.getElementById('onboarding-step').textContent = `${onboardingIdx + 1} / ${ONBOARDING_STEPS.length}`;
+  document.getElementById('onboarding-step').textContent = `${onboardingIdx + 1} / ${onboardingSteps.length}`;
   document.getElementById('onboarding-next-btn').textContent =
-    onboardingIdx === ONBOARDING_STEPS.length - 1 ? '完了' : '次へ';
+    onboardingIdx === onboardingSteps.length - 1 ? '完了' : '次へ';
 
   // 対象を前面に持ち上げ（暗幕の上に出して見やすく）
   onboardingLiftTarget(target);
@@ -5325,22 +10936,52 @@ function onboardingPosition() {
   bubble.style.left = (leftVisual / z) + 'px';
 }
 
+// v0.24.81: 使い方ガイドの動き（前は暗幕が一瞬で出入りし、吹き出しは keyframes の ease で出て、次の手順へは一瞬で跳んでいた）
+//   - 暗幕はふわっと出る・消える
+//   - 吹き出しは少し小さいところから少し行き過ぎてぽんと出る。次の手順では、前の場所から新しい場所へばねで移り、中の字はふわっと入れ替わる
 function startOnboarding() {
   onboardingIdx = 0;
-  document.getElementById('onboarding').classList.remove('hidden');
+  onboardingSteps = ONBOARDING_STEPS.filter((st) => !st.optional || document.querySelector(st.target));
+  const ob = document.getElementById('onboarding');
+  const bubble = document.getElementById('onboarding-bubble');
+  if (window.Motion) {
+    Motion.popIn(ob, { from: 1, hiddenClass: 'hidden' });
+    onboardingPosition();
+    Motion.set(bubble, { scale: 0.94, opacity: 0, y: 8 });
+    Motion.animate(bubble, { scale: 1, y: 0 }, { spring: Motion.MOTION.pop });
+    Motion.animate(bubble, { opacity: 1 }, { spring: Motion.MOTION.popFade }).then((d) => { if (d) Motion.clear(bubble); });
+    return;
+  }
+  ob.classList.remove('hidden');
   onboardingPosition();
 }
 function nextOnboarding() {
   onboardingIdx++;
-  if (onboardingIdx >= ONBOARDING_STEPS.length) {
+  if (onboardingIdx >= onboardingSteps.length) {
     closeOnboarding();
     return;
   }
+  const bubble = document.getElementById('onboarding-bubble');
+  const before = window.Motion ? bubble.getBoundingClientRect() : null;
   onboardingPosition();
+  if (before) {
+    const after = bubble.getBoundingClientRect();
+    const z = Motion.zoom();
+    Motion.place(bubble, { x: (before.left - after.left) / z + Motion.current(bubble).x, y: (before.top - after.top) / z + Motion.current(bubble).y });
+    Motion.animate(bubble, { x: 0, y: 0 }, { spring: Motion.SPRINGS.sheet }).then((d) => { if (d) Motion.clear(bubble); });
+    for (const id of ['onboarding-title', 'onboarding-text', 'onboarding-step']) {
+      const t = document.getElementById(id);
+      if (!t) continue;
+      Motion.set(t, { opacity: 0 });
+      Motion.animate(t, { opacity: 1 }, { spring: Motion.MOTION.morph.contentIn }).then((d) => { if (d) Motion.clear(t); });
+    }
+  }
 }
 function closeOnboarding() {
   onboardingUnliftTarget();
-  document.getElementById('onboarding').classList.add('hidden');
+  const ob = document.getElementById('onboarding');
+  if (window.Motion) Motion.popOut(ob, { to: 1, hiddenClass: 'hidden' });
+  else ob.classList.add('hidden');
 }
 const btnOnboarding = document.getElementById('btn-onboarding');
 if (btnOnboarding) btnOnboarding.addEventListener('click', startOnboarding);
@@ -5394,16 +11035,23 @@ if (els.btnSummaryCombo) {
     const hit = e.target.closest('[data-role]');
     const role = hit?.dataset.role;
     if (role === 'toggle') {
-      state.settings.autoSummarize = !state.settings.autoSummarize;
-      saveSettings();
+      // v0.24.143: このタブだけ切り替える
+      const session = getActiveSession();
+      setTabOpt(session, 'autoSummary', !tabOpt(session, 'autoSummary'));
       applyAiButtonState();
+      renderEmptyHints && renderEmptyHints();
     } else {
-      els.btnSummaryCombo.classList.add('firing');
-      try {
-        await generateSummary({ silent: false });
-      } finally {
-        els.btnSummaryCombo.classList.remove('firing');
-      }
+      // v0.24.143: 押すと聞く。もう要約があれば作り直すか（やっさんの指定）。名前のとおり、要約とタイトルを作る
+      // v0.24.27: 印は generateSummary がタブごとに付け外しする（ここで付けるとタブをまたぐ）
+      snapshotActiveToSession();
+      const session = getActiveSession();
+      const has = !!(session && String(session.summary || '').replace(/<[^>]*>/g, '').trim());
+      const ok = await confirmDialog(has
+        ? { title: '要約とタイトルを作り直しますか？', message: 'いまの要約は置き換わります。', ok: '作り直す' }
+        : { title: '要約とタイトルを作りますか？', message: '', ok: '作る' });
+      if (!ok) return;
+      await generateSummary({ silent: false });
+      await autoGenerateTitle({ sessionId: state.activeId, force: true });
     }
   });
 }
@@ -5440,6 +11088,271 @@ if (els.modeGemini) {
   els.modeGemini.addEventListener('change', () => {
     applyGeminiOnlyVisibility(true);
     applyWebSpeechOnlyVisibility(true);
+  });
+}
+
+/* ───────── 使用量のカード (v0.24.104) ─────────
+ * 設定のいちばん下。数えるのは usage.js（何を数えて、何が入らないかはそちらの冒頭）。
+ * 棒は「どれだけ使ったか」が一目で分かるように。Groq は残りが 2 割を切ったらオレンジ、使い切ったら赤
+ */
+function fmtNum(n) { return Math.round(n || 0).toLocaleString('ja-JP'); }
+function fmtUsd(n) { return n < 0.01 ? (n > 0 ? '$0.01 未満' : '$0') : '$' + n.toFixed(2); }
+function fmtSecLeft(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h ? `${h}時間${m}分` : `${m}分`;
+}
+function usageMeter(label, used, limit, leftText) {
+  const r = limit ? Math.min(1, used / limit) : 0;
+  const cls = r >= 1 ? 'over' : r >= 0.8 ? 'low' : '';
+  return `<div class="usage-meter ${cls}"><div class="usage-meter-head"><span>${label}</span><span class="usage-left">${leftText}</span></div>`
+    + `<div class="usage-bar"><span style="width:${(r * 100).toFixed(1)}%"></span></div></div>`;
+}
+/**
+ * Gemini の月別のグラフ (v0.24.110)
+ * やっさん「Gemini のトークンは、長押しすると月別のグラフが出るように」。
+ * 今月から前へ 6 か月（v0.24.116 で 12 か月から減らした）。
+ * 棒はトークン、上に数・下に月。今月は見出しの色。出し方は SUMADO のポップアップと同じ（少し行き過ぎてぽんと出る）
+ */
+function usageMonthlySeries(u, now) {
+  const keys = Object.keys((u && u.gemini) || {}).sort();
+  const out = [];
+  const d = new Date(now.getFullYear(), now.getMonth(), 1);
+  // v0.24.116: 最近 6 か月だけ（やっさん「ぎゅうぎゅう詰め」。12 本はサイドパネルの幅に入らない）。
+  // 前は記録が 1 つも無いと 12 本並んでいた（「数え始めた月より前は出さない」の条件が、記録が無いときに効いていなかった）
+  for (let i = 0; i < 6; i++) {
+    const k = usageMonthKey(d);
+    const m = (u.gemini || {})[k];
+    out.unshift({ key: k, month: d.getMonth() + 1, tokens: m ? m.text + m.audio + m.output : 0, cost: m ? usageGeminiCost(m) : 0 });
+    d.setMonth(d.getMonth() - 1);
+  }
+  return out;
+}
+function fmtCompact(n) {
+  if (n >= 1e8) return (n / 1e8).toFixed(1).replace(/\.0$/, '') + '億';
+  if (n >= 1e4) return (n / 1e4).toFixed(n >= 1e5 ? 0 : 1).replace(/\.0$/, '') + '万';
+  return fmtNum(n);
+}
+function openUsageChart() {
+  const anchor = document.getElementById('usage-gemini-total');
+  const pop = document.getElementById('usage-chart');
+  if (!anchor || !pop) return;
+  const now = new Date();
+  const series = usageMonthlySeries(usageLoad(), now);
+  const max = Math.max(1, ...series.map((x) => x.tokens));
+  const cur = usageMonthKey(now);
+  pop.innerHTML = `<div class="usage-chart-title">Gemini の月別のトークン</div><div class="usage-chart-bars">`
+    + series.map((x) => `<div class="usage-chart-col${x.key === cur ? ' current' : ''}" title="">`
+      + `<span class="usage-chart-n">${x.tokens ? fmtCompact(x.tokens) : ''}</span>`
+      + `<span class="usage-chart-bar"><span style="height:${(x.tokens / max * 100).toFixed(1)}%"></span></span>`
+      + `<span class="usage-chart-m">${x.month}月</span>`
+      + `<span class="usage-chart-c">${x.tokens ? fmtUsd(x.cost) : ''}</span></div>`).join('')
+    + `</div>`;
+  const box = document.getElementById('usage-card');
+  const br = box.getBoundingClientRect(), ar = anchor.getBoundingClientRect();
+  pop.style.top = (ar.bottom - br.top + 6) + 'px';
+  if (window.Motion) Motion.popIn(pop); else pop.hidden = false;
+}
+function closeUsageChart() {
+  const pop = document.getElementById('usage-chart');
+  if (!pop || pop.hidden) return;
+  if (window.Motion) Motion.popOut(pop); else pop.hidden = true;
+}
+/**
+ * 押すと開く・もう一度押すと閉じる (v0.24.114・やっさん「長押しではなくタップ（クリック）にしよう」)。キーボードなら Enter・Space。
+ * 押しているあいだだけ少し縮む（押したことが分かるように）
+ */
+function toggleUsageChart() {
+  const pop = document.getElementById('usage-chart');
+  if (pop && !pop.hidden) closeUsageChart(); else openUsageChart();
+}
+function installUsageLongPress() {
+  const el = document.getElementById('usage-gemini-total');
+  if (!el) return;
+  el.addEventListener('pointerdown', () => el.classList.add('pressing'));
+  for (const t of ['pointerup', 'pointerleave', 'pointercancel']) el.addEventListener(t, () => el.classList.remove('pressing'));
+  el.addEventListener('click', toggleUsageChart);
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleUsageChart(); } });
+}
+// 外を触ったら・Esc で閉じる（カードは描き直すので、入れ物の外側で 1 回だけ登録）
+document.addEventListener('pointerdown', (e) => {
+  const pop = document.getElementById('usage-chart');
+  if (pop && !pop.hidden && !pop.contains(e.target) && !(e.target.closest && e.target.closest('#usage-gemini-total'))) closeUsageChart();
+}, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeUsageChart(); });
+
+/**
+ * Groq の残りの輪 (v0.24.111・やっさん「3 つの円グラフ（上に 1 つ、下に 2 つ）にしてかっこよく」「減っていくやつで」)
+ * 輪は**残り**を表し、使うほど減っていく（12 時の位置から時計回りに残りが伸びている形）。
+ * 残りが 2 割を切ったらオレンジ、使い切ったら赤。描くときは満タンから今の残りへ、ばね風に減っていく
+ */
+function usageRing(label, used, limit, centerHtml, big) {
+  const rem = limit ? Math.max(0, Math.min(1, 1 - used / limit)) : 1;
+  const cls = rem <= 0 ? 'over' : rem < 0.2 ? 'low' : '';
+  const C = 2 * Math.PI * 42;
+  return `<div class="usage-ring ${big ? 'big' : ''} ${cls}" data-rem="${rem.toFixed(4)}">`
+    + `<svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-track" cx="50" cy="50" r="42"/>`
+    + `<circle class="ring-rem" cx="50" cy="50" r="42" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="0"/></svg>`
+    + `<div class="ring-center"><span class="ring-left">残り</span><span class="ring-val">${centerHtml}</span></div>`
+    + `<div class="ring-label">${label}</div></div>`;
+}
+function animateUsageRings(root) {
+  const C = 2 * Math.PI * 42;
+  const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  root.querySelectorAll('.usage-ring').forEach((r) => {
+    const arc = r.querySelector('.ring-rem');
+    const target = (C * (1 - Number(r.dataset.rem))).toFixed(2);
+    if (reduce) { arc.style.strokeDashoffset = target; return; }
+    requestAnimationFrame(() => requestAnimationFrame(() => { arc.style.strokeDashoffset = target; }));
+  });
+}
+function fmtRingSec(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h ? `<b>${h}</b><small>時間</small><b>${m}</b><small>分</small>` : `<b>${m}</b><small>分</small>`;
+}
+
+function renderUsageCard() {
+  const box = document.getElementById('usage-card');
+  if (!box || typeof usageLoad !== 'function') return;
+  const u = usageLoad();
+  const now = new Date();
+  const mk = usageMonthKey(now);
+  const mon = (u.gemini || {})[mk] || { calls: 0, text: 0, audio: 0, output: 0, byFeature: {} };
+  const total = mon.text + mon.audio + mon.output;
+  const pct = (x) => (total ? (x / total * 100).toFixed(1) : 0);
+  const labels = typeof GEMINI_USAGE_LABELS === 'object' ? GEMINI_USAGE_LABELS : {};
+  const feats = Object.entries(mon.byFeature || {}).sort((a, b) => b[1].tokens - a[1].tokens).slice(0, 6);
+  const maxF = feats.length ? feats[0][1].tokens || 1 : 1;
+  const prev = Object.keys(u.gemini || {}).filter((k) => k < mk).sort().reverse().slice(0, 3);
+  const g = usageGroqNow(u, now);
+  const featRows = feats.map(([k, f]) => `<div class="usage-feature"><span class="usage-feature-name">${escapeHtmlSimple(labels[k] || k)}</span>`
+    + `<span class="usage-bar thin"><span style="width:${(f.tokens / maxF * 100).toFixed(1)}%"></span></span>`
+    + `<span class="usage-feature-n">${fmtNum(f.tokens)}</span></div>`).join('');
+  const monthRows = prev.map((k) => {
+    const m = u.gemini[k];
+    return `<div><span>${Number(k.slice(5))}月</span><span>${fmtNum(m.text + m.audio + m.output)} トークン・${fmtUsd(usageGeminiCost(m))}</span></div>`;
+  }).join('');
+  box.innerHTML = `
+    <div class="usage-block">
+      <div class="usage-head"><strong>Gemini</strong><span class="usage-sub">${now.getMonth() + 1}月</span></div>
+      <div class="usage-big" id="usage-gemini-total" tabindex="0" role="button" aria-label="Gemini の月別のトークン（押すとグラフ）">${fmtNum(total)}<small>トークン</small><span class="usage-cost">料金の目安 ${fmtUsd(usageGeminiCost(mon))}</span></div>
+      <div class="usage-stack" aria-label="入力（文字）・入力（音声）・出力の割合">
+        <span class="seg-text" style="width:${pct(mon.text)}%"></span><span class="seg-audio" style="width:${pct(mon.audio)}%"></span><span class="seg-output" style="width:${pct(mon.output)}%"></span>
+      </div>
+      <div class="usage-legend"><span><i class="seg-text"></i>文字 ${fmtNum(mon.text)}</span><span><i class="seg-audio"></i>音声 ${fmtNum(mon.audio)}</span><span><i class="seg-output"></i>出力 ${fmtNum(mon.output)}</span></div>
+      ${featRows ? `<div class="usage-features">${featRows}</div>` : ''}
+      ${monthRows ? `<div class="usage-months">${monthRows}</div>` : ''}
+      <div class="usage-actions"><button type="button" class="usage-reset" id="btn-usage-reset">リセット</button></div>
+      <small class="field-hint">料金は Gemini 2.5 Flash の単価（100万トークンあたり 文字 $${GEMINI_PRICE_PER_M.text.toFixed(2)}・音声 $${GEMINI_PRICE_PER_M.audio.toFixed(2)}・出力 $${GEMINI_PRICE_PER_M.output.toFixed(2)}）で計算した目安です。</small>
+    </div>
+    <div class="usage-block">
+      <div class="usage-head"><strong>Groq Whisper</strong><span class="usage-sub">無料枠の残り</span></div>
+      <div class="usage-rings">
+        ${usageRing('今日の音声', g.daySec, GROQ_FREE.daySec, fmtRingSec(GROQ_FREE.daySec - g.daySec))}
+        <div class="usage-rings-row">
+          ${usageRing('この1時間の音声', g.hourSec, GROQ_FREE.hourSec, fmtRingSec(GROQ_FREE.hourSec - g.hourSec))}
+          ${usageRing('今日の回数', g.dayReq, GROQ_FREE.dayReq, `<b>${fmtNum(Math.max(0, GROQ_FREE.dayReq - g.dayReq))}</b><small>回</small>`)}
+        </div>
+      </div>
+      <!-- v0.24.140: 「Groq の返事では、残り ◯ 回です。」は出さない（輪の数と 2 つ並んで、どちらを信じるか迷う・やっさんの指定）。返事の値は usage.js に覚えたまま -->
+      <div class="usage-actions"><button type="button" class="usage-reset" id="btn-usage-reset-groq">リセット</button></div>
+      <small class="field-hint">このアプリから送ったデータを集計しています。</small>
+    </div>
+    <div id="usage-chart" class="usage-chart" role="dialog" aria-label="Gemini の月別のトークン" hidden></div>`;
+  installUsageLongPress();   // v0.24.110: 描き直すたびに数字が新しくなるので、そのつど付け直す
+  animateUsageRings(box);   // v0.24.111
+  const reset = document.getElementById('btn-usage-reset');
+  if (reset) reset.addEventListener('click', resetGeminiUsage);
+  const resetGroq = document.getElementById('btn-usage-reset-groq');   // v0.24.112
+  if (resetGroq) resetGroq.addEventListener('click', resetGroqUsage);
+}
+
+/**
+ * Gemini のトークンの記録をリセット (v0.24.110・やっさん「トークンのリセットボタンをつけよう。リセット時は警告」)
+ * 消すのは Gemini の記録（全部の月）だけ。Groq の数は無料枠の残りに使っているので消さない（消すと残りが多く見えて嘘になる）
+ */
+/**
+ * Groq の数をリセット (v0.24.112・やっさん「リセットは Gemini、Groq 個別でできるように」)
+ * 消すと、Groq 側ではもう使った分があっても、ここでは残りが満タンに見える。それを警告で伝える（できないことをできると言わない）
+ */
+async function resetGroqUsage() {
+  if (!(await confirmDialog({
+    title: 'Groq の使用量をリセットしますか？',
+    message: '今日とこの1時間の数が 0 に戻ります。Groq 側で使った分は減らないので、ここでの残りは実際より多く見えます。元に戻せません。',
+    ok: 'リセット', destructive: true,
+  }))) return;
+  const u = usageLoad();
+  delete u.groq;
+  usageSave(u);
+  diagLog.info('Groq の使用量をリセットしました');
+  renderUsageCard();
+}
+
+async function resetGeminiUsage() {
+  if (!(await confirmDialog({
+    title: 'Gemini のトークンの記録をリセットしますか？',
+    message: '今月と前の月の記録がすべて消えます。元に戻せません。Groq の無料枠の残りは消しません。',
+    ok: 'リセット', destructive: true,
+  }))) return;
+  const u = usageLoad();
+  delete u.gemini;
+  usageSave(u);
+  diagLog.info('Gemini のトークンの記録をリセットしました');
+  closeUsageChart();
+  renderUsageCard();
+}
+
+/* ───────── 詳細設定のまとまり (v0.24.95・設定の見本の 4 段目) ─────────
+ * 見出しを押すと開く・閉じる。高さと濃さをばねで（Motion.reveal。SUMADO の「すっと出し入れ」）。
+ * 開いているかどうかは覚えない（毎回たたんだ状態から。ふだん触らないものを置く場所なので）。
+ * 中から使う欄（「AI 設定を開く」など）を見せたいときは openSettingsSection を使う
+ */
+function setSettingsSection(group, open, animated = true) {
+  if (!group) return;
+  const head = group.querySelector('.settings-acc-head');
+  const body = group.querySelector('.settings-acc-body');
+  if (!head || !body) return;
+  head.setAttribute('aria-expanded', String(!!open));
+  if (window.Motion) Motion.reveal(body, !!open, { instant: !animated });
+  else body.hidden = !open;
+}
+function openSettingsSection(id, animated = true) {
+  const el = document.getElementById(id);
+  setSettingsSection(el && el.closest('.settings-acc'), true, animated);
+}
+/** テストと、まとめて見たいとき用: 詳細設定を全部ひらく（動かさずに） */
+function expandAllSettingsSections() {
+  document.querySelectorAll('#settings-modal .settings-acc').forEach((g) => setSettingsSection(g, true, false));
+}
+document.querySelectorAll('#settings-modal .settings-acc-head').forEach((head) => {
+  head.addEventListener('click', () => {
+    setSettingsSection(head.closest('.settings-acc'), head.getAttribute('aria-expanded') !== 'true');
+  });
+});
+
+// v0.24.88: AI 設定のトグルを切り替えたら、その下（キーの欄・連携のボタン）を出し入れする
+for (const box of [els.inputGeminiEnabled, els.inputGroqEnabled, els.inputClaudeCode]) {
+  if (box) box.addEventListener('change', () => { applyAiSettingsVisibility(true); renderAiTable(); applyLiveSummaryAvailability(); });
+}
+// v0.24.92: キーを入れた・消した、モードを変えたら、表と注意書きも描き直す
+for (const el of [els.inputApiKey, els.inputGroqKey]) if (el) el.addEventListener('input', () => { renderAiTable(); applyLiveSummaryAvailability(); });
+for (const el of [els.modeGemini, els.modeWebSpeech]) if (el) el.addEventListener('change', renderAiTable);
+if (els.aiTableBody) {
+  els.aiTableBody.addEventListener('click', (e) => {
+    const b = e.target.closest('.ai-pick');
+    if (!b || b.disabled || !aiPickWorking) return;
+    const k = b.dataset.k;
+    if (k !== 'stt' && k !== 'post') return;
+    aiPickWorking[k] = b.dataset.a;
+    renderAiTable();
+    // 7 個セットは一緒に変わったことが見えるよう、選んだ列の丸を順にぽんと（少し行き過ぎて戻る）
+    if (window.Motion) {
+      els.aiTableBody.querySelectorAll(`.ai-pick[data-k="${k}"][data-a="${b.dataset.a}"] .ai-pick-dot`).forEach((d, i) => {
+        Motion.set(d, { scale: 0.6 });
+        setTimeout(() => Motion.animate(d, { scale: 1 }, { spring: Motion.SPRINGS.press }), i * 25);
+      });
+    }
   });
 }
 
@@ -5480,8 +11393,118 @@ function onEdit() {
 els.confirmed.addEventListener('input', onEdit);
 els.memo.addEventListener('input', onEdit);
 els.summary.addEventListener('input', onEdit);
+// v0.24.22: リアルタイム要約の目次を押したら、その節へ飛ぶ（v0.24.25 から自分のタブ）
+if (els.liveSummary) {
+  els.liveSummary.addEventListener('input', onEdit);
+  els.liveSummary.addEventListener('click', (e) => {
+    // v0.24.54: 目次の横のボタンは、文字起こしのその話題の場所へ
+    const go = e.target.closest && e.target.closest('[data-ls-goto]');
+    if (go && els.liveSummary.contains(go)) {
+      e.preventDefault();
+      const gli = go.closest('li[data-ls-jump]');
+      if (gli) liveSummaryJumpToTranscript(gli);
+      return;
+    }
+    const li = e.target.closest && e.target.closest('[data-ls-jump]');
+    if (!li || !els.liveSummary.contains(li)) return;
+    const sec = els.liveSummary.querySelector(`[data-ls-section="${li.dataset.lsJump}"]`);
+    if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+// v0.24.143: ライブ要約のタブのトグル（やっさんの指定）。つまみ＝このタブのオン・オフ、名前＝押すと聞いて、目次付きで最初から作る（作り直す）。
+// 前の［最初から要約し直す］（v0.24.25）の働きは、名前を押したときに入れた
+{
+  const combo = document.getElementById('btn-live-combo');
+  if (combo) combo.addEventListener('click', async (e) => {
+    const role = e.target.closest('[data-role]')?.dataset.role;
+    const session = getActiveSession();
+    if (!session) return;
+    if (role === 'toggle') {
+      const on = !tabOpt(session, 'liveSummary');
+      setTabOpt(session, 'liveSummary', on);
+      applyAiButtonState();
+      // 録音中のタブでオンにしたら、その場から間隔ごとの更新を始める（オフなら次の回から止まる。liveSummaryTick が見る）
+      if (on && state.isRecording && state.recordingSessionId === session.id && !state.liveSummaryTimer) startLiveSummaryTimer();
+      return;
+    }
+    if (!postEngineNow()) { statusNotice('error', 'ライブ要約には、AI 設定で Gemini API か Claude Code をオンにしてください', { ms: 4000 }); return; }
+    snapshotActiveToSession();
+    const has = !!String(session.liveSummary || '').replace(/<[^>]*>/g, '').trim();
+    const ok = await confirmDialog(has
+      ? { title: 'ライブ要約を作り直しますか？', message: '講義全体を見て、目次付きで最初から作ります。いまのライブ要約は置き換わります。', ok: '作り直す' }
+      : { title: 'ライブ要約を作りますか？', message: '講義全体を見て、目次付きで作ります。', ok: '作る' });
+    if (!ok) return;
+    // 押せなくするのは runLiveSummary がタブごとにやる (v0.24.27)
+    await runLiveSummary({ sessionId: state.activeId, fresh: true, final: !state.isRecording, manual: true });
+  });
+}
 
 /* ───────── Memo Notion風 Markdown エディタ ───────── */
+
+/**
+ * メモの「行」にあたるブロック要素のタグ。
+ * ul / ol は行ではなく入れ物なので入れない（行は li のほう）。
+ */
+const MEMO_BLOCK_TAGS = new Set([
+  'div', 'p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'blockquote', 'pre', 'label', 'td', 'th', 'dd', 'dt', 'figcaption',
+]);
+
+/**
+ * キャレットのいるノードから「行」のブロックを探す。(v0.24.2)
+ *
+ * ■ なぜ直したか
+ *
+ * 以前は #memo の**直下の子**まで遡っていた。手で打っている間は
+ * 「1行 = #memo 直下の div」なので一致していたが、クリップボードの
+ * text/html を貼ると Chrome は
+ *   <div><p>行</p><p>行</p><p>行</p></div>
+ * という入れ子を作る。すると外側の div が返り、その textContent に
+ * 貼り付けた全文が入るので、^・ や ^# の判定が二度と当たらなくなる。
+ * Enter を押しても新しい p が同じ div の中にできるだけなので、
+ * 以降ずっと直らない。やっさん報告
+ * 「途中コピペ　それ以降の手動での・が箇条書きの・にならなくなる」はこれ。
+ *
+ * 推測ではなく、実機の Chromium に本物の Ctrl+V を送って再現させた。
+ * text/plain だけの貼り付けと <ul> の貼り付けでは壊れない（入れ子の
+ * 作られ方が違う）ので、「コピペすると必ず」ではなく
+ * 「text/html が付いているとき」が条件。
+ *
+ * ■ なぜ「内側のブロック」を返すのか
+ *
+ * 入れ子がなければ最初に見つかるブロックが直下の子そのものなので、
+ * 貼り付けを挟まない従来の操作では戻り値が変わらない。
+ * ブロックが1つも見つからないとき（<span> だけで包まれている等）だけ、
+ * 従来どおり直下の子を返して取りこぼさないようにする。
+ */
+function memoBlockFromNode(node, root) {
+  if (!node || !root) return null;
+  // TEXT_NODE。テストで DOM を用意しないので数値で見る
+  if (node.nodeType === 3) node = node.parentNode;
+  let topChild = null;
+  while (node && node !== root) {
+    if (node.nodeType === 1 && MEMO_BLOCK_TAGS.has((node.tagName || '').toLowerCase())) return node;
+    if (node.parentNode === root) topChild = node;
+    node = node.parentNode;
+  }
+  return topChild;
+}
+
+/**
+ * すでに箇条書きの中で打たれた行頭の記号を外す。(v0.24.2)
+ *
+ * li の中で「・みかん」と打つと、li のマーカーと文字の ・ が二重に出る
+ * （上の修理とは別口で、貼り付けなしでも2行目から起きていた）。
+ * やっさんは行頭に ・ を打って箇条書きを作るので、2行目以降も同じ打ち方に
+ * なる。打たれた ・ は「箇条書きにしたい」という意思表示で、すでに li なら
+ * 用は済んでいる。だから記号だけ飲み込む。
+ *
+ * 記号だけで content が空のときは返さない（打ちかけを消さないため）。
+ */
+function memoStripListMarker(text) {
+  const m = String(text == null ? '' : text).match(/^(?:・\s?|[-*]\s)(.+)$/);
+  return m ? m[1] : null;
+}
 
 function memoGetCurrentBlock() {
   const sel = window.getSelection();
@@ -5518,12 +11541,8 @@ function memoGetCurrentBlock() {
     return div;
   }
 
-  // 通常ケース: 直下の element まで遡る
-  if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
-  while (node && node !== els.memo && node.parentNode !== els.memo) {
-    node = node.parentNode;
-  }
-  return (node && node !== els.memo) ? node : null;
+  // 通常ケース: 「行」のブロックまで遡る
+  return memoBlockFromNode(node, els.memo);
 }
 
 function memoFindTaskItem() {
@@ -5546,6 +11565,64 @@ function memoFindAncestor(tagName) {
     node = node.parentNode;
   }
   return null;
+}
+
+/**
+ * 文字も画像も無い行か (v0.24.15)
+ *
+ * v0.24.14 までは `textContent.trim() === ''` で見ていた。画像は文字を持たないので、
+ * **画像だけの箇条書きで Enter を押すと「空の行」扱いで画像ごと消えていた**
+ * （やっさん報告「画像の右にカーソルを移動して改行したら画像が消えた」）。
+ */
+function memoIsBlank(el) {
+  if (!el) return true;
+  if ((el.textContent || '').trim() !== '') return false;
+  return !el.querySelector('img, hr, table');
+}
+
+/**
+ * 行の形を変えるとき、中身を**要素ごと**移す (v0.24.15)
+ *
+ * 以前は `div.textContent = li.textContent` で作り直していたので、画像・太字・
+ * リンクが行の形を変えた瞬間に落ちていた。入れ子のリストは移さない（呼び出し側で扱う）。
+ */
+function memoMoveInlineChildren(from, to) {
+  for (const n of Array.from(from.childNodes)) {
+    if (n.nodeType === 1 && (n.tagName === 'UL' || n.tagName === 'OL')) continue;
+    to.appendChild(n);
+  }
+  if (memoIsBlank(to) && !to.querySelector('br')) to.innerHTML = '<br>';
+}
+
+/** 項目の直下にある子リスト（最初の1つ）。無ければ null (v0.24.18) */
+function memoDirectChildList(li) {
+  return Array.from(li.children).find(c => c.tagName === 'UL' || c.tagName === 'OL') || null;
+}
+
+/** 子リストを除いた、項目そのものの中身が空か (v0.24.18) */
+function memoInlineIsBlank(li) {
+  const c = li.cloneNode(true);
+  for (const n of Array.from(c.children)) if (n.tagName === 'UL' || n.tagName === 'OL') n.remove();
+  return memoIsBlank(c);
+}
+
+/**
+ * カーソルが項目の文字の末尾（子リストの直前）にあるか (v0.24.18)
+ *
+ * カーソルから子リストの手前までに、文字も画像も無ければ末尾とみなす。
+ * 子リストより後ろ（子の中など）にいるときは false。
+ */
+function memoCaretAtInlineEnd(li, childList) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed) return false;
+  const caret = sel.getRangeAt(0);
+  if (childList.contains(caret.startContainer)) return false;
+  const r = document.createRange();
+  r.setStart(caret.startContainer, caret.startOffset);
+  r.setEndBefore(childList);
+  if (r.collapsed && r.compareBoundaryPoints(Range.START_TO_START, caret) !== 0) return false;
+  const frag = r.cloneContents();
+  return !(frag.textContent || '').trim() && !frag.querySelector('img');
 }
 
 function memoPlaceCaretAtEnd(el) {
@@ -5618,7 +11695,20 @@ function checkMemoMarkdown() {
   const block = memoGetCurrentBlock();
   if (!block) return;
   const tag = (block.tagName || '').toLowerCase();
-  if (['h1','h2','h3','li','blockquote','hr','label'].includes(tag)) return;
+  // すでに箇条書きの中。行頭に打たれた ・ / - は飲み込む (v0.24.2)
+  if (tag === 'li') {
+    // 子要素がある li は触らない。textContent への代入で
+    // 画像や <br> を消してしまうから
+    if (!block.children.length) {
+      const stripped = memoStripListMarker(block.textContent || '');
+      if (stripped !== null) {
+        block.textContent = stripped;
+        memoPlaceCaretAtEnd(block);
+      }
+    }
+    return;
+  }
+  if (['h1','h2','h3','blockquote','hr','label'].includes(tag)) return;
   const text = block.textContent || '';
 
   // --- 区切り線 (- 単独や -- 入力中に箇条書きに化けないよう最初に判定)
@@ -5659,14 +11749,19 @@ function updateMemoCheatsheetVisibility() {
     // auto: メモが空の時だけ表示
     show = !els.memo.textContent.trim() && !els.memo.querySelector('*:not(br)');
   }
-  sheet.classList.toggle('hidden', !show);
+  // v0.24.73: 高さと濃さをばねで出し入れする（SUMADO の reveal。TODO「動きを SUMADO の仕様書に合わせる」の 12）
+  const wrap = document.getElementById('memo-cheatsheet-wrap') || sheet;
+  wrap.__shown = show;
+  if (window.Motion) Motion.reveal(wrap, show);
+  else wrap.hidden = !show;
   if (helpBtn) helpBtn.classList.toggle('active', show);
 }
 
 function toggleMemoCheatsheet() {
   const sheet = document.getElementById('memo-cheatsheet');
   if (!sheet) return;
-  const currentlyShown = !sheet.classList.contains('hidden');
+  const wrap = document.getElementById('memo-cheatsheet-wrap') || sheet;
+  const currentlyShown = wrap.__shown !== undefined ? wrap.__shown : !wrap.hidden;
   state.cheatsheetForced = currentlyShown ? 'hidden' : 'shown';
   updateMemoCheatsheetVisibility();
 }
@@ -5690,7 +11785,7 @@ els.memo.addEventListener('input', (e) => {
   checkMemoMarkdown();
 });
 
-els.memo.addEventListener('keydown', (e) => {
+function handleMemoKeydown(e) {
   // Tab / Shift+Tab
   if (e.key === 'Tab') {
     const li = memoFindAncestor('LI');
@@ -5741,12 +11836,32 @@ els.memo.addEventListener('keydown', (e) => {
     if (label) {
       e.preventDefault();
       const span = label.querySelector('span');
-      const isEmpty = !span || span.textContent.trim() === '';
+      const isEmpty = !span || memoIsBlank(span);
       const newBlock = document.createElement('div');
       newBlock.innerHTML = '<br>';
       label.parentNode.insertBefore(newBlock, label.nextSibling);
       if (isEmpty) label.remove();
       memoPlaceCaretAtStart(newBlock);
+      return;
+    }
+
+    /* v0.24.18: 子を持つ項目の**文字の末尾**で Enter → 最初の子として新しい項目を作る。
+     *
+     * Chrome に任せると、新しい空の項目が親と同じ高さにでき、子のリストがそちらへ
+     * **引っ越す**（実機で確認: <li>あああ</li><li><br><ul>いいい…</ul></li>）。
+     * 見た目は「空の親の下に子がぶら下がる」形で、やっさんは「間違えた」と思って
+     * Backspace を押し、そこから崩れていった（報告: 「いいいの上に子の点を入れたくて、
+     * まちがえて あああ の右で改行すると、親の・ができる」）。
+     * 子を持つ行の末尾で改行したら最初の子になるのは Notion と同じで、
+     * この報告で本人がやりたかったことそのものでもある。 */
+    const parentLi = memoFindAncestor('LI');
+    const childList = parentLi && memoDirectChildList(parentLi);
+    if (childList && memoCaretAtInlineEnd(parentLi, childList)) {
+      e.preventDefault();
+      const newLi = document.createElement('li');
+      newLi.innerHTML = '<br>';
+      childList.insertBefore(newLi, childList.firstChild);
+      memoPlaceCaretAtStart(newLi);
       return;
     }
 
@@ -5761,7 +11876,7 @@ els.memo.addEventListener('keydown', (e) => {
     //   末尾で押した  → 従来どおりリストを抜けて、その下に空行
     //   途中で押した  → その位置でリストを分割し、間に空行を挟む（以降の行が下がる）
     const li = memoFindAncestor('LI');
-    if (li && li.textContent.trim() === '') {
+    if (li && memoIsBlank(li)) {
       e.preventDefault();
       const list = li.parentNode;
       const listTag = list.tagName.toLowerCase();
@@ -5808,8 +11923,7 @@ els.memo.addEventListener('keydown', (e) => {
     if (['h1','h2','h3','blockquote'].includes(tag)) {
       e.preventDefault();
       const div = document.createElement('div');
-      div.textContent = block.textContent;
-      if (!div.textContent) div.innerHTML = '<br>';
+      memoMoveInlineChildren(block, div);
       block.replaceWith(div);
       memoPlaceCaretAtStart(div);
       return;
@@ -5821,10 +11935,82 @@ els.memo.addEventListener('keydown', (e) => {
       const li = block;
       const list = li.parentNode;
       const div = document.createElement('div');
-      div.textContent = li.textContent;
-      if (!div.textContent) div.innerHTML = '<br>';
-      list.parentNode.insertBefore(div, list);
+      // 入れ子のリストは文字に潰さず、出した行のすぐ下にリストのまま残す
+      const nested = Array.from(li.children).filter(c => c.tagName === 'UL' || c.tagName === 'OL');
+
+      /* v0.24.18: 子を持つ**空の**項目なら、項目ごと消して子を1つ上の項目に返す。
+       *
+       * 下の「・だけ消す」をこの形に当てると、子のリストが親と同じ高さに出てしまう
+       * （子が一段浅くなる）。空の項目に子がぶら下がっているのは、ほぼ必ず
+       * 「子を持つ行の途中で Enter を押した」結果なので、その逆をやるのが自然。 */
+      const prevLi = li.previousElementSibling;
+      if (nested.length && prevLi && prevLi.tagName === 'LI' && memoInlineIsBlank(li)) {
+        let caretBefore = null;
+        for (const n of nested) {
+          const last = prevLi.lastElementChild;
+          if (last && last.tagName === n.tagName) {
+            // 上の項目がすでに同じ種類の子リストを持っていれば、その末尾へ続ける
+            while (n.firstChild) last.appendChild(n.firstChild);
+            n.remove();
+            if (!caretBefore) caretBefore = last;
+          } else {
+            prevLi.appendChild(n);
+            if (!caretBefore) caretBefore = n;
+          }
+        }
+        li.remove();
+        // カーソルは上の項目の文字の末尾（子リストの直前）
+        const r = document.createRange();
+        r.setStartBefore(caretBefore);
+        r.collapse(true);
+        const sel2 = window.getSelection();
+        sel2.removeAllRanges();
+        sel2.addRange(r);
+        return;
+      }
+
+      memoMoveInlineChildren(li, div);
+      /* v0.24.16: 押した行の**その場所で**・だけを消す。
+       *
+       * 以前は何番目の項目でも `list` の前に出していた。先頭の項目なら合っているが、
+       * 最後の項目で押すと行がリストの頭へ飛ぶ。入れ子では「親」と「1番目の子」の
+       * 間に空行が入ったように見えていた（やっさん報告「一番最後の子のところで
+       * バックスペースを押すと、親と一番上の子の間に1行空行が入る。本当は一番最後の
+       * 子の・が消えてほしい」）。
+       *
+       * 途中の項目なら、そこでリストを2つに分けて間に置く（Enter で空の項目を抜ける
+       * ときと同じ分け方）。入れ子のリストの項目なら、字下げは子の位置に揃える
+       * （・だけが消えて、行は動かないように見せるため）。 */
+      const after = [];
+      for (let n = li.nextElementSibling; n; n = n.nextElementSibling) after.push(n);
+      const isFirst = !li.previousElementSibling;
+      if (list.parentNode && list.parentNode.tagName === 'LI') {
+        const pad = parseFloat(getComputedStyle(list).paddingLeft) || 0;
+        if (pad) div.style.paddingLeft = Math.round(pad) + 'px';
+      }
       li.remove();
+      if (isFirst) {
+        list.parentNode.insertBefore(div, list);
+      } else {
+        list.parentNode.insertBefore(div, list.nextSibling);
+        if (after.length) {
+          const listTag = list.tagName.toLowerCase();
+          const rest = document.createElement(listTag);
+          for (const el of after) rest.appendChild(el);
+          if (listTag === 'ol') {
+            rest.start = (parseInt(list.getAttribute('start'), 10) || 1) + list.children.length;
+          }
+          div.parentNode.insertBefore(rest, div.nextSibling);
+        }
+      }
+      // 子のリストは出した行のすぐ下に置き、行と同じだけ字下げする
+      // （行の文字より一段深い位置のまま ── 子が浅くならないように）
+      let anchor = div;
+      for (const n of nested) {
+        if (div.style.paddingLeft) n.style.marginLeft = div.style.paddingLeft;
+        anchor.parentNode.insertBefore(n, anchor.nextSibling);
+        anchor = n;
+      }
       if (list.children.length === 0) list.remove();
       memoPlaceCaretAtStart(div);
       return;
@@ -5835,8 +12021,8 @@ els.memo.addEventListener('keydown', (e) => {
       e.preventDefault();
       const span = block.querySelector('span');
       const div = document.createElement('div');
-      div.textContent = span ? span.textContent : '';
-      if (!div.textContent) div.innerHTML = '<br>';
+      if (span) memoMoveInlineChildren(span, div);
+      else div.innerHTML = '<br>';
       block.replaceWith(div);
       memoPlaceCaretAtStart(div);
       return;
@@ -5850,6 +12036,54 @@ els.memo.addEventListener('keydown', (e) => {
       return;
     }
   }
+}
+
+/**
+ * メモのキー操作の入口 (v0.24.15)
+ *
+ * ■ Ctrl+Z / Ctrl+Y をアプリの「戻す／やり直す」に回す
+ *
+ * メモの中で押した Ctrl+Z は、これまでブラウザ自身の取り消しに任せていた。
+ * ブラウザの取り消しは**スクリプトが書き換えた分を知らない**（画像の貼り付け、
+ * ・ からの箇条書き化、Enter / Backspace の特別処理）。そのため関係ない文字が
+ * 消えたり、やり直すと見たことのない途中の形が出たりする（実機の Chromium で再現:
+ * 画像を貼って Enter → Ctrl+Z を3回押しても戻らず、Ctrl+Y で「・あ」が出てきた）。
+ * やっさん報告「元に戻そうとしたら…文字が消えて、やり直そうとしたらやり直し機能が無くて」。
+ *
+ * ■ 特別処理で書き換えたら、その前の状態を積む
+ *
+ * 打鍵の取り消し（bindPaneTypingUndo）のリスナーはこれより**後**に登録されるので、
+ * 走る時点では書き換えが終わっていて、書き換え前の状態を取りこぼしていた。
+ */
+els.memo.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.isComposing) {
+    const k = (e.key || '').toLowerCase();
+    const redo = k === 'y' || (k === 'z' && e.shiftKey);
+    const undo = k === 'z' && !e.shiftKey;
+    if (undo || redo) {
+      e.preventDefault();
+      if (paneTypingFlush['pane-memo']) paneTypingFlush['pane-memo']('編集');
+      const was = els.memo.innerHTML;
+      if (undo) doPaneUndo('pane-memo'); else doPaneRedo('pane-memo');
+      // 中身を入れ替えるとカーソルが消えるので、メモの末尾に戻して打ち続けられるようにする。
+      // 何も戻らなかったときは、カーソルを動かさない
+      if (els.memo.innerHTML !== was) {
+        els.memo.focus();
+        memoPlaceCaretAtEnd(els.memo);
+      }
+      return;
+    }
+  }
+
+  const before = paneHtml('pane-memo');
+  handleMemoKeydown(e);
+  if (!e.defaultPrevented || paneHtml('pane-memo') === before) return;
+  // 特別処理が書き換えた。打ちかけ → 書き換え前 の順に積む
+  if (paneLastStable['pane-memo'] !== before) {
+    pushUndoSnapshot('pane-memo', '編集', paneLastStable['pane-memo']);
+  }
+  pushUndoSnapshot('pane-memo', e.key === 'Enter' ? '改行' : '行の形を変更', before);
+  memoUndoCommit();
 });
 
 // チェックボックスクリックで .done 切替
@@ -5863,8 +12097,80 @@ els.memo.addEventListener('change', (e) => {
 });
 
 // ペースト時：AI整形ONなら少し待って整形発動
+/* v0.22.1: 貼った画像を触る（クリックで枠、右クリックでメニュー）
+ *
+ * ここは**画像のときだけ**割り込む。それ以外はメモの標準の編集を邪魔しない。
+ */
+els.memo.addEventListener('pointerdown', (e) => {
+  const img = e.target && e.target.tagName === 'IMG' ? e.target : null;
+  if (!img) { clearImageSelection(); return; }
+  selectMemoImage(img);
+  // 「前面」は座標で、「行内」は文字の間を選んで動かす。
+  // v0.24.13 までは行内を標準のドラッグに任せていて、画像がタブで開いていた
+  if (img.dataset.float === '1') onFloatingImageDown(e);
+  else onInlineImageDown(e);
+});
+
+// pointerdown の preventDefault で標準のドラッグは始まらないが、
+// 念のためここでも止める（URL を運ぶドラッグが1度でも始まるとタブで開かれる）
+els.memo.addEventListener('dragstart', (e) => {
+  if (e.target && e.target.tagName === 'IMG') e.preventDefault();
+});
+
+els.memo.addEventListener('contextmenu', (e) => {
+  const img = e.target && e.target.tagName === 'IMG' ? e.target : null;
+  if (!img) return;   // 画像以外は標準の右クリックメニューのまま
+  e.preventDefault();
+  selectMemoImage(img);
+  openImageMenu(img, e.clientX, e.clientY);
+});
+
+// 枠がずれないよう、動きうるものに追随させる
+els.paneMemoBody.addEventListener('scroll', positionImageBox);
+// v0.24.15: キーで画像を消したとき枠だけ残っていた。打鍵で行がずれたときも追う
+els.memo.addEventListener('input', () => { if (_selectedImg) positionImageBox(); });
+window.addEventListener('resize', positionImageBox);
+// メモの外を触ったら選択を解く（メニューの中は除く）
+document.addEventListener('pointerdown', (e) => {
+  if (!_selectedImg) return;
+  if (e.target.closest && (e.target.closest('#img-handles') || e.target.closest('#img-menu'))) return;
+  if (els.memo.contains(e.target)) return;
+  clearImageSelection();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') clearImageSelection();
+});
+
+/* v0.22.0: メモの貼り付け。画像は保管庫へ、受け取れないものは一言出す */
+// v0.24.98: 貼り付けのオプション。押したら切り替え、打ち始めたり外を触ったりしたら引っ込める（Word と同じ）
+(() => {
+  const box = document.getElementById('paste-options');
+  if (!box) return;
+  // 押してもメモのカーソルを奪わない
+  box.addEventListener('pointerdown', (e) => e.preventDefault());
+  box.addEventListener('click', (e) => { const b = e.target.closest('[data-paste]'); if (b) applyPasteMode(b.dataset.paste); });
+  // 先に見る（capture）。メモのほかのキーの処理（Markdown の変換など）が止めても、引っ込めは効くように
+  document.addEventListener('keydown', (e) => {
+    if (!_pasteOpt || e.ctrlKey || e.metaKey || ['Control', 'Meta', 'Shift', 'Alt'].includes(e.key)) return;
+    hidePasteOptions();
+  }, true);
+  // 日本語の入力（IME）や、キーを押さずに入る文字でも引っ込める。自分の「文字だけ」の入れ直しは除く
+  els.memo.addEventListener('beforeinput', () => { if (_pasteOpt && !_pasteApplying) hidePasteOptions(); }, true);
+  document.addEventListener('pointerdown', (e) => { if (_pasteOpt && !box.contains(e.target)) hidePasteOptions(); }, true);
+  // 流れたら引っ込めずについていく（大きな字を貼ると、貼った直後にメモが流れる。最初は引っ込めていて、出た瞬間に消えていた）
+  els.paneMemoBody.addEventListener('scroll', () => { if (_pasteOpt) placePasteOptions(); });
+})();
+
+els.memo.addEventListener('paste', (e) => {
+  // ここで throw すると貼り付け操作ごと落ちるので、必ず受け止める
+  handleMemoPaste(e).catch(err => {
+    console.warn('[memo paste] failed:', err);
+    setStatus('error', '貼り付けに失敗しました: ' + (err.message || err));
+  });
+});
+
 els.confirmed.addEventListener('paste', () => {
-  if (!state.settings.aiEnabled || !state.settings.apiKey) return;
+  if (!tabOpt(state.activeId, 'liveRefine') || !geminiKey()) return;   // v0.24.143: タブごと
   setTimeout(() => { refineUnstructuredInTranscript({ showFeedback: false }); }, 150);
 });
 
@@ -5878,18 +12184,121 @@ if (els.btnRefineTranscript) {
     } else {
       // 本体クリック: トグルON/OFFに関わらず、全体を上から下までまとめて文脈込みで
       // 再整形＋見出し付け。既に整形済みのテキストも一度に整う。
-      if (!state.settings.apiKey) { openSettings(); return; }
-      els.btnRefineTranscript.classList.add('firing');
+      if (!geminiKey()) { openSettings(); return; }
+      // v0.24.27: 印はタブごと（別のタブに移ったら消え、戻ったらまた付く）
+      const sid = state.activeId;
+      markBusy('refine', sid, true);
       try {
         await refineWholeTranscript({ showFeedback: true });
       } finally {
-        els.btnRefineTranscript.classList.remove('firing');
+        markBusy('refine', sid, false);
       }
     }
   });
 }
 
+/* v0.21.0: 話者判別。走っている間は同じボタンが「中止」になる */
+if (els.btnDiarize) {
+  els.btnDiarize.addEventListener('click', () => { runDiarization(); });
+  updateDiarizeButton();
+}
+
+/* ───────── モーダルの出入り（v0.24.62・TODO「動きを SUMADO の仕様書に合わせる」の 3）─────────
+ * 設定・文脈・Notion の保存先・字幕の設定・無音の確認。開くときは CSS の keyframes（ease）、閉じると一瞬で消えていた。
+ * 仕様書 2.2「アラートは少し大きいところから縮んで、少し行き過ぎて収まる。しまうときは行き過ぎない」（MOTION.pop / alertFrom）。
+ *
+ * 出し入れは今までどおり各所で .hidden を付け外しする。ここは class の変化を見張って動きだけを付ける
+ * （呼び出し側を全部書き換えると、閉じ忘れや二重の閉じが起きやすい）。
+ * 閉じるときは、本物はその場で隠し、見た目の写しを置いて縮めながら消す。本物を残して待つと、その間は
+ * classList.contains('hidden') が false のままで、「開いていたら閉じる」の判定（Esc など）がずれる。
+ */
+function installModalMotion() {
+  if (!window.Motion) return;
+  const M = Motion.MOTION, S = Motion.SPRINGS;
+  const ghostOf = (modal) => {
+    const g = modal.cloneNode(true);
+    g.removeAttribute('id');
+    g.setAttribute('aria-hidden', 'true');
+    g.classList.remove('hidden');
+    g.style.pointerEvents = 'none';
+    g.querySelectorAll('[id]').forEach((n) => n.removeAttribute('id'));
+    // 写しには、いま入っている値を写す（cloneNode は打ち込んだ値・チェックを写さない）
+    const src = modal.querySelectorAll('input, textarea, select');
+    g.querySelectorAll('input, textarea, select').forEach((n, i) => {
+      const o = src[i];
+      if (!o) return;
+      if (n.type === 'checkbox' || n.type === 'radio') n.checked = o.checked; else n.value = o.value;
+    });
+    // iframe は写すと読み込み直して白く光るので、同じ大きさの空の箱にする（字幕の設定）
+    g.querySelectorAll('iframe').forEach((f) => { const d = document.createElement('div'); d.style.cssText = 'flex:1;background:var(--bg)'; f.replaceWith(d); });
+    return g;
+  };
+  for (const modal of document.querySelectorAll('.modal')) {
+    let shown = !modal.classList.contains('hidden');
+    new MutationObserver(() => {
+      const now = !modal.classList.contains('hidden');
+      if (now === shown) return;
+      shown = now;
+      const card = modal.querySelector('.modal-card');
+      const back = modal.querySelector('.modal-backdrop');
+      if (now) {
+        if (card) {
+          Motion.set(card, { scale: M.alertFrom, opacity: 0 });
+          // 2 回目の animate は 1 回目の約束を「割り込まれた」で終わらせる。片付けは、全部のばねが止まったときに
+          // 返る 2 回目の約束にかける（1 回目にかけると片付かず、style に値が残った。テストで見つけた）
+          Motion.animate(card, { scale: 1 }, { spring: M.pop });
+          Motion.animate(card, { opacity: 1 }, { spring: M.popFade }).then((d) => { if (d) Motion.clear(card); });
+        }
+        if (back) {
+          Motion.set(back, { opacity: 0 });
+          Motion.animate(back, { opacity: 1 }, { spring: S.fade }).then((d) => { if (d) Motion.clear(back); });
+        }
+        return;
+      }
+      const g = ghostOf(modal);
+      document.body.appendChild(g);
+      const gc = g.querySelector('.modal-card');
+      const gb = g.querySelector('.modal-backdrop');
+      // 開いている途中で閉じたら、その途中の大きさ・濃さから
+      if (card && gc) {
+        const c = Motion.current(card);
+        Motion.clear(card);
+        Motion.set(gc, { scale: c.scale, opacity: c.opacity });
+      }
+      if (back) Motion.clear(back);
+      const done = [];
+      if (gc) {
+        Motion.animate(gc, { scale: 0.96 }, { spring: S.press });
+        done.push(Motion.animate(gc, { opacity: 0 }, { spring: S.fade }));
+      }
+      if (gb) done.push(Motion.animate(gb, { opacity: 0 }, { spring: S.fade }));
+      Promise.all(done).then(() => g.remove());
+    }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+  }
+}
+installModalMotion();
+
+// v0.24.77: 設定の「Claude Code 連携」「Notion 連携」の横の状態（確認中… → 長い結果）は、字の長さで折り返して
+// 行の高さが変わる。跳ばずに伸び縮みさせる（やっさん「唐突に出る動きを徹底的にほかにないか調べてみて」）
+if (window.Motion) {
+  for (const id of ['claude-bridge-status', 'notion-test-result']) {
+    const row = document.getElementById(id) && document.getElementById(id).closest('.field');
+    if (row) Motion.smoothHeight(row, row);
+  }
+}
+// v0.24.69: 右上の状態の札を、SUMADO のダイナミックアイランドのように（点 → 縦 → 横で出る・字が変わると形が伸び縮み）
+installStatusIsland();
+// v0.24.64: Notion 保存の小窓は、文言・結果の行・下のボタンの出入りで高さが変わる。跳ばずに伸び縮みさせる
+if (window.Motion && els.notionProgress) Motion.smoothHeight(els.notionProgress, els.notionProgress);
+// v0.24.60: 下書き（#interim）の高さを、出る・消える・行が増えるたびにばねで（空は高さ 0）
+if (window.Motion && els.interim) Motion.smoothHeight(els.interim, els.interim);
+// v0.24.60: 人が自分でスクロールしはじめたら、ばねの自動スクロールをその場で止める
+for (const ev of ['wheel', 'touchstart', 'pointerdown', 'keydown']) {
+  els.paneTranscriptBody.addEventListener(ev, stopTranscriptScroll, { passive: true });
+}
 els.paneTranscriptBody.addEventListener('scroll', () => {
+  // ばねの自動スクロールの途中は、まだ最下部に着いていないだけ（人が上へ戻したのではない）
+  if (transcriptScroll.moving) return;
   state.userScrolledUp = !isPinnedToBottom();
   els.btnScrollBottom.classList.toggle('hidden', !state.userScrolledUp);
 });
@@ -5905,6 +12314,7 @@ document.addEventListener('keydown', (e) => {
     if (!els.settingsModal.classList.contains('hidden')) closeSettings();
     // v0.14.2: 保存先ピッカーは Promise で待っているので、Escape でも必ず解決させる
     if (els.notionPicker && !els.notionPicker.classList.contains('hidden')) closeNotionPicker(null);
+    if (els.contextModal && !els.contextModal.classList.contains('hidden')) closeContextModal();
     if (!els.silenceDialog.classList.contains('hidden')) {
       hideSilenceDialog();
       resetLongSilenceTimer();
@@ -6009,7 +12419,8 @@ function clampFloatWindow() {
   const win = els.quickChatModal;
   if (!win || !win.classList.contains('positioned')) return;
   const z = getAppZoom();
-  const rect = win.getBoundingClientRect(); // visual px
+  // v0.24.75: 出てくる途中は小さく描いているので、getBoundingClientRect では測らない（layout の大きさ × 倍率で見る）
+  const rect = { width: win.offsetWidth * z, height: win.offsetHeight * z }; // visual px
   const margin = 4;
   // 視覚上の可動域（visual px）→ layout px に変換して style.left/top と突き合わせ
   const maxX = (window.innerWidth  - rect.width  - margin) / z;
@@ -6034,6 +12445,13 @@ function openQuickChat() {
     els.quickChatModal.style.top = `${pos.y}px`;
   }
   renderChatInto(els.quickChatMessages, els.quickChatEmpty, els.quickChatBody);
+  // v0.24.75: 小さいところから少し行き過ぎてぽんと（TODO「動きを SUMADO の仕様書に合わせる」の 12。前は CSS の transition の ease）
+  if (window.Motion) {
+    Motion.popIn(els.quickChatModal, { from: 0.9, y: 8, shownClass: 'show' });
+    clampFloatWindow();
+    setTimeout(() => els.quickChatInput?.focus(), 60);
+    return;
+  }
   // 次フレームで .show を付けてフェードイン（visibility の hidden→visible の猶予）
   requestAnimationFrame(() => {
     els.quickChatModal.classList.add('show');
@@ -6045,13 +12463,20 @@ function openQuickChat() {
 }
 function closeQuickChat() {
   if (!els.quickChatModal) return;
+  // v0.24.75: 行き過ぎずに縮みながらふわっと消えてから隠す
+  if (window.Motion) { Motion.popOut(els.quickChatModal, { to: 0.94, shownClass: 'show' }); return; }
   els.quickChatModal.classList.remove('show');
   // visibility: hidden は CSS transition の delay で自動的に追いつく
+}
+/** 質問の小窓が出ているか（しまう途中は出ていない扱い。押し直したら出し直す） */
+function quickChatOpen() {
+  if (!els.quickChatModal) return false;
+  return window.Motion ? Motion.popIsOpen(els.quickChatModal, { shownClass: 'show' }) : els.quickChatModal.classList.contains('show');
 }
 if (els.btnQuickChat) {
   els.btnQuickChat.addEventListener('click', () => {
     // トグル: 開いていたら閉じる
-    if (els.quickChatModal?.classList.contains('show')) closeQuickChat();
+    if (quickChatOpen()) closeQuickChat();
     else openQuickChat();
   });
 }
@@ -6157,9 +12582,300 @@ applySummaryDetailSwitch();
 applyPaneOrder();
 renderInnerTabs();
 if (typeof renderIcons === 'function') renderIcons();
+// v0.24.89: 空のときの案内の「AI 設定を開く」（案内は描き直すので、入れ物ごとに 1 回だけ登録）
+for (const box of [els.emptyHint, els.liveSummaryEmpty, els.summaryEmpty, els.chatEmpty]) {
+  if (box) box.addEventListener('click', (e) => { if (e.target.closest('.empty-open-ai')) openAiSettings(); });
+}
 els.zoomRange.value = state.settings.appZoom;
 els.zoomPercent.textContent = state.settings.appZoom + '%';
+if (els.btnClearAudio) {
+  els.btnClearAudio.addEventListener('click', async () => {
+    // v0.24.103: 自前の確認の小窓に。「残す」にした録音は消さない
+    const pinnedN = pinnedAudioIds().size;
+    if (!(await confirmDialog({
+      title: '保持している録音をすべて消しますか？',
+      message: '文字起こしの結果は消えません。' + (pinnedN ? `「残す」にした録音（${pinnedN}件）は消しません。` : ''),
+      ok: 'すべて消す', destructive: true,
+    }))) return;
+    try {
+      const n = await audioStoreClearAll({ keep: pinnedAudioIds() });
+      diagLog.info(`保持していた音声 ${n} 件を手動で消しました`);
+    } catch (e) {
+      alert('消せませんでした: ' + (e.message || e));
+    }
+    refreshAudioUsage();
+  });
+}
+
 initSessions();
+renderDictBar();   // v0.20.0
+// v0.22.0: どのメモからも参照されていない画像を片付ける
+sweepStoredImages();
+// v0.24.0: 保存されている Claude 連携の設定を claude-bridge.js に渡す。
+// **起動のたびに必ずやる。** claude-bridge.js 側の旗は false から始まるので、
+// ここを通さないと、設定画面で入れてあっても連携が切れたままになる
+applyClaudeBridgeSetting();
+// v0.24.44: 連携がオンなら、立ち上げたときに接続とログインを自動で確かめて、トグルの横に出す
+// （「接続を確認」ボタンは外した。やっさんの指定）。ここでは結果を出すだけで、設定は変えない
+// （立ち上げた瞬間だけ繋がらないこともあるので、オフに戻したりはしない）
+if (state.settings.claudeCode) testClaudeBridge();
+// v0.24.50: Notion 連携も同じく、オンなら立ち上げたときに確かめて横に出す（結果を出すだけで設定は変えない）。
+// **loadSettings() より後でないといけない**（最初はその前に書いてしまい、設定が空のまま判断していた）
+if (state.settings.notionEnabled && state.settings.notionToken && notionIsAvailable()) {
+  testNotionConnection(state.settings.notionToken);
+}
+// v0.24.9: オンにしたその場でログインを見る
+if (els.inputClaudeBridge) {
+  els.inputClaudeBridge.addEventListener('change', () => { applyLiveSummaryAvailability(); });
+}
+// v0.24.39: 「Claude Code」（連携を使う）。オンにしたその場で接続とログインを確かめる
+if (els.inputClaudeCode) {
+  els.inputClaudeCode.addEventListener('change', () => {
+    // オフにしたら、横の状態の表示も消す（オフなのに「使えます」と出ていると紛らわしい）
+    if (!els.inputClaudeCode.checked && els.claudeBridgeStatus) {
+      els.claudeBridgeStatus.textContent = '';
+      els.claudeBridgeStatus.className = 'field-hint';
+    }
+    verifyClaudeBridgeToggle();
+    applyLiveSummaryAvailability();
+  });
+}
+// v0.24.47: 音声チャンクの5つを既定値に戻す（やっさんの指定）。欄に入れるだけで、
+// ほかの設定と同じく「保存」を押したときに反映される（押し間違えても、キャンセルで元に戻せる）
+{
+  const btn = document.getElementById('btn-chunk-defaults');
+  if (btn) btn.addEventListener('click', () => {
+    const d = DEFAULT_SETTINGS;
+    if (els.inputChunkSec) els.inputChunkSec.value = d.audioChunkSec;
+    if (els.inputSilenceCut) els.inputSilenceCut.checked = d.audioSilenceCut !== false;
+    if (els.inputChunkMaxSec) els.inputChunkMaxSec.value = d.audioChunkMaxSec;
+    if (els.inputMinChunkBytes) els.inputMinChunkBytes.value = d.audioMinChunkBytes;
+    if (els.inputAudioBitrate) els.inputAudioBitrate.value = String(d.audioBitrate);
+  });
+}
+// v0.24.113: AI の動き・停止条件・表示にも「既定値に戻す」（やっさんの指定）。音声入力と同じく、欄の値を戻すだけ（保存で決まる）。
+// トグル・欄の出し入れ（ライブ要約の間隔など）が値に合わせて変わるよう、change を送る
+{
+  const setVal = (el, v) => { if (el) { el.value = String(v); el.dispatchEvent(new Event('input', { bubbles: true })); } };
+  const setChk = (el, v) => { if (el && !el.disabled) { el.checked = !!v; el.dispatchEvent(new Event('change', { bubbles: true })); } };
+  const d = DEFAULT_SETTINGS;
+  const on = (id, fn) => { const b = document.getElementById(id); if (b) b.addEventListener('click', fn); };
+  on('btn-ai-defaults', () => {
+    setChk(els.inputClaudeFallback, d.claudeFallbackGemini);
+    setChk(els.inputAiEnabled, d.aiEnabled);
+    setVal(els.inputSilenceSec, d.silenceSec);
+    setVal(els.inputMidConsolidateSec, d.midConsolidateSec);
+    setChk(els.inputLiveSummary, d.liveSummary);
+    setVal(els.inputLiveSummaryMin, d.liveSummaryMin);
+    setChk(els.inputAutoSummarize, d.autoSummarize);
+    setChk(els.inputRefineWithWs, d.refineWithWebSpeech);   // v0.24.144
+    applyAiSettingsVisibility(true);   // v0.24.132: 要約の詳しさの出し入れも戻す
+    const det = { low: els.summaryDetailLow, medium: els.summaryDetailMedium, high: els.summaryDetailHigh }[d.summaryDetail || 'medium'];
+    if (det) det.checked = true;
+  });
+  on('btn-autostop-defaults', () => {
+    setChk(els.inputAutoStop, d.autoStopEnabled);
+    setVal(els.inputAutoStopSec, d.autoStopSec);
+  });
+  on('btn-display-defaults', () => {
+    settingsWorkingOrder = d.paneOrder.slice();
+    renderPaneOrderList();
+    setVal(els.fontTranscript, d.transcriptFont); setVal(els.sizeTranscript, d.transcriptSize);
+    setVal(els.fontMemo, d.memoFont); setVal(els.sizeMemo, d.memoSize);
+    setVal(els.fontSummary, d.summaryFont); setVal(els.sizeSummary, d.summarySize);
+    setVal(els.inputConfirmFx, d.confirmEffect);
+    setVal(els.inputDraftFx, d.draftEffect);
+    setVal(els.inputDraftStyle, d.draftStyle);
+    setVal(els.inputProcFx, d.procEffect); setVal(els.inputProcStyle, d.procStyle);
+    setVal(els.inputFinalStyle, d.finalStyle);
+    restartFxPreview();
+  });
+}
+/**
+ * 聞き取り中の表示のプレビュー (v0.24.119〜133)
+ * 録音しなくても見比べられるように、設定の中で「下書き → 処理 → 確定」を繰り返し見せる。
+ * どの処理がどの過程に当たるかは、設定の欄（モード・リアルタイム表示・ライブ整形・使用するAI）の値で決める（本番と同じ決まり）。
+ * プレビューが画面に見えているあいだだけ動く（設定を閉じる・表示をたたむと止まる）。欄を変えると、その場でやり直す
+ */
+const FX_SAMPLE = {
+  draft: 'えーとそれでは今日の内容について順番にお話ししていきます',
+  heard: 'えーと、それでは今日の内容について順番にお話ししていきます。',   // Groq は句読点を付けることが多い（実機 2026-11-11）
+  refined: 'それでは、今日の内容について順番にお話ししていきます。',
+};
+let fxPreviewRun = 0;
+const fxWait = (ms) => new Promise((r) => setTimeout(r, ms));
+function fxPreviewBox() { return document.getElementById('fx-preview'); }
+// v0.24.136: 字を出すところ（左上の再生・停止のボタンは残す）
+function fxPreviewStage() { const b = fxPreviewBox(); return b && b.querySelector('.fx-preview-stage'); }
+// 設定を閉じる・表示をたたむと offsetParent が無くなる
+function fxPreviewVisible() { const b = fxPreviewBox(); return !!(b && b.offsetParent); }
+const fxVal = (sel) => (sel && sel.value) || 'none';
+
+/**
+ * 設定の欄の値から、段落が通る道を作る（本番の割り当てと同じ決まり）
+ * @returns {Array<{phase:'draft'|'proc'|'final'|'draftfinal'|'wait', text:string, cls?:string}>} 下書きのあとに通る段階（最後が確定。
+ *   wait は「（文字起こし中…）」で過程の見た目なし。draft は下書きになる段落、draftfinal は下書きの演出のあと確定の演出）
+ */
+function fxPreviewSteps() {
+  const ai = !!(els.modeGemini && els.modeGemini.checked);
+  const refineOn = !!(els.inputAiEnabled && els.inputAiEnabled.checked);
+  const avail = typeof formAiAvail === 'function' ? formAiAvail() : { gemini: true, groq: false, claude: false };
+  const steps = [];
+  const draftOn = !ai || !(els.inputGeminiLiveDisplay && !els.inputGeminiLiveDisplay.checked);   // AI で聞き取るとき、Web Speech を並走させるか
+  if (!ai) {
+    // Web Speech だけ: 確定した段落 →（整形が続くなら）整形した字。Web Speech モードの整形は Gemini のキーがあるとき（webSpeechFinalWillBeRefined）
+    const willRefine = refineOn && avail.gemini;
+    steps.push({ phase: willRefine ? 'proc' : 'final', text: FX_SAMPLE.draft });
+    if (willRefine) steps.push({ phase: 'final', text: FX_SAMPLE.refined });
+    return steps;
+  }
+  const stt = typeof pickAvailable === 'function' ? pickAvailable(aiPickWorking && aiPickWorking.stt, avail, ['groq', 'gemini']) : 'groq';
+  const liveRefine = refineOn && (avail.gemini || avail.claude);
+  // Web Speech を並走させないときは下書きも、Web Speech の字の段落も無い。「（文字起こし中…）」のあと AI の字から
+  if (draftOn) steps.push({ phase: 'proc', text: FX_SAMPLE.draft, cls: 'provisional' });
+  else steps.push({ phase: 'wait', text: '（文字起こし中…）', cls: 'refining' });
+  if (stt === 'groq' && liveRefine) {
+    // 並走させないときは、Groq の字が最初に出る字＝下書き
+    steps.push({ phase: draftOn ? 'proc' : 'draft', text: FX_SAMPLE.heard, cls: 'provisional heard' });
+    steps.push({ phase: 'final', text: FX_SAMPLE.refined });
+  } else {
+    // Groq で整形なし → 聞き取ったままの字が確定。Gemini で聞き取る → 整えた字がそのまま返ってくるので確定。
+    // 並走させないときは、その字が下書きでもある（下書きの演出のあと確定の演出）
+    steps.push({ phase: draftOn ? 'final' : 'draftfinal', text: stt === 'groq' ? FX_SAMPLE.heard : FX_SAMPLE.refined });
+  }
+  return steps;
+}
+
+/**
+ * 再生・停止 (v0.24.136)
+ * 前は「見えていて、枠の中が空のとき」だけ動き出したので、表示のまとまりをたたんで開き直すと、前の字が残っていて二度と動かなかった
+ * （やっさん「プレビューが止まっていることがある」）。いまは「再生中か」を覚えて、見えていて止めていなければ動き出す。
+ * 左上のボタンで止める・再生する。止めたあとで選ぶ欄を変えたら、また再生する（変えた結果を見るため）
+ */
+let fxPreviewPlaying = false;
+let fxPreviewUserStopped = false;
+function paintFxPreviewBtn() {
+  const btn = document.getElementById('btn-fx-preview');
+  if (!btn) return;
+  btn.textContent = fxPreviewPlaying ? 'プレビュー ■' : 'プレビュー ▶';
+  btn.setAttribute('aria-pressed', String(fxPreviewPlaying));
+}
+function stopFxPreview() {
+  fxPreviewRun++;   // 動いている繰り返しを止める
+  fxPreviewPlaying = false;
+  paintFxPreviewBtn();
+}
+
+async function playFxPreview() {
+  const box = fxPreviewStage();
+  if (!box || !window.ConfirmFx) return;
+  const run = ++fxPreviewRun;
+  const alive = () => run === fxPreviewRun && fxPreviewVisible();
+  fxPreviewPlaying = true;
+  paintFxPreviewBtn();
+  try { await fxPreviewLoop(box, alive); } finally {
+    if (run === fxPreviewRun) { fxPreviewPlaying = false; paintFxPreviewBtn(); }
+  }
+}
+
+async function fxPreviewLoop(box, alive) {
+  while (alive()) {
+    // プレビューの箱には欄の値のスタイルを付ける（ページ全体の値より近いので勝つ）
+    ConfirmFx.applyStageStyle(box, 'draft', fxVal(els.inputDraftStyle));
+    ConfirmFx.applyStageStyle(box, 'proc', fxVal(els.inputProcStyle));
+    ConfirmFx.applyStageStyle(box, 'final', fxVal(els.inputFinalStyle));
+    const steps = fxPreviewSteps();
+    const text = FX_SAMPLE.draft;
+    let old = '';
+    if (steps[0].phase !== 'wait') {
+      // 下書き: Web Speech のように、数文字ずつ全文が送られてくる
+      const draft = document.createElement('div');
+      draft.className = 'draft-text';
+      box.replaceChildren(draft);
+      for (let n = 0; n < text.length && alive();) {
+        n = Math.min(text.length, n + 2 + Math.floor(Math.random() * 3));
+        ConfirmFx.renderDraft(draft, text.slice(0, n), fxVal(els.inputDraftFx));
+        await fxWait(140);
+      }
+      await fxWait(600);
+      old = text;
+      if (!alive()) break;
+    }
+    // 処理・確定: 設定で決まる道を順に
+    const p = document.createElement('div');
+    for (const [k, st] of steps.entries()) {
+      if (!alive()) break;
+      const ph = { proc: ' ph-proc', draft: ' ph-draft', draftfinal: ' short-refined ph-draft', final: ' short-refined' }[st.phase] || '';
+      p.className = 'paragraph' + (st.cls ? ' ' + st.cls : '') + ph;
+      setParagraphContent(p, st.text);
+      if (k === 0) box.replaceChildren(p);
+      if (st.phase === 'wait') { await fxWait(900); continue; }
+      const fxSel = { proc: els.inputProcFx, draft: els.inputDraftFx, draftfinal: els.inputDraftFx, final: els.inputConfirmFx }[st.phase];
+      const done = ConfirmFx.playConfirmFx(p, old, fxVal(fxSel));
+      old = p.textContent;
+      if (st.phase === 'draftfinal') {
+        // 下書き＝確定: 下書きの演出が終わったら、確定の見た目と演出に続ける
+        await done;
+        if (!alive()) break;
+        p.classList.remove('ph-draft');
+        ConfirmFx.playConfirmFx(p, old, fxVal(els.inputConfirmFx));
+      }
+      await fxWait(st.phase === 'proc' || st.phase === 'draft' ? 1400 : 2600);
+    }
+  }
+}
+// プレビューが見えたら始める（表示のまとまりを開いたとき）。止めていれば始めない。見張りは軽い（見えているかを確かめるだけ）
+setInterval(() => { if (fxPreviewVisible() && !fxPreviewPlaying && !fxPreviewUserStopped) playFxPreview(); }, 500);
+function restartFxPreview() { fxPreviewUserStopped = false; if (fxPreviewVisible()) playFxPreview(); }
+{
+  const btn = document.getElementById('btn-fx-preview');
+  if (btn) btn.addEventListener('click', () => {
+    if (fxPreviewPlaying) { fxPreviewUserStopped = true; stopFxPreview(); }
+    else { fxPreviewUserStopped = false; playFxPreview(); }
+  });
+}
+
+/** 3 つの過程のスタイルをページに付ける（保存した値）。CSS の変数で、いちばん近い指定が勝つ（プレビューは欄の値） */
+function applyStageStyles() {
+  if (!window.ConfirmFx) return;
+  const root = document.documentElement, st = state.settings;
+  ConfirmFx.applyStageStyle(root, 'draft', st.draftStyle);
+  ConfirmFx.applyStageStyle(root, 'proc', st.procStyle);
+  ConfirmFx.applyStageStyle(root, 'final', st.finalStyle);
+}
+if (window.ConfirmFx) {
+  ConfirmFx.installDraftEasing(document.documentElement);
+  const fill = (sel, list) => { if (sel && !sel.options.length) sel.innerHTML = list.map((o) => `<option value="${o.value}">${o.label}</option>`).join(''); };
+  fill(els.inputDraftFx, ConfirmFx.DRAFT_FX);
+  [els.inputProcFx, els.inputConfirmFx].forEach((sel) => fill(sel, ConfirmFx.CONFIRM_FX));
+  [els.inputDraftStyle, els.inputProcStyle, els.inputFinalStyle].forEach((sel) => fill(sel, ConfirmFx.DRAFT_STYLE));
+}
+[els.inputDraftFx, els.inputDraftStyle, els.inputProcFx, els.inputProcStyle, els.inputConfirmFx, els.inputFinalStyle, els.inputAiEnabled, els.modeGemini, els.modeWebSpeech, els.inputGeminiLiveDisplay]
+  .forEach((sel) => { if (sel) sel.addEventListener('change', restartFxPreview); });
+applyStageStyles();
+// v0.24.132: 要約・タイトル生成・ライブ整形・ライブ要約を切り替えたら、その下の欄を出し入れ（起動時に登録。tests/browser/t-settings-ai-browser.js で押して確かめる）
+[els.inputAutoSummarize, els.inputAiEnabled, els.inputLiveSummary].forEach((box) => { if (box) box.addEventListener('change', () => applyAiSettingsVisibility(true)); });
+// v0.24.142: 録音を止めたら Notion に自動で保存（設定の欄）
+if (els.inputNotionAutoSave) els.inputNotionAutoSave.addEventListener('change', () => revealSettingRow(document.getElementById('notion-auto-fields'), els.inputNotionAutoSave.checked, true));
+if (els.btnNotionAutoPick) els.btnNotionAutoPick.addEventListener('click', async () => {
+  const token = els.inputNotionToken ? els.inputNotionToken.value.trim() : state.settings.notionToken;
+  if (token && token !== state.settings.notionToken) state.settings.notionToken = token;   // 入れたばかりのトークンでも選べるように
+  const dest = await openNotionPicker('録音を止めたときに、自動で保存する先を選びます。');
+  if (!dest) return;
+  notionAutoDestWorking = dest;
+  renderNotionAutoTargetOptions('fixed');
+});
+if (els.btnSaveBridgeFiles) {
+  els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });
+}
+// v0.24.21: インストール式。**起動時に走る行なので tests/browser/ で押して確かめる**（CLAUDE.md）
+if (els.btnClaudeInstall) {
+  els.btnClaudeInstall.addEventListener('click', () => { saveClaudeInstaller(); });
+}
+applyClaudeBridgeMode();
+// v0.19.0: 期限切れの音声を掃除する。「タブを閉じたら消す」はクラッシュや
+// 強制リロードでは走らないので、消し忘れを防ぐ本体はこちら
+sweepStoredAudio();
 renderTabs();
 loadActiveSessionIntoDOM();
 updateActionButtons();
@@ -6171,7 +12887,7 @@ bindPaneTypingUndo();
  * メモ内で範囲選択してボタンを押すと、Gemini に送って整形。
  * 訂正箇所は <mark class="mr-diff"> で一時的にハイライト（6秒後にフェード消去）。 */
 async function refineMemoSelection() {
-  if (!state.settings.apiKey) {
+  if (!geminiKey()) {
     alert('Gemini API キーが未設定です。設定から登録してください。');
     openSettings();
     return;
@@ -6212,13 +12928,14 @@ async function refineMemoSelection() {
   snapshotActiveToSession();
   persistSessions();
 
-  const btn = document.getElementById('btn-memo-refine-selection');
-  if (btn) btn.classList.add('firing');
+  // v0.24.27: 印はタブごと
+  const memoSid = state.activeId;
+  markBusy('memoRefine', memoSid, true);
   diagLog.info(`メモ選択整形開始: ${selectedText.length}字`);
 
   try {
     const refinedHtml = await window.refineMemoSelectionWithGemini({
-      apiKey: state.settings.apiKey,
+      apiKey: geminiKey(),
       text: selectedText,
     });
     // プレースホルダを実結果で置換。Gemini は <mark>...</mark> 付きテキストを返す想定。
@@ -6255,9 +12972,9 @@ async function refineMemoSelection() {
     snapshotActiveToSession();
     persistSessions();
     setStatus('error', 'メモ整形失敗: ' + (e.message || '').slice(0, 60));
-    setTimeout(() => setStatus('idle', '停止'), 4000);
+    setTimeout(() => restoreStatus(), 4000);   // v0.24.56
   } finally {
-    if (btn) btn.classList.remove('firing');
+    markBusy('memoRefine', memoSid, false);
   }
 }
 
@@ -6358,6 +13075,7 @@ const SEARCH_TARGETS = {
   'pane-transcript': { sel: '#confirmed',        label: '文字起こし' },
   'pane-memo':       { sel: '#memo',             label: 'メモ' },
   'pane-summary':    { sel: '#summary',          label: '要約' },
+  'pane-live':       { sel: '#live-summary',     label: 'ライブ要約' },
   'pane-chat':       { sel: '#chat-messages',    label: '質問（チャット）' },
 };
 
@@ -6392,7 +13110,9 @@ function openSearchBar() {
   const bar = document.getElementById('search-bar');
   if (!bar) return;
   searchState.open = true;
-  bar.classList.remove('hidden');
+  // v0.24.66: 小さいところから少し行き過ぎてぽんと（TODO「動きを SUMADO の仕様書に合わせる」の 7。前は keyframes の ease）
+  if (window.Motion) Motion.popIn(bar, { from: 0.9, hiddenClass: 'hidden' });
+  else bar.classList.remove('hidden');
   const input = document.getElementById('search-input');
   // 既に選択中のテキストがあれば初期値に（ブラウザ標準の挙動に寄せる）
   const sel = window.getSelection();
@@ -6409,7 +13129,9 @@ function closeSearchBar() {
   const bar = document.getElementById('search-bar');
   if (!bar) return;
   searchState.open = false;
-  bar.classList.add('hidden');
+  // v0.24.66: 一瞬で消さず、行き過ぎずに縮みながらふわっと
+  if (window.Motion) Motion.popOut(bar, { to: 0.94, hiddenClass: 'hidden' });
+  else bar.classList.add('hidden');
   const { el } = getSearchTargetEl();
   clearSearchHighlights(el);
   searchState.matches = [];
@@ -6562,11 +13284,12 @@ function searchReplaceOne() {
     updateSearchCounter();
   }
 }
-function searchReplaceAll() {
+async function searchReplaceAll() {
   const n = searchState.matches.length;
   if (n === 0) return;
   const repl = document.getElementById('search-replace').value;
-  if (!confirm(`${n}件を「${repl || '（空文字）'}」に置換しますか？\n\nCtrl+Z で戻せます。`)) return;
+  // v0.24.117: ブラウザの confirm をやめ、自前の確認の小窓に（やっさん「残りのブラウザの確認の小窓を自前に」）
+  if (!(await confirmDialog({ title: `${n}件を「${repl || '（空文字）'}」に置換しますか？`, message: 'Ctrl+Z で戻せます。', ok: '置換', destructive: true }))) return;
   // 検索の対象ペインで Undo スタックを積む
   pushUndo(`全置換 (${n}件)`, state.activePane);
   for (const m of searchState.matches) {
@@ -6633,7 +13356,9 @@ function searchReplaceAll() {
   });
   if (btnTog && replRow) btnTog.addEventListener('click', () => {
     searchState.showReplace = !searchState.showReplace;
-    replRow.classList.toggle('hidden', !searchState.showReplace);
+    // v0.24.66: 置換の行は、高さと濃さをばねで出し入れする（SUMADO の reveal。前は class で一瞬）
+    if (window.Motion) Motion.reveal(replRow, !!searchState.showReplace);
+    else replRow.hidden = !searchState.showReplace;
     btnTog.classList.toggle('active', searchState.showReplace);
     if (searchState.showReplace) setTimeout(() => replInput.focus(), 10);
   });

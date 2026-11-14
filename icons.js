@@ -24,6 +24,8 @@ const ICON_DEFS = {
   check: '<polyline points="20 6 9 17 4 12"/>',
   mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 11a7 7 0 01-14 0"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>',
   'pencil': '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>',
+  // v0.24.25: リアルタイム要約のタブ（目次の形）
+  'list': '<line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
   'file-text': '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/>',
   'message-circle': '<path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/>',
   'send': '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
@@ -40,13 +42,39 @@ const ICON_DEFS = {
   'redo': '<path d="M15 14l5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13"/>',
   // Notion アップロード（雲＋上矢印）。Lucide の cloud-upload に合わせた 24x24 / stroke 2
   'cloud-upload': '<path d="M12 13v8"/><path d="M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.2"/><path d="M8 17l4-4 4 4"/>',
+  // 話者判別。Lucide の users に合わせた 24x24 / stroke 2 (v0.21.0)
+  'users': '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  // 録音の文脈（語彙ヒント）。Lucide の tag に合わせた 24x24 / stroke 2
+  'tag': '<path d="M12.6 2.7l8.7 8.7a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0l-8.7-8.7A2 2 0 0 1 3 10.2V4a1 1 0 0 1 1-1h6.2a2 2 0 0 1 1.4.6z"/><circle cx="7.5" cy="7.5" r="1.2"/>',
   // 置換（⇄ / swap）
   'replace': '<path d="M4 7h13M4 7l4-4M4 7l4 4"/><path d="M20 17H7M20 17l-4-4M20 17l-4 4"/>',
+  // v0.24.89: SUMADO の線の絵（SUMADO の extension/js/line-icons.js から写した。線の太さ 1.8）。名前は sm- で始める
+  // やっさんの指定「シンボル化やアイコンは SUMADO に収録しているものを使ってほしい」
+  'sm-warn': '<path d="M12 4l9 15.5H3z"/><path d="M12 10v4.5M12 17h.01"/>',
+  'sm-wave': '<path d="M4 12h1.5M7.5 8v8M11 5v14M14.5 9v6M18 7v10M20.5 12H20"/>',
+  'sm-clock': '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  'sm-note': '<path d="M6 3.5h9l3.5 3.5V20a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z"/><path d="M8.5 10h7M8.5 13.5h7M8.5 17h4"/>',
+  'sm-chat': '<path d="M20 12a7.5 7.5 0 0 1-11 6.6L4 20l1.4-4.5A7.5 7.5 0 1 1 20 12z"/>',
+  'sm-tick': '<path d="M5.5 12.5l4 4 9-9.5"/>',
+  // SUMADO の検索欄の × と同じ形（丸の中の白い ×）。丸は CSS で塗る
+  'sm-mic': '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/>',
+  'sm-user': '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/>',
+  'sm-sparkle': '<path d="M12 3.5l1.8 5.2 5.2 1.8-5.2 1.8L12 17.5l-1.8-5.2L5 10.5l5.2-1.8z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
+  'sm-frame': '<rect x="8" y="3" width="8" height="18" rx="2.2"/><path d="M3.5 9v6M20.5 9v6"/>',
+  'sm-folder': '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+  'sm-apps': '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8.5v7M8.5 12h7"/>',
+  'sm-chevron-right': '<path d="M9 4 L17 12 L9 20"/>',   // SUMADO の GLYPHS.chevronRight
+  'sm-gear': '<circle cx="12" cy="12" r="3"/><path d="M12 2.8l1.6 2.4 2.8-.6.6 2.8 2.4 1.6-1.4 2.5 1.4 2.5-2.4 1.6-.6 2.8-2.8-.6L12 21.2l-1.6-2.4-2.8.6-.6-2.8-2.4-1.6L6 12.5 4.6 10l2.4-1.6.6-2.8 2.8.6z"/>',
+  'sm-bolt': '<path d="M13 3L5.5 13.5H12L11 21l7.5-10.5H12z"/>',
+  'sm-book': '<path d="M4 5.5A2 2 0 0 1 6 3.5h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20.5V5.5M19 18.5v2H6"/>',
+  'sm-battery': '<rect x="3" y="7.5" width="16" height="9" rx="2.5"/><path d="M21 10.5v3"/>',
+  'sm-xmark': '<path d="M7 7l10 10M17 7L7 17"/>',
 };
 
 function icon(name, size = 16) {
   const inner = ICON_DEFS[name] || '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+  const w = name.startsWith('sm-') ? '1.8' : '2';   // SUMADO の線の絵は 1.8
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
 }
 
 function renderIcons(root = document) {
