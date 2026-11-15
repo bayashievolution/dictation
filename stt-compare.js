@@ -33,7 +33,11 @@
 
   /* ───────── 保存 ───────── */
 
-  const PREF_IDS = ['groq-key', 'groq-model', 'preprocess', 'min-sec', 'max-sec', 'from-min', 'len-min', 'ctx-field', 'ctx-terms', 'use-gemini', 'use-groq'];
+  const PREF_IDS = ['groq-key', 'groq-model', 'muse-key', 'preprocess', 'min-sec', 'max-sec', 'from-min', 'len-min', 'ctx-field', 'ctx-terms', 'use-gemini', 'use-groq', 'use-muse', 'use-diarize'];
+  // v0.24.147: Muse Voice Transcribe（Meta）。ファイルで送る口。1 回に 10 分か 32MB まで（Meta の見本 meta-model-cookbook の utils.py）
+  const MUSE_URL = 'https://api.meta.ai/v1/asr/transcribe';
+  const MUSE_MODEL = 'muse-voice-transcribe-1.0';
+  const MUSE_MAX_SEC = 600;
   function loadPrefs() {
     let p = {};
     try { p = JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {}; } catch (_) {}
@@ -289,6 +293,83 @@
     return { text: '', ms: 0, error: 'Groq の回数の上限に当たり続けました' };
   }
 
+  /**
+   * Muse Voice Transcribe に 1 回送る (v0.24.147)
+   * 形は Meta の見本（meta-model-cookbook/06_muse_voice/01_voice_api_fundamentals/utils.py の transcribe_recording）のとおり:
+   * multipart で、設定は JSON の部品「request」、音声は WAV の部品「audio」。キーは Authorization: Bearer
+   * @param {'PUSH_TO_TALK'|'DIARIZATION'} mode  区切りごとの文字起こしは PUSH_TO_TALK、話者付きは DIARIZATION
+   * @returns {Promise<{text:string, turns?:Array, ms:number, error?:string, audioMs?:number}>}
+   */
+  async function callMuse(wavBlob, mode) {
+    const request = { mode, model: MUSE_MODEL, audioEncoding: 'WAV', languageBias: ['japanese'] };
+    const terms = el('ctx-terms').value.split(/[、,，\n]/).map(s => s.trim()).filter(Boolean).slice(0, 50);
+    if (terms.length) request.keywords = terms;
+    const fd = new FormData();
+    fd.append('request', new Blob([JSON.stringify(request)], { type: 'application/json' }));
+    fd.append('audio', wavBlob, 'chunk.wav');
+    const t0 = performance.now();
+    let res;
+    try {
+      res = await fetch(MUSE_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + el('muse-key').value.trim() }, body: fd });
+    } catch (e) {
+      const base = '通信できませんでした（' + (e.message || e) + '）';
+      return { text: '', ms: performance.now() - t0, error: location.protocol !== 'chrome-extension:'
+        ? base + '。ブラウザ版からは Meta に届かないかもしれません。拡張の住所（chrome-extension://…/stt-compare.html）で開いてください'
+        : base + '。拡張が Meta への通信を許していない古い設定のままなら、chrome://extensions で ↻ を押してから開き直してください' };
+    }
+    const ms = performance.now() - t0;
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      const hint = { 400: '10 分より長いか、送り方の誤り', 401: 'キーが受け付けられませんでした', 413: '32MB より大きい', 429: '回数の上限' }[res.status] || '';
+      return { text: '', ms, error: `Muse ${res.status}${hint ? '（' + hint + '）' : ''}: ${body.slice(0, 200)}` };
+    }
+    const data = await res.json().catch(() => ({}));
+    const turns = Array.isArray(data.turns) ? data.turns : [];
+    const text = String(data.transcript || turns.map(t => t.transcript || '').join('')).trim();
+    return { text, turns, ms, audioMs: data.audioDurationMs };
+  }
+
+  /** 選んだ範囲をまとめて、いまの話者判別（Gemini）に通す (v0.24.147)。本体と同じ diarizeSegmentWithGemini */
+  async function callGeminiDiarize(wavBlob, sessionContext) {
+    const t0 = performance.now();
+    const apiKey = geminiKey();
+    let up = null;
+    try {
+      up = await geminiFileUpload({ apiKey, blob: wavBlob, displayName: 'dictation-compare' });
+      await geminiFileWaitActive({ apiKey, name: up.name });
+      const out = await diarizeSegmentWithGemini({ apiKey, fileUri: up.uri, mimeType: up.mimeType, sessionContext, index: 0, total: 1 });
+      return { turns: (out.turns || []).map(t => ({ speaker: t.speaker, transcript: t.text })), ms: performance.now() - t0 };
+    } catch (e) {
+      return { turns: [], ms: performance.now() - t0, error: String(e.message || e).slice(0, 200) };
+    } finally {
+      if (up && up.name) geminiFileDelete({ apiKey, name: up.name });
+    }
+  }
+
+  function renderDiarize(res) {
+    const box = el('diarize'), cols = el('diarize-cols');
+    box.hidden = false;
+    cols.textContent = '';
+    for (const [k, name] of [['muse', 'Muse（Meta）'], ['gemini', 'Gemini（いまの話者判別）']]) {
+      const r = res[k];
+      if (!r) continue;
+      const c = document.createElement('div');
+      c.className = 'col';
+      const who = document.createElement('div');
+      who.className = 'who';
+      const n = document.createElement('span'); n.textContent = name;
+      const sp = new Set((r.turns || []).map(t => t.speaker).filter(Boolean));
+      const t = document.createElement('span'); t.textContent = r.pending ? '送信中…' : `${(r.ms / 1000).toFixed(1)}秒 / 話者 ${sp.size}人`;
+      who.append(n, t);
+      const text = document.createElement('div');
+      text.className = 'text' + (r.error ? ' ng' : '');
+      text.textContent = r.pending ? '' : r.error ? r.error
+        : (r.turns || []).map(t => `${t.speaker ? t.speaker + ': ' : ''}${t.transcript || ''}`).join('\n') || '（空）';
+      c.append(who, text);
+      cols.appendChild(c);
+    }
+  }
+
   /*
    * Groq に届かなかった理由を言い分ける（2026-11-09 やっさんの実機で「Failed to fetch」だけが出た）
    * fetch の失敗はどれも同じ「Failed to fetch」になり、画面からは原因が分からない。
@@ -348,12 +429,12 @@
       const cols = document.createElement('div');
       cols.className = 'cols';
       row.cols = {};
-      for (const k of ['gemini', 'groq']) {
+      for (const k of ['gemini', 'groq', 'muse']) {
         if (!row.want[k]) continue;
         const c = document.createElement('div');
         c.className = 'col';
         c.innerHTML = '<div class="who"><span></span><span></span></div><div class="text"></div>';
-        c.querySelector('.who span').textContent = k === 'gemini' ? 'Gemini' : 'Groq Whisper';
+        c.querySelector('.who span').textContent = { gemini: 'Gemini', groq: 'Groq Whisper', muse: 'Muse（Meta）' }[k];
         cols.appendChild(c);
         row.cols[k] = c;
       }
@@ -388,7 +469,7 @@
   function renderSummary(done) {
     const s = sttSummarize(state.rows);
     const lines = [];
-    lines.push(`${done ? '終わりました' : '送信中…'}（${state.rows.filter(r => (!r.want.gemini || r.gemini) && (!r.want.groq || r.groq)).length} / ${state.rows.length} 個）`);
+    lines.push(`${done ? '終わりました' : '送信中…'}（${state.rows.filter(r => (!r.want.gemini || r.gemini) && (!r.want.groq || r.groq) && (!r.want.muse || r.muse)).length} / ${state.rows.length} 個）`);
     if (s.gemini.n) lines.push(`Gemini: 平均 ${s.gemini.avgSec} 秒・最大 ${s.gemini.maxSec} 秒 / 入力 ${s.gemini.input} トークン（うち音声 ${s.gemini.audio}）`);
     if (s.groq.n) lines.push(`Groq: 平均 ${s.groq.avgSec} 秒・最大 ${s.groq.maxSec} 秒 / 無料枠で数えられた音声 ${s.groq.billedSec} 秒（1 時間 7,200 秒・1 日 28,800 秒まで）`);
     lines.push('かかった秒数が赤いものは、その区切りの長さより時間がかかっています（録音しながらだと遅れが溜まります）。');
@@ -399,10 +480,12 @@
   async function run() {
     const p = currentPlan();
     if (!p || !p.chunks.length) return;
-    const want = { gemini: el('use-gemini').checked, groq: el('use-groq').checked };
-    if (!want.gemini && !want.groq) { alert('Gemini と Groq のどちらかには送ってください'); return; }
-    if (want.gemini && !geminiKey()) { alert('Gemini の API キーが本体の設定にありません'); return; }
+    const want = { gemini: el('use-gemini').checked, groq: el('use-groq').checked, muse: el('use-muse').checked };
+    const wantDiarize = el('use-diarize').checked;
+    if (!want.gemini && !want.groq && !want.muse && !wantDiarize) { alert('どれかには送ってください'); return; }
+    if ((want.gemini || wantDiarize) && !geminiKey()) { alert('Gemini の API キーが本体の設定にありません'); return; }
     if (want.groq && !el('groq-key').value.trim()) { alert('Groq の API キーを入れてください'); return; }
+    if ((want.muse || wantDiarize) && !el('muse-key').value.trim()) { alert('Meta Model API のキー（Muse）を入れてください'); return; }
     savePrefs();
 
     state.running = true; state.abort = false;
@@ -426,6 +509,23 @@
     const sessionContext = (fieldV || termsV) ? { field: fieldV, terms: termsV } : undefined;
     let prevGemini = '', prevGroq = '';
 
+    // v0.24.147: 話者付きの比較。選んだ範囲をまとめて（10 分まで）Muse と Gemini（いまの話者判別）に送る。区切りごとの比較と同時に走らせる
+    el('diarize').hidden = true;
+    let diarizeDone = Promise.resolve();
+    state.diarize = null;
+    if (wantDiarize) {
+      const from = p.chunks[0].start, to = Math.min(p.chunks[p.chunks.length - 1].end, from + MUSE_MAX_SEC);
+      let seg = audio.subarray(Math.round(from * SR), Math.round(to * SR));
+      if (mode === 'comp-norm') seg = sttNormalizePeak(seg).samples;
+      const wav = new Blob([sttEncodeWav16(seg, SR)], { type: 'audio/wav' });
+      const res = state.diarize = { range: `${sttFmtTime(from)}–${sttFmtTime(to)}`, muse: { pending: true }, gemini: { pending: true } };
+      renderDiarize(res);
+      diarizeDone = Promise.all([
+        callMuse(wav, 'DIARIZATION').then(r => { res.muse = r; renderDiarize(res); }),
+        callGeminiDiarize(wav, sessionContext).then(r => { res.gemini = r; renderDiarize(res); }),
+      ]);
+    }
+
     for (const c of p.chunks) {
       if (state.abort) break;
       let samples = audio.subarray(Math.round(c.start * SR), Math.round(c.end * SR));
@@ -445,10 +545,13 @@
       await Promise.all([
         want.gemini && callGemini(blob, c, prevGemini, sessionContext).then(r => { row.gemini = r; if (r.text) prevGemini += '\n' + r.text; renderRow(row); }),
         want.groq && callGroq(blob, prevGroq).then(r => { row.groq = r; if (r.text) prevGroq += r.text; renderRow(row); }),
+        want.muse && callMuse(blob, 'PUSH_TO_TALK').then(r => { row.muse = r; renderRow(row); }),
       ]);
       renderSummary(false);
     }
 
+    await diarizeDone;
+    state.meta.diarize = state.diarize;
     state.running = false;
     el('btn-abort').disabled = true;
     el('btn-copy').disabled = !state.rows.length;

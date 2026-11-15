@@ -3768,3 +3768,11 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - すでに Notion に入った見出しの時刻は直らない（直すなら Notion 側で手で）
   - 書き出しのファイル名・診断ログの時刻は、今回は変えていない（環境の時刻帯のまま）
   - テスト: `tests/t-jst-time.js`（環境の時刻帯を UTC・ニューヨークにしても日本時間。v0.24.145 に当てると 9 件落ちる）。`tests/t-notion-append.js` は時刻を時差つきで作るように直した
+- 2026-11-15 (v0.24.147): **比較ページに Meta の Muse Voice Transcribe を足した**（やっさん「日本語でやってる人がショート動画で紹介されてた。比較してみて！」）
+  - Muse: 文字起こしと話者の聞き分けを 1 つのモデルで（2026-09 公開・1 時間 0.18 ドル・話者込み）。日本語の正確さの公表値は無い（英語だけ）。話者の聞き分けは声がかぶったところは対象外
+  - 送り方は Meta の見本（GitHub meta-models/meta-model-cookbook の 06_muse_voice/01_voice_api_fundamentals/utils.py）のとおり: POST https://api.meta.ai/v1/asr/transcribe、multipart で「request」（JSON: mode・model muse-voice-transcribe-1.0・audioEncoding WAV・languageBias・keywords）と「audio」（WAV）、Authorization: Bearer。1 回 10 分か 32MB まで
+  - languageBias の値は見本に english の例しか無く、日本語の書き方（'japanese'）は推測。効かなければ Meta の API の説明（dev.meta.ai/docs/api-reference/voice）で確かめる
+  - 比較ページ: 区切りごとの文字起こしに Muse の列（PUSH_TO_TALK）。「話者付きでも比べる」で、選んだ範囲（10 分まで）を Muse（DIARIZATION）と Gemini（本体と同じ diarizeSegmentWithGemini）に送って左右に並べる。結果のコピーにも入る
+  - 拡張の host_permissions と CSP の connect-src に https://api.meta.ai を足した（比較ページは拡張の住所で開く）
+  - 本体の文字起こし・話者判別にはまだ入れていない（比較の結果を見てから決める）
+  - テスト: `tests/browser/t-stt-compare-browser.js`（送る形・区切りの列・話者付きの左右・コピー）

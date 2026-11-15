@@ -46,7 +46,7 @@
   .chunk { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
   .chunk-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
   .chunk-head audio { height: 32px; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }   /* v0.24.147: Muse を足して 3 列になることがある */
   @media (max-width: 700px) { .cols { grid-template-columns: 1fr; } }
   .col { background: var(--bg-subtle); border-radius: 8px; padding: 10px; min-height: 60px; }
   .col .who { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
@@ -79,6 +79,13 @@
         <option value="whisper-large-v3">whisper-large-v3（精度重視）</option>
         <option value="whisper-large-v3-turbo">whisper-large-v3-turbo（速さ重視）</option>
       </select>
+    </div>
+  </div>
+  <!-- v0.24.147: Meta の Muse Voice Transcribe（やっさん「比較してみて！」）。文字起こしと話者の聞き分けを 1 つのモデルで -->
+  <div class="row">
+    <div class="field grow">
+      <label for="muse-key">Meta Model API のキー（Muse Voice Transcribe。このブラウザの中だけに保存します）</label>
+      <input type="password" id="muse-key" autocomplete="off" placeholder="Meta Model API key">
     </div>
   </div>
 </div>
@@ -128,6 +135,10 @@
   <div class="row">
     <label><input type="checkbox" id="use-gemini" checked> Gemini に送る</label>
     <label><input type="checkbox" id="use-groq" checked> Groq に送る</label>
+    <label><input type="checkbox" id="use-muse"> Muse に送る</label>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="use-diarize"> 話者付きでも比べる（選んだ範囲をまとめて Muse と Gemini（いまの話者判別）に送る。10 分まで）</label>
   </div>
   <div class="row">
     <button id="btn-run" disabled>比較する</button>
@@ -145,9 +156,16 @@
   </div>
 </div>
 
+<!-- v0.24.147: 話者付きの比較（Muse と Gemini を左右に） -->
+<div id="diarize" class="card" hidden>
+  <h2>話者付きの比較</h2>
+  <div class="cols" id="diarize-cols"></div>
+</div>
+
 <div id="chunks"></div>
 
 <script src="gemini.js"></script>
+<script src="gemini-files.js"></script>
 <script src="audio-store.js"></script>
 <script src="stt-compare-core.js"></script>
 <script src="stt-compare.js"></script>

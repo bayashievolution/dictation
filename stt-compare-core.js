@@ -208,7 +208,22 @@ function sttResultText(meta, rows) {
       lines.push(`[Groq ${fmtSec(r.groq.ms)}] ${r.groq.error ? '（エラー）' + r.groq.error : (r.groq.text || '（空）')}`);
       for (const s of r.groq.suspicious || []) lines.push(`  ⚠ ${s.reasons.join('・')}: ${s.text}`);
     }
+    // v0.24.147: Muse（Meta）
+    if (r.muse) lines.push(`[Muse ${fmtSec(r.muse.ms)}] ${r.muse.error ? '（エラー）' + r.muse.error : (r.muse.text || '（空）')}`);
     lines.push('');
+  }
+  // v0.24.147: 話者付きの比較
+  const d = meta.diarize;
+  if (d) {
+    lines.push(`# 話者付きの比較（${d.range || ''}）`);
+    for (const [k, name] of [['muse', 'Muse'], ['gemini', 'Gemini（いまの話者判別）']]) {
+      const x = d[k];
+      if (!x) continue;
+      lines.push(`## ${name} ${fmtSec(x.ms)}`);
+      if (x.error) { lines.push('（エラー）' + x.error); continue; }
+      for (const t of x.turns || []) lines.push(`${t.speaker ? t.speaker + ': ' : ''}${t.transcript || ''}`);
+      lines.push('');
+    }
   }
   return lines.join('\n');
   function fmtSec(ms) { return Number.isFinite(ms) ? (ms / 1000).toFixed(1) + '秒' : '—'; }

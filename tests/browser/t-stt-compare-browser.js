@@ -136,10 +136,64 @@ async function unreachable(browser) {
   await ctx.close();
 }
 
+// v0.24.147: Muse Voice Transcribe（Meta）と、話者付きの比較（Muse と Gemini のいまの話者判別）
+async function muse(browser) {
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
+  const sent = [];
+  await page.route('**/api.meta.ai/**', async r => {
+    const req = r.request();
+    const body = req.postDataBuffer().toString('latin1');
+    const m = body.match(/name="request"[\s\S]*?\r\n\r\n(\{[\s\S]*?\})\r\n/);
+    const request = m ? JSON.parse(Buffer.from(m[1], 'latin1').toString('utf8')) : null;
+    sent.push({ url: req.url(), auth: req.headers()['authorization'], request, hasAudio: /name="audio"; filename="chunk\.wav"/.test(body) && /RIFF/.test(body) });
+    const diar = request && request.mode === 'DIARIZATION';
+    await r.fulfill({ contentType: 'application/json', body: JSON.stringify(diar
+      ? { sessionId: 's1', transcript: 'こんにちは。はい、どうぞ。', audioDurationMs: 45000, turns: [{ speaker: 'A', transcript: 'こんにちは。', startMs: 0 }, { speaker: 'B', transcript: 'はい、どうぞ。', startMs: 16000 }] }
+      : { sessionId: 's2', transcript: `ミューズ${sent.length}`, audioDurationMs: 14000 }) });
+  });
+  // Gemini: 話者判別は ファイルを上げる → 待つ → 話者付きで頼む → 消す（本体の diarizeSegmentWithGemini と同じ道）
+  await page.route('**/generativelanguage.googleapis.com/**', async r => {
+    const url = r.request().url(), method = r.request().method();
+    if (/upload\//.test(url)) return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ file: { name: 'files/abc', uri: 'https://x/files/abc', mimeType: 'audio/wav', state: 'ACTIVE' } }) });
+    if (method === 'GET' && /files\/abc/.test(url)) return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ name: 'files/abc', state: 'ACTIVE' }) });
+    if (method === 'DELETE') return r.fulfill({ contentType: 'application/json', body: '{}' });
+    return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ speakers: [{ label: '話者A' }], turns: [{ speaker: '話者A', text: 'ジェミニが聞いた文。' }] }) }] }, finishReason: 'STOP' }] }) });
+  });
+  await page.goto(URL);
+  await page.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({ apiKey: 'AIza-test' })));
+  await page.reload();
+  await page.uncheck('#use-gemini'); await page.uncheck('#use-groq');
+  await page.check('#use-muse'); await page.check('#use-diarize');
+  await page.fill('#muse-key', 'meta-test');
+  await page.fill('#ctx-terms', 'ルーブリック、形成的評価'); await page.dispatchEvent('#ctx-terms', 'change');
+  await page.setInputFiles('#file', makeWav());
+  await page.waitForFunction(() => !document.getElementById('btn-run').disabled, null, { timeout: 10000 });
+  await page.click('#btn-run');
+  await page.waitForFunction(() => /終わりました/.test(document.getElementById('summary').textContent), null, { timeout: 60000 });
+  const chunkReq = sent.filter(x => x.request && x.request.mode === 'PUSH_TO_TALK');
+  const diarReq = sent.filter(x => x.request && x.request.mode === 'DIARIZATION');
+  eq('[Muse] 区切りごとに送る（3 個）・キーは Bearer・WAV を audio の部品で', [chunkReq.length, chunkReq.every(x => x.auth === 'Bearer meta-test' && x.hasAudio)], [3, true]);
+  eq('[Muse] 送る設定（モデル・WAV・日本語・よく出る語）', chunkReq[0].request, { mode: 'PUSH_TO_TALK', model: 'muse-voice-transcribe-1.0', audioEncoding: 'WAV', languageBias: ['japanese'], keywords: ['ルーブリック', '形成的評価'] });
+  const museTexts = await page.$$eval('.chunk .col .text', ns => ns.map(n => n.textContent));
+  eq('[Muse] 区切りの列に Muse の字（3 個）', [museTexts.length, museTexts.every(t => /^ミューズ\d$/.test(t))], [3, true]);
+  eq('[話者付き] Muse には範囲をまとめて 1 回（DIARIZATION）', diarReq.length, 1);
+  const cols = await page.$$eval('#diarize-cols .col', ns => ns.map(n => [n.querySelector('.who span').textContent, n.querySelector('.text').textContent]));
+  eq('[話者付き] Muse と Gemini を左右に並べる', cols.map(c => c[0]), ['Muse（Meta）', 'Gemini（いまの話者判別）']);
+  eq('[話者付き] 話者ごとの行', cols.map(c => c[1]), ['A: こんにちは。\nB: はい、どうぞ。', '話者A: ジェミニが聞いた文。']);
+  await page.evaluate(() => { window.__copied = ''; navigator.clipboard.writeText = (t) => { window.__copied = t; return Promise.resolve(); }; });
+  await page.click('#btn-copy');
+  const copied = await page.evaluate(() => window.__copied);
+  eq('[コピー] Muse と話者付きの結果も入る', [copied.includes('[Muse '), copied.includes('# 話者付きの比較'), copied.includes('B: はい、どうぞ。')], [true, true, true]);
+  await ctx.close();
+}
+
 (async () => {
   const browser = await chromium.launch();
   try {
     await unreachable(browser);
+    await muse(browser);
     for (const preprocess of ['none', 'comp', 'comp-norm']) await runOnce(browser, { preprocess });
   } finally { await browser.close(); }
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');
