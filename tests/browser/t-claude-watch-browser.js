@@ -47,7 +47,7 @@ const eq = (label, got, want) => {
   await page.evaluate(() => { window.__calls = []; window.__plan = [() => Promise.resolve({ ok: false, error: '時間内に返事がありませんでした' })]; window.__r2 = _tryClaudeBridge({}, 'summary'); });
   await page.waitForTimeout(3000);   // 試し直す前に 2 秒待つ
   const s1 = await status();
-  eq('オレンジ・注意の絵で「要約を試し直しています（1/3 回目）」', [s1.t, s1.c.includes('caution'), s1.c.includes('cw-retry'), s1.c.includes('has-detail')], ['要約を試し直しています（1/3 回目）', true, true, true]);
+  eq('オレンジ・注意の絵で「Claude 要約の再試行中（1/3 回目）」', [s1.t, s1.c.includes('caution'), s1.c.includes('cw-retry'), s1.c.includes('has-detail')], ['Claude 要約の再試行中（1/3 回目）', true, true, true]);
   eq('試し直すときは待つ上限を延ばす（720 → 900 秒）', await page.evaluate(() => window.__calls.map((ms) => ms / 1000)), [720, 900]);
   await page.click('#status-indicator');
   await page.waitForTimeout(400);
@@ -60,11 +60,18 @@ const eq = (label, got, want) => {
   await page.evaluate(() => { window.__plan = [() => new Promise((r) => setTimeout(() => r({ ok: true, text: 'やり直した要約', seconds: 2 }), 1500))]; claudeWatchFireWake(); });
   await page.waitForTimeout(500);
   const s2 = await status();
-  eq('「スタンバイ後、要約をやり直しています」', [s2.t, s2.c.includes('cw-retry')], ['スタンバイ後、要約をやり直しています', true]);
+  eq('「Claude 要約の再試行中（スタンバイ復帰）」', [s2.t, s2.c.includes('cw-retry')], ['Claude 要約の再試行中（スタンバイ復帰）', true]);
   eq('待つ上限は前の回と同じ（回数に数えない）', await page.evaluate(() => window.__calls.map((ms) => ms / 1000)), [720, 900, 900]);
   eq('やり直した返事を使う', await page.evaluate(() => window.__r2), 'やり直した要約');
   await page.waitForTimeout(400);
   eq('終わればオレンジは消えて、いつもの表示に戻る', (await status()).c.includes('caution'), false);
+
+  console.log('\n■ 試し直してもだめだったとき: 「Claude 要約に失敗（3 回再試行）」（赤）');
+  await page.evaluate(() => { window.__plan = [0, 1, 2, 3].map(() => () => Promise.resolve({ ok: false, error: '時間内に返事がありませんでした' })); window.__r3 = _tryClaudeBridge({}, 'summary').catch((e) => 'NG'); });
+  await page.waitForTimeout(8000);
+  const s4 = await status();
+  eq('赤で「Claude 要約に失敗（3 回再試行）」', [s4.t, s4.c.includes('error')], ['Claude 要約に失敗（3 回再試行）', true]);
+  await page.evaluate(() => dismissStatusNotice());
 
   console.log('\n■ いつもの 2 倍を過ぎた: 返事を待っている時間（字の出し入れの動きはしない）');
   await page.evaluate(() => { localStorage.setItem('dictation:claudeTimes', JSON.stringify({ title: [3] })); window.__plan = []; _tryClaudeBridge({}, 'title'); });
@@ -72,7 +79,7 @@ const eq = (label, got, want) => {
   eq('20 秒まではまだ出さない（いつもの 2 倍・最低 20 秒）', (await status()).c.includes('caution'), false);
   await page.waitForTimeout(2500);
   const s3 = await status();
-  eq('オレンジ・砂時計で「Claude の返事を待っています 0:2x」', [/^Claude の返事を待っています 0:2\d$/.test(s3.t), s3.c.includes('cw-wait')], [true, true]);
+  eq('オレンジ・砂時計で「Claude タイトルの返事待ち 0:2x」', [/^Claude タイトルの返事待ち 0:2\d$/.test(s3.t), s3.c.includes('cw-wait')], [true, true]);
   await page.waitForTimeout(1200);   // 出たときのふわっと（字が濃くなる途中）が終わってから測る
   const ops = [];
   for (let i = 0; i < 25; i++) { ops.push(await page.evaluate(() => [Number(getComputedStyle(document.querySelector('#status-indicator .status-text')).opacity), !!document.getElementById('status-indicator').dataset.oldText])); await page.waitForTimeout(60); }

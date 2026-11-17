@@ -91,7 +91,8 @@ async function runConsolidation(page) {
       return !!p && p.textContent.includes('評価論の話');
     }), true);
     const st = (await page.evaluate(() => window.__notices)).join('|');
-    eq('「整形せずに残しました」と出す（「Gemini で処理」とは言わない）', [st.includes('整形せずに残しました'), st.includes('Gemini で処理')], [true, false]);
+    // v0.24.149: 試し直してもだめだったときの文言は「Claude 見出し追加に失敗（3 回再試行）」（やっさんが見本の案を採用。ここは見出し追加の処理）
+    eq('「Claude 見出し追加に失敗（3 回再試行）」と出す（「Gemini で処理」とは言わない）', [st.includes('Claude 見出し追加に失敗（3 回再試行）'), st.includes('Gemini で処理')], [true, false]);
     await ctx.close();
   }
 

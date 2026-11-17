@@ -94,8 +94,9 @@ const summarize = (page, chars) => page.evaluate(async (n) => {
     eq('1回目は量で決めた長さ（決め打ちの 180秒ではない）', [seen.claude[0].timeoutMs >= 300000, seen.claude[0].timeoutMs <= 320000], [true, true]);
     eq('Gemini には回していない', seen.gemini, 0);
     eq('要約は作られない', text.includes('要約'), false);
-    eq('「要約できませんでした」と言う（「Gemini で処理」とは言わない）',
-       await page.evaluate(() => [window.__notices.some(n => n.includes('要約できませんでした')), window.__notices.some(n => n.includes('Gemini で処理'))]), [true, false]);
+    // v0.24.149: 試し直してもだめだったときの文言は「Claude 要約に失敗（3 回再試行）」（やっさんが見本の案を採用）
+    eq('「Claude 要約に失敗（3 回再試行）」と言う（「Gemini で処理」とは言わない）',
+       await page.evaluate(() => [window.__notices.some(n => n.includes('Claude 要約に失敗（3 回再試行）')), window.__notices.some(n => n.includes('Gemini で処理'))]), [true, false]);
     await ctx.close();
   }
   {

@@ -457,9 +457,15 @@ async function _tryClaudeBridge(body, feature) {
   // v0.24.6: 理由によって言い分ける。中継が動いていて claude 側で失敗したときまで
   // 「繋がらない」と言うのは嘘で、start.bat を見に行っても直らない
   // v0.24.7: 出しっぱなしにしない。しばらくしたら消え、詳細は押したときだけ出す
-  const msg = typeof claudeBridgeFallbackMessage === 'function'
+  let msg = typeof claudeBridgeFallbackMessage === 'function'
     ? sayFail(r.error)
     : 'Claude で処理できなかったので Gemini で処理しました';
+  // v0.24.149: 試し直してもだめだったとき（Gemini に回さない設定）は、右上の文言を「Claude 要約に失敗（3 回再試行）」の形に
+  // （見本 https://claude.ai/artifact/WiLp7kmj4F1n8V942Ss73a でやっさんが案を採用）。理由は押したときのくわしくに残す
+  if (strict && attempt > 0) {
+    const name = (typeof CLAUDE_FEATURE_NAME === 'object' && CLAUDE_FEATURE_NAME[feature]) || '処理';
+    msg = `Claude ${name}に失敗（${attempt} 回再試行）`;
+  }
   // ログイン切れは放っておいて治らないので、詳細に直し方を添える (v0.24.8)
   const fix = /authenticat|OAuth|session expired|unauthorized|401/i.test(String(r.error || ''))
     ? '\n\n── 直し方 ──\n'

@@ -1045,15 +1045,16 @@ function claudeWatchText({ c, kind, el }) {
   const limit = c.timeoutMs ? `待つ上限：${Math.round(c.timeoutMs / 60000)} 分（あと ${cwMmss(leftSec)}）\n` : '';
   const left = Math.max(0, c.retries - c.attempt);
   const then = left > 0 ? `試し直します（あと ${left} 回）` : 'あきらめて、お知らせします';
+  // v0.24.149: 文言を見本の案に（やっさんが採用）。「Claude 要約の返事待ち」「Claude 要約の再試行中（2/3 回目）」「Claude 要約の再試行中（スタンバイ復帰）」
   if (kind === 'wake') {
-    return { label: `スタンバイ後、${name}をやり直しています`,
+    return { label: `Claude ${name}の再試行中（スタンバイ復帰）`,
       detail: `スタンバイから戻ったので、${name}をやり直しています\nPC がスタンバイになっているあいだに、Claude の処理が止まったとみられます。\n上限まで待たずに、最初からやり直しています。` };
   }
   if (kind === 'retry') {
-    return { label: `${name}を試し直しています（${c.attempt}/${c.retries} 回目）`,
+    return { label: `Claude ${name}の再試行中（${c.attempt}/${c.retries} 回目）`,
       detail: `${name}を試し直しています（${c.attempt}/${c.retries} 回目）\n前の回は ${Math.round(c.prevWaitMs / 60000)} 分待っても Claude から返事がありませんでした。\n${limit}このあとも返事が無ければ、${then}。` };
   }
-  return { label: `Claude の返事を待っています ${cwMmss(el)}`,
+  return { label: `Claude ${name}の返事待ち ${cwMmss(el)}`,
     detail: `Claude の返事を待っています（${cwMmss(el)}・${name}）\nいつもは ${Math.round(claudeWatchTypicalSec(c.feature))} 秒ほどで終わる処理です。\n${limit}上限を過ぎても返事が無ければ、${then}。` };
 }
 function paintClaudeWatch() {
