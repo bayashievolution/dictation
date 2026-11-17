@@ -5934,7 +5934,7 @@ async function notionSendSessions(targets, dest) {
     if (targets.length > 1) els.notionProgressTitle.textContent = `Notion に保存中…（${done}/${targets.length}）`;
   }
   if (notionCancelRequested) cancelled = true;
-  if (results.some(r => r.ok)) { persistSessions(); renderTabs(); }
+  if (results.some(r => r.ok)) { persistSessions(); renderTabs(); refreshNotionStatusAfterSuccess(); }   // v0.24.148: 保存できたなら、つながっている
   return { results, cancelled, remaining: targets.length - done , verb };
 }
 
@@ -8722,6 +8722,13 @@ function importContextFromMemo() {
 /* ───────── Notion 連携の設定 UI (v0.14.1) ───────── */
 
 /** 接続テスト欄の色を design-system の変数で塗り分ける（style.css の .notion-test-result） */
+/** いま Notion の状態が失敗（NG）と出ているか (v0.24.148) */
+function notionStatusIsNg() { return !!(els.notionTestResult && els.notionTestResult.classList.contains('is-ng')); }
+/** Notion とやりとりできたあと、失敗の表示が残っていたら確かめ直す (v0.24.148) */
+function refreshNotionStatusAfterSuccess() {
+  if (notionStatusIsNg() && state.settings.notionEnabled && state.settings.notionToken) testNotionConnection(state.settings.notionToken);
+}
+
 function setNotionTestResult(msg, kind = 'note') {
   if (!els.notionTestResult) return;
   els.notionTestResult.textContent = msg;
@@ -8758,6 +8765,9 @@ function syncNotionSettingsUi() {
     setNotionTestResult('');
   }
   // オンのときの状態は、立ち上げたときの自動の確認（またはオンにしたとき）の結果をそのまま残す
+  // v0.24.148: ただし前の確認が失敗（NG）のままなら、開いたときに確かめ直す。立ち上げたときにネットが不安定だと NG が残り、
+  // そのあと保存がうまくいっても「未接続」と出ていた（やっさんの実機 2026-11-17）
+  else if (notionStatusIsNg() && state.settings.notionToken) testNotionConnection(state.settings.notionToken);
 }
 
 /**
@@ -12865,6 +12875,8 @@ if (els.btnNotionAutoPick) els.btnNotionAutoPick.addEventListener('click', async
   notionAutoDestWorking = dest;
   renderNotionAutoTargetOptions('fixed');
 });
+// v0.24.148: ネットがつながり直したら、Notion の失敗の表示を確かめ直す（起動時の登録。tests/browser/t-notion-settings-browser.js）
+window.addEventListener('online', () => { if (typeof refreshNotionStatusAfterSuccess === 'function') refreshNotionStatusAfterSuccess(); });
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });
 }

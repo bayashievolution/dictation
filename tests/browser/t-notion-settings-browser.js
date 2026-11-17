@@ -32,6 +32,7 @@ async function launch() {
   });
   const calls = [];
   await ctx.route('https://api.notion.com/**', (r) => {
+    if (global.__netDown) return r.abort('failed');   // v0.24.148: ネットが不安定なとき
     const url = r.request().url();
     const auth = r.request().headers()['authorization'] || '';
     calls.push(url.replace('https://api.notion.com/v1', ''));
@@ -131,6 +132,27 @@ const status = (page) => page.evaluate(() => document.getElementById('notion-tes
     await page.click('#input-notion-enabled');   // 確かめている最中にオフ
     await page.waitForTimeout(800);
     eq('空', await status(page), '');
+    await page.close();
+  }
+
+  console.log('■ 立ち上げたときにネットが不安定で NG のままでも、あとで確かめ直す（v0.24.148・やっさんの実機）');
+  {
+    global.__netDown = true;
+    const page = await openApp(ctx, id, { notionEnabled: true, notionToken: 'ntn_good' });
+    await page.waitForTimeout(800);
+    eq('ネットが不安定だと NG（Failed to fetch）', (await status(page)).startsWith('NG:'), true);
+    global.__netDown = false;
+    await page.evaluate(() => openSettings());
+    await page.waitForTimeout(1200);
+    eq('設定を開くと確かめ直して OK になる', (await status(page)).startsWith('OK:'), true);
+    global.__netDown = true;
+    await page.evaluate(() => { closeSettings(); testNotionConnection(state.settings.notionToken); });
+    await page.waitForTimeout(800);
+    eq('（もう一度 NG にして）', (await status(page)).startsWith('NG:'), true);
+    global.__netDown = false;
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await page.waitForTimeout(1200);
+    eq('ネットがつながり直したら確かめ直して OK になる', (await status(page)).startsWith('OK:'), true);
     await page.close();
   }
 
