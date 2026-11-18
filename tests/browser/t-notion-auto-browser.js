@@ -87,6 +87,7 @@ const eq = (label, got, want) => {
       badge: !!document.querySelector('.tab-uploaded'), title: document.getElementById('notion-progress-title').textContent }), sid);
     eq('タブは残り、保存済みの印が付く', [st.tab, st.up, st.badge], [true, true, true]);
     eq('右下の小窓で知らせる', st.title, 'Notion への自動保存が完了しました');
+    eq('閉じない設定なら、手で保存するときと同じく閉じるか聞く（v0.24.154）', await page.evaluate(() => document.getElementById('notion-progress-body').textContent.includes('タブを閉じますか')), true);
     await page.close();
   }
 
@@ -119,6 +120,35 @@ const eq = (label, got, want) => {
   {
     const { page } = await run({ ...base, notionAutoSave: true, notionAutoTarget: 'last', notionLastDataSourceId: '' });
     eq('送らずに、保存先が無いと知らせる', [calls.filter((c) => c.startsWith('POST')).length, (await page.textContent('#notion-progress-body')).includes('保存先がまだありません')], [0, true]);
+    await page.close();
+  }
+
+  console.log('\n■ 保存の小窓のトグル（v0.24.154: 手で保存するときも自動保存も同じ・初めの値は設定）');
+  {
+    const page = await ctx.newPage();
+    await page.goto(`chrome-extension://${id}/index.html`);
+    await page.evaluate((s) => { localStorage.setItem('dictation:settings', JSON.stringify(s)); }, { ...base, notionAutoCloseTab: false, notionAutoKeepAudio: true });
+    await page.reload(); await page.waitForTimeout(1000);
+    const st = await page.evaluate(async () => {
+      appendRawChunk('手で保存するタブの中身');
+      snapshotActiveToSession();
+      const s = getActiveSession();
+      const dest = { id: 'ds1', title: '講義ノート', titleProp: '名前', dateProp: '', pageId: '', pageUrl: '', pageTitle: '' };
+      const p = notionSendSessions([s], dest);
+      await new Promise((r) => setTimeout(r, 50));
+      const during = { sec: document.querySelector('#notion-session-opts .notion-float-sec').textContent,
+        rows: [...document.querySelectorAll('#notion-session-opts .field-row')].map((l) => [l.textContent.trim(), l.querySelector('input').checked]),
+        title: document.getElementById('notion-progress-title').textContent };
+      notionFinish(await p);
+      await new Promise((r) => setTimeout(r, 400));
+      return { during, pinned: isAudioPinned(s.id), tab: !!state.sessions.find((x) => x.id === s.id), body: document.getElementById('notion-progress-body').textContent,
+        btns: [...document.querySelectorAll('#notion-progress-footer button')].filter((b) => !b.hidden).map((b) => b.textContent) };
+    });
+    eq('見出し「このセッションのみ」とトグル 2 つ（設定の値で始まる）', [st.during.sec, st.during.rows], ['このセッションのみ', [['保存できたタブを、確認せずに閉じる', false], ['録音を残す', true]]]);
+    eq('手で保存するときの見出し', st.during.title, 'Notion に保存中…');
+    eq('録音を残すがオンなら、手で保存しても残す', st.pinned, true);
+    eq('閉じるがオフなら、閉じるか聞く（残す｜閉じる）', [st.tab, st.body.includes('録音は残しました'), st.body.includes('タブを閉じますか'), st.btns], [true, true, true, ['残す', '閉じる']]);
+    eq('設定は変わらない', await page.evaluate(() => [state.settings.notionAutoCloseTab, state.settings.notionAutoKeepAudio]), [false, true]);
     await page.close();
   }
 

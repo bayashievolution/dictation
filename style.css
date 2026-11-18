@@ -3047,6 +3047,9 @@ body.chat-active #dict-bar {
   padding: 8px 12px 10px;
 }
 .notion-float .field-row { font-size: 12px; }
+/* v0.24.154: 「このセッションのみ」の見出し（見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ の形） */
+.notion-float-sec { font-size: 11.5px; color: var(--text-muted); margin: 10px 0 2px; }
+#notion-session-opts .field-row { margin: 0; padding: 4px 0; }
 /* ボタンが1つも出ていないとき（1件だけの保存中）は、下の段ごと隠す（空白が残るため） */
 .notion-float-footer:not(:has(button:not([hidden]))) { display: none; }
 

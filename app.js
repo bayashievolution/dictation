@@ -588,7 +588,8 @@ const els = {
   notionProgressFooter: document.getElementById('notion-progress-footer'),
   btnNotionCancel: document.getElementById('btn-notion-cancel'),
   notionAutoClose: document.getElementById('notion-auto-close'),
-  notionAutoCloseRow: document.getElementById('notion-auto-close-row'),
+  notionAutoCloseRow: document.getElementById('notion-session-opts'),   // v0.24.154: 「このセッションのみ」のトグル 2 つのまとまり（名前は前のまま）
+  notionKeepAudio: document.getElementById('notion-keep-audio'),
   btnNotionCloseTabs: document.getElementById('btn-notion-close-tabs'),
   btnNotionKeepTabs: document.getElementById('btn-notion-keep-tabs'),
   btnContext: document.getElementById('btn-context'),
@@ -5761,17 +5762,14 @@ function notionProgressOpen(title, { cancellable = true } = {}) {
   if (window.Motion) for (const el of [els.notionAutoCloseRow, els.btnNotionKeepTabs, els.btnNotionCloseTabs]) if (el) { el.__fadingOut = false; Motion.clear(el); }
   els.btnNotionCancel.hidden = !cancellable;
   els.notionAutoCloseRow.hidden = false;
-  // v0.21.4: **毎回オフから始める。** 状態を覚えない。
+  // v0.24.154: 初めの値は設定（Notion 連携の「保存したらタブを閉じる」「保存したら録音を残す」）。ここで変えても設定は変わらない。
   //
-  // 以前は設定として記憶していたが、そうすると一度オンにした人は
-  // 以後ずっとオンのままで、**聞かれずにタブが消える**ことになる。
-  // 1件だけ送るときは送信が数秒で終わるので、消したくないと気づいてから
-  // チェックを外すまでの猶予がほとんど無い（やっさんの指摘）。
-  //
-  // ここをオフに戻しておけば、自動で閉じるのは
-  // 「**その回に自分でチェックを入れたとき**」だけになり、不意打ちが原理的に起きない。
-  // まとめて送るときも、1回チェックするだけで済む。
-  els.notionAutoClose.checked = false;
+  // v0.21.4〜v0.24.153 は「確認せずに閉じる」を毎回オフから始めていた。小窓の中で覚えると、一度オンにした人が
+  // **聞かれずにタブが消える**ことに気づけないため（1 件だけだと数秒で終わり、外す猶予がない。やっさんの指摘）。
+  // いまは設定の画面に「保存したらタブを閉じる」とはっきり出ていて、既定はオフ。自分で設定をオンにしたときだけ聞かずに閉じるので、
+  // 不意打ちにはならない（やっさんの指定「トグルは設定に従った状態」）
+  els.notionAutoClose.checked = !!state.settings.notionAutoCloseTab;
+  if (els.notionKeepAudio) els.notionKeepAudio.checked = !!state.settings.notionAutoKeepAudio;
   els.btnNotionCancel.disabled = false;
   els.btnNotionCancel.textContent = '中止';
   els.btnNotionCloseTabs.hidden = true;
@@ -5978,14 +5976,14 @@ async function uploadSessionsToNotion(sessions) {
  * 決まった保存先へ、タブを 1 つずつ送る (v0.24.142 で uploadSessionsToNotion から切り出した)
  * 手で保存するとき（保存先の小窓のあと）と、録音を止めたあとの自動保存（autoSaveToNotion）で同じものを使う
  */
-async function notionSendSessions(targets, dest) {
+async function notionSendSessions(targets, dest, { auto = false } = {}) {
   // v0.23.0: 既存ノートへの追記かどうかで、画面の言葉を変える。
   // 「保存」と出したまま既存ノートに書き足すのは、起きたことと違う
   const appending = !!dest.pageId;
   const verb = appending ? '追記' : '保存';
   notionProgressOpen(
     targets.length === 1
-      ? `Notion に${verb}中…`
+      ? `Notion に${auto ? '自動' : ''}${verb}中…`
       : `Notion に${verb}中…（0/${targets.length}）`,
     { cancellable: targets.length > 1 },
   );
@@ -6043,7 +6041,7 @@ async function notionSendSessions(targets, dest) {
   }
   if (notionCancelRequested) cancelled = true;
   if (results.some(r => r.ok)) { persistSessions(); renderTabs(); refreshNotionStatusAfterSuccess(); }   // v0.24.148: 保存できたなら、つながっている
-  return { results, cancelled, remaining: targets.length - done , verb };
+  return { results, cancelled, remaining: targets.length - done, verb, auto };
 }
 
 /**
@@ -6075,14 +6073,19 @@ function notionNoteTitle(session, dateProp) {
  * アップロード結果を出して「閉じますか？」を聞く。
  * 成功したタブだけを閉じる対象にする（やっさん指示: 失敗した分は残す）。
  */
-function notionFinish({ results, cancelled, remaining, verb }) {
+function notionFinish({ results, cancelled, remaining, verb, auto = false }) {
   // v0.23.0: 既存ノートへの追記のときは「保存」と言わない
-  const act = verb || '保存';
+  // v0.24.154: 自動保存も同じ終わり方にした（やっさんの指定「手動もこのモーダルにして共通」）。違うのは見出しの「自動」だけ
+  const act = (auto ? '自動' : '') + (verb || '保存');
   const ok = results.filter(r => r.ok);
   const ng = results.filter(r => !r.ok);
 
-  // v0.21.4: チェックの状態は**覚えない**（notionProgressOpen の解説を参照）
+  // v0.24.154: 小窓の「このセッションのみ」のトグル（初めの値は設定・notionProgressOpen の解説を参照）
   const autoClose = !!els.notionAutoClose.checked;
+  const keepAudio = !!(els.notionKeepAudio && els.notionKeepAudio.checked);
+  // 録音を残すのは、閉じる前に（閉じると「タブを閉じたら消す」で消えるため）
+  if (keepAudio) for (const r of ok) setAudioPinned(r.session.id, true, { title: r.session.title });
+  const kept = keepAudio && ok.length ? '録音は残しました。' : '';
 
   // v0.24.33: 保存中に書き足されたタブは閉じない（書き足した分は送っていないので、閉じると消える）
   snapshotActiveToSession();
@@ -6101,7 +6104,10 @@ function notionFinish({ results, cancelled, remaining, verb }) {
 
   if (ok.length === 0) {
     els.notionProgressTitle.textContent = cancelled ? `Notion への${act}を中止しました` : `Notion への${act}に失敗しました`;
-    notionProgressSet(`${act}できたタブはありません。タブはそのまま残しています。`);
+    const why = auto && ng[0] && ng[0].error ? ng[0].error + '\n' : '';
+    notionProgressSet(auto
+      ? `${why}タブと録音はそのまま残しています。Notion のボタンから保存し直せます。`
+      : `${act}できたタブはありません。タブはそのまま残しています。`);
     els.btnNotionCloseTabs.hidden = true;
     els.btnNotionKeepTabs.textContent = '閉じる';
     els.btnNotionKeepTabs.onclick = notionProgressClose;
@@ -6128,7 +6134,7 @@ function notionFinish({ results, cancelled, remaining, verb }) {
     els.btnNotionCloseTabs.hidden = true;
     els.btnNotionKeepTabs.textContent = '閉じる';
     els.btnNotionKeepTabs.onclick = notionProgressClose;
-    notionProgressSet(`${label}を${act}して閉じました。${note}`);
+    notionProgressSet(`${label}を${act}して閉じました。${kept}${note}`);
     els.btnNotionKeepTabs.focus();
     return;
   }
@@ -6138,14 +6144,14 @@ function notionFinish({ results, cancelled, remaining, verb }) {
     els.btnNotionCloseTabs.hidden = true;
     els.btnNotionKeepTabs.textContent = '閉じる';
     els.btnNotionKeepTabs.onclick = notionProgressClose;
-    notionProgressSet(`${label}を${act}しました。${note}`);
+    notionProgressSet(`${label}を${act}しました。${kept}${note}`);
     els.btnNotionKeepTabs.focus();
     return;
   }
 
   notionFadeIn(els.btnNotionCloseTabs);
   els.btnNotionKeepTabs.textContent = '残す';
-  notionProgressSet(`${label}を${act}しました。タブを閉じますか？（閉じるとアプリ内の内容は削除されます）${note}`);
+  notionProgressSet(`${label}を${act}しました。${kept}タブを閉じますか？（閉じるとアプリ内の内容は削除されます）${note}`);
 
   els.btnNotionCloseTabs.onclick = () => {
     notionProgressClose();
@@ -6202,43 +6208,12 @@ async function autoSaveToNotion(sessionId) {
     dest = await resolveNotionAutoDest();
   } catch (e) {
     notionProgressOpen('Notion への自動保存に失敗しました', { cancellable: false });
-    notionAutoFinish({ results: [{ session, ok: false, error: e.message }] });
+    notionFinish({ results: [{ session, ok: false, error: e.message }], cancelled: false, remaining: 0, auto: true });
     return;
   }
   diagLog.info(`録音を止めたので Notion に自動で保存します（${dest.pageId ? `追記先: ${dest.pageTitle}` : `保存先: ${dest.title}`}）`);
-  const outcome = await notionSendSessions([session], dest);
-  notionAutoFinish(outcome);
-}
-
-/** 自動保存の結果。聞かずに設定どおりにする（閉じる・録音を残す）。失敗したらタブを残して知らせる */
-function notionAutoFinish({ results, verb }) {
-  const act = verb || '保存';
-  const r = results[0];
-  els.btnNotionCancel.hidden = true;
-  notionFadeOut(els.notionAutoCloseRow);
-  els.btnNotionCloseTabs.hidden = true;
-  els.btnNotionKeepTabs.textContent = '閉じる';
-  els.btnNotionKeepTabs.onclick = notionProgressClose;
-  notionFadeIn(els.btnNotionKeepTabs);
-  if (!r || !r.ok) {
-    els.notionProgressTitle.textContent = `Notion への自動${act}に失敗しました`;
-    notionProgressSet(`${r && r.error ? r.error + '\n' : ''}タブと録音はそのまま残しています。Notion のボタンから保存し直せます。`);
-    return;
-  }
-  // 録音を残すのは、閉じる前に（閉じると「タブを閉じたら消す」で消えるため）
-  if (state.settings.notionAutoKeepAudio) setAudioPinned(r.session.id, true, { title: r.session.title });
-  // 保存中に書き足されたら閉じない（書き足した分は送っていないので、閉じると消える。notionFinish と同じ）
-  snapshotActiveToSession();
-  const changed = r.sentSig != null && sessionContentSig(r.session) !== r.sentSig;
-  if (changed) { r.session.notionUploadedAt = null; persistSessions(); renderTabs(); }
-  els.notionProgressTitle.textContent = `Notion への自動${act}が完了しました`;
-  const keep = state.settings.notionAutoKeepAudio ? '録音は残しました。' : '';
-  if (state.settings.notionAutoCloseTab && !changed) {
-    closeMultipleSessions([r.session.id], { skipConfirm: true });
-    notionProgressSet(`「${r.session.title}」を${act}して閉じました。${keep}`);
-  } else {
-    notionProgressSet(`「${r.session.title}」を${act}しました。${keep}${changed ? `（${act}中に書き足されたので、閉じずに残します。書き足した分は送っていません）` : ''}`);
-  }
+  const outcome = await notionSendSessions([session], dest, { auto: true });
+  notionFinish(outcome);
 }
 
 /** クリック = 今開いているタブだけ */
