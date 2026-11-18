@@ -2643,6 +2643,7 @@ async function startRecording() {
   state.isRecording = true;
   state.shouldAutoRestart = true;
   state.recordingSessionId = state.activeId; // BG録音用に固定
+  markRecordingStarted(state.recordingSessionId);   // v0.24.151: 録音を始めた日時
   diagLog.info(`録音開始 (Web Speech) session=${state.recordingSessionId?.slice(-6)} commitSec=${state.settings.webspeechCommitSec || 0}`);
   try {
     state.recognition.start();
@@ -4336,6 +4337,7 @@ async function startGeminiAudioRecording() {
   state.isRecording = true;
   state.shouldAutoRestart = true;
   state.recordingSessionId = state.activeId; // BG録音用に固定
+  markRecordingStarted(state.recordingSessionId);   // v0.24.151: 録音を始めた日時
   // v0.19.1: 保持のオン/オフをログに残す。これが無いと、保持まわりの
   // 動作確認をログから判断できない（実機テストで実際に困った）
   diagLog.info(state.settings.audioKeepRecording
@@ -5903,7 +5905,7 @@ async function notionSendSessions(targets, dest) {
           token: state.settings.notionToken,
           pageId: dest.pageId,
           pageUrl: dest.pageUrl,
-          dateTs: session.createdAt,
+          dateTs: recordedAtOf(session),   // v0.24.151: 録音を始めた日時（前はタブを作った時刻）
           // 追記では日付列を使わないので、タイトルに日時を残す
           title: notionNoteTitle(session, ''),
           toggles: buildNotionToggles(session),
@@ -5914,7 +5916,7 @@ async function notionSendSessions(targets, dest) {
           dataSourceId: dest.id,
           titleProp: dest.titleProp,
           dateProp: dest.dateProp,
-          dateTs: session.createdAt,
+          dateTs: recordedAtOf(session),   // v0.24.151: 録音を始めた日時（前はタブを作った時刻）
           title: notionNoteTitle(session, dest.dateProp),
           toggles: buildNotionToggles(session),
         });
@@ -6169,6 +6171,7 @@ function buildExportHtml(session) {
       aiTitle: session.aiTitle || null,
       titleIsManual: !!session.titleIsManual,
       createdAt: session.createdAt,
+      recordingStartedAt: session.recordingStartedAt || null,   // v0.24.151
       updatedAt: session.updatedAt,
       transcript: session.transcript || '',
       memo: session.memo || '',
@@ -6494,6 +6497,7 @@ function buildAllSessionsExportHtml(sessions) {
       aiTitle: s.aiTitle || null,
       titleIsManual: !!s.titleIsManual,
       createdAt: s.createdAt,
+      recordingStartedAt: s.recordingStartedAt || null,   // v0.24.151
       updatedAt: s.updatedAt,
       transcript: s.transcript || '',
       memo: s.memo || '',
@@ -6716,6 +6720,7 @@ function importSessionData(s) {
   session.aiTitle = s.aiTitle || null;
   session.titleIsManual = !!s.titleIsManual;
   session.createdAt = s.createdAt || Date.now();
+  if (s.recordingStartedAt) session.recordingStartedAt = s.recordingStartedAt;   // v0.24.151
   session.updatedAt = Date.now();
   persistSessions();
   loadActiveSessionIntoDOM();
@@ -6746,6 +6751,7 @@ async function importMultipleSessions(sessions) {
     session.aiTitle = s.aiTitle || null;
     session.titleIsManual = !!s.titleIsManual;
     session.createdAt = s.createdAt || Date.now();
+    if (s.recordingStartedAt) session.recordingStartedAt = s.recordingStartedAt;   // v0.24.151
     session.updatedAt = Date.now();
     if (!firstCreatedId) firstCreatedId = session.id;
   }
@@ -7817,7 +7823,7 @@ async function autoGenerateTitle({ silent = true, force = false, sessionId = nul
     session = state.sessions.find(s => s.id === targetId);
     if (!session) return;
     session.aiTitle = aiTitle;
-    session.title = `${aiTitle}(${formatDatePart(session.createdAt)})`;
+    session.title = `${aiTitle}(${formatDatePart(recordedAtOf(session))})`;   // v0.24.151: 録音を始めた日時
     session.titleIsManual = false;
     session.updatedAt = Date.now();
     persistSessions();
@@ -9247,6 +9253,29 @@ function persistSessions() {
       setStatus('error', quota ? '保存領域がいっぱいです' : '保存に失敗しました');
     }
   }
+}
+
+/**
+ * そのタブで録音を始めた日時 (v0.24.151)
+ * やっさんの実機（2026-11-19）: Notion の録音日が「2026年11月17日 16:55」になった。11/17 に作ったタブで 11/19 に録音していた。
+ * 前は Notion の録音日・タイトルの日時「(MM/DD HH:MM)」・追記の見出しに、タブを作った時刻（createdAt）を使っていた。
+ * いまは、そのタブで最初に録音を始めた時刻（recordingStartedAt）を使う。録音していないタブ（貼り付けただけなど）は前のまま作った時刻。
+ * 同じタブで何度か録音したときは、最初の録音の時刻（講義の始まり）
+ */
+function recordedAtOf(session) {
+  return (session && (session.recordingStartedAt || session.createdAt)) || Date.now();
+}
+function markRecordingStarted(sessionId) {
+  const s = state.sessions.find((x) => x.id === sessionId);
+  if (!s || s.recordingStartedAt) return;
+  s.recordingStartedAt = Date.now();
+  // タブの名前がまだ作ったときの既定（MM/DD HH:MM）のままなら、録音を始めた時刻に書き換える（自分で付けた名前・AI の名前は触らない）
+  if (!s.titleIsManual && !s.aiTitle && s.title === formatDatePart(s.createdAt)) {
+    s.title = formatDatePart(s.recordingStartedAt);
+    if (s.id === state.activeId && els.titleDisplay) els.titleDisplay.textContent = s.title;
+    renderTabs();
+  }
+  persistSessions();
 }
 
 function defaultTitle() {
