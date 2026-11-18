@@ -140,7 +140,9 @@ const DEFAULT_SETTINGS = {
   liveSummaryMin: 10,
   // v0.24.58: Claude で失敗したら Gemini に回すか。既定はオフ（料金を増やさないほう。オフなら Claude で3回試し直す）
   claudeFallbackGemini: false,
-  groqFallbackGemini: true,   // v0.24.152: Groq に失敗したかたまりを Gemini で文字にする（前からの動き。オフにすると失敗の小窓で聞く）
+  // v0.24.152: Groq に失敗したかたまりを Gemini で文字にする。オフなら失敗の小窓で聞く。
+  // v0.24.155: 既定はオフ（やっさんの指定「処理に失敗したら Gemini API で処理 まわりは、規定はオフで」。Claude の側と同じ）
+  groqFallbackGemini: false,
   summaryDetail: 'medium',
   appZoom: 100,
   // v0.24.26: ライブ要約は既定で要約の左（やっさんの指定）
@@ -723,6 +725,9 @@ function loadSettings() {
     state.settings.paneOrder.push('pane-chat');
   }
   // v0.24.50: 「Notion 連携」トグルを足した。トークンを入れていた人はオンのまま始める
+  // v0.24.155: v0.24.152〜154 は「Groq に失敗したら Gemini」の既定がオンだった。その間に設定を保存すると、選んでいなくてもオンが残る。
+  // 既定をオフにしたので一度だけオフに戻す（groqFallbackV で一度きり。このあとオンにしたものはそのまま）
+  if (state.settings.groqFallbackV !== 2) { state.settings.groqFallbackGemini = false; state.settings.groqFallbackV = 2; }
   if (state.settings.notionEnabled === undefined) state.settings.notionEnabled = !!state.settings.notionToken;
   // v0.24.83: 比較ページ（stt-compare.html）で入れた Groq のキーを引き継ぐ。同じ拡張の中なので同じ場所に保存されている。
   // 引き継ぐだけで、聞き取りを Groq に切り替えはしない（それはやっさんが設定で選ぶ）
@@ -4847,7 +4852,7 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
 function groqMayFallBackToGemini() {
   if (!geminiKey()) return false;
   if (state.groqOverride && typeof state.groqOverride.gemini === 'boolean') return state.groqOverride.gemini;
-  return state.settings.groqFallbackGemini !== false;
+  return state.settings.groqFallbackGemini === true;
 }
 
 /**
@@ -4857,7 +4862,7 @@ function groqMayFallBackToGemini() {
  * キャンセルなら何も変えない。決定なら、変えたものだけ、この録音のあいだ（次の録音を始めるまで）効かせる
  */
 function groqFailurePrompt() {
-  if (state.groqFailAsked || state.settings.groqFallbackGemini !== false) return;
+  if (state.groqFailAsked || state.settings.groqFallbackGemini === true) return;
   const box = document.getElementById('groq-fail-dialog');
   if (!box) return;
   state.groqFailAsked = true;
@@ -8916,7 +8921,7 @@ function openSettings() {
   if (els.inputMidConsolidateSec) els.inputMidConsolidateSec.value = midConsolidateMs() / 1000;   // v0.24.51
   if (els.inputLiveSummary) els.inputLiveSummary.checked = !!state.settings.liveSummary;
   if (els.inputClaudeFallback) els.inputClaudeFallback.checked = !!state.settings.claudeFallbackGemini;   // v0.24.58
-  if (els.inputGroqFallback) els.inputGroqFallback.checked = state.settings.groqFallbackGemini !== false;   // v0.24.152
+  if (els.inputGroqFallback) els.inputGroqFallback.checked = state.settings.groqFallbackGemini === true;   // v0.24.152・v0.24.155 既定オフ
   if (els.inputLiveSummaryMin) els.inputLiveSummaryMin.value = clampLiveSummaryMinutes(state.settings.liveSummaryMin);
   els.inputAiEnabled.checked = state.settings.aiEnabled;
   if (els.inputRefineWithWs) els.inputRefineWithWs.checked = !!state.settings.refineWithWebSpeech;   // v0.24.144

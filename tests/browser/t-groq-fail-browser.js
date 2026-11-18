@@ -43,6 +43,10 @@ const eq = (label, got, want) => {
   const setup = (extra) => page.evaluate((x) => localStorage.setItem('dictation:settings', JSON.stringify(Object.assign({ inputMode: 'gemini-audio', apiKey: 'A', groqApiKey: 'g', transcribeEngine: 'groq', aiEnabled: false }, x))), extra);
   await setup({});
   await page.reload();
+  await page.waitForTimeout(500);
+  eq('既定は Gemini に回さない（v0.24.155）', await page.evaluate(() => [state.settings.groqFallbackGemini, groqMayFallBackToGemini()]), [false, false]);
+  await setup({ groqFallbackGemini: true, groqFallbackV: 2 });
+  await page.reload();
   await page.waitForTimeout(700);
   const send = (prov, edges) => page.evaluate(([p, e]) => sendAudioChunkToGemini(new Blob(['x'.repeat(3000)], { type: 'audio/webm' }), p, Object.assign({ startsAtSilence: true, endsAtSilence: true, durationMs: 8300 }, e)), [prov, edges]);
   const paras = () => page.evaluate(() => [...document.querySelectorAll('#confirmed .paragraph')].map((p) => p.innerText.trim()));
@@ -68,7 +72,7 @@ const eq = (label, got, want) => {
   groqQueue = ['', ''];
   await send(PROV, { hadSpeech: true, maxDb: -40 });
   await page.waitForTimeout(500);
-  eq('2 回とも空なら、設定（既定オン）どおり Gemini で文字にする', [groqCalls, geminiTranscribe], [2, 1]);
+  eq('2 回とも空なら、設定（オン）どおり Gemini で文字にする', [groqCalls, geminiTranscribe], [2, 1]);
   eq('Gemini の字を出す', await paras(), ['Gemini で聞き取った字']);
 
   await clear(); groqCalls = 0;
@@ -78,7 +82,7 @@ const eq = (label, got, want) => {
   eq('Web Speech の字が短いときは送り直さない（相づち・物音を正しく空にしたとみる）', groqCalls, 1);
 
   console.log('\n■ Gemini に回さない設定');
-  await setup({ groqFallbackGemini: false, geminiLiveDisplay: true });
+  await setup({ groqFallbackGemini: false, groqFallbackV: 2, geminiLiveDisplay: true });
   await page.reload();
   await page.waitForTimeout(700);
   await clear(); groqCalls = 0; geminiTranscribe = 0;
