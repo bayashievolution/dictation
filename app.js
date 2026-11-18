@@ -486,7 +486,7 @@ function savableHtml(html) {
  */
 function webSpeechFinalWillBeRefined() {
   // appendRawChunk が flushPendingToGemini を呼ぶ条件と同じ
-  return state.settings.inputMode === 'web-speech' && tabOpt(workingSessionId(), 'liveRefine') && !!geminiKey();   // v0.24.143: タブごと
+  return state.settings.inputMode === 'web-speech' && tabOpt(workingSessionId(), 'liveRefine') && postAiReady();   // v0.24.143: タブごと
 }
 function phaseFxMode(phase) {
   if (phase === 'draft') return state.settings.draftEffect || 'none';
@@ -767,7 +767,7 @@ function applyAiButtonState() {
     const on = tabOpt(state.activeId, 'liveRefine');
     els.btnRefineTranscript.classList.toggle('on', on);
     els.btnRefineTranscript.setAttribute('aria-pressed', on ? 'true' : 'false');
-    els.btnRefineTranscript.classList.toggle('needs-key', on && !geminiKey());
+    els.btnRefineTranscript.classList.toggle('needs-key', on && !postAiReady());
   }
   if (els.btnSummaryCombo) {
     const on = tabOpt(state.activeId, 'autoSummary');
@@ -1819,7 +1819,7 @@ function appendRawChunk(text) {
   if (
     state.settings.inputMode === 'web-speech' &&
     tabOpt(workingSessionId(), 'liveRefine') &&   // v0.24.143: タブごと
-    geminiKey()
+    postAiReady()
   ) {
     flushPendingToGemini();
   }
@@ -1842,6 +1842,21 @@ function getContextForGemini(maxChars = 800) {
  * 連携がオンなら Claude が受けるので、Gemini のキーが無くても回せる
  * （Web Speech モードなら Gemini を一度も使わずに済む）。
  */
+/**
+ * 文字の後処理（整形・要約・タイトル・質問・メモの整形・ライブ整形）に使える AI があるか (v0.24.156)
+ *
+ * 前は入口ごとに「Gemini のキーがあるか」だけを見ていた。Claude Code だけ（Gemini なし）の人は、
+ * 「使用するAI」の表では Claude になっているのに、要約を押すと「Gemini API キーが未設定です」と出て設定が開き、
+ * 止めたあとの要約・タイトルは黙って飛ばされていた（2026-11-19 の設定の連動の点検で見つけた）。
+ * 呼ばれた先（gemini.js の _callGemini）は、連携がオンなら Claude に回すので、入口では「どちらかが使えるか」を見る。
+ * 音声を送るもの（文字起こし・話者判別）は Claude では動かないので、そちらの入口は geminiKey() のまま
+ */
+function postAiReady() {
+  if (geminiKey()) return true;
+  return typeof claudeBridgeIsEnabled === 'function' && claudeBridgeIsEnabled();
+}
+const NO_POST_AI_MESSAGE = '使える AI がありません。設定で Gemini API か Claude Code を有効にしてください。';
+
 function liveRefineReady() {
   if (!tabOpt(workingSessionId(), 'liveRefine')) return false;   // v0.24.143: タブごと
   if (geminiKey()) return true;
@@ -1905,8 +1920,8 @@ async function flushPendingToGemini() {
  * まとめて Gemini に送って .paragraph として整形置換する。
  */
 async function refineUnstructuredInTranscript({ force = false, showFeedback = true } = {}) {
-  if (!geminiKey()) {
-    if (showFeedback) { alert('Gemini API キーが未設定です'); openSettings(); }
+  if (!postAiReady()) {
+    if (showFeedback) { alert(NO_POST_AI_MESSAGE); openSettings(); }
     return;
   }
   if (!force && !tabOpt(state.activeId, 'liveRefine')) return;   // v0.24.143: タブごと
@@ -2011,8 +2026,8 @@ async function retryPendingRefinements({ showFeedback = true } = {}) {
  * ミドル整形を全体に拡張した版。
  */
 async function refineWholeTranscript({ showFeedback = true } = {}) {
-  if (!geminiKey()) {
-    if (showFeedback) { alert('Gemini API キーが未設定です'); openSettings(); }
+  if (!postAiReady()) {
+    if (showFeedback) { alert(NO_POST_AI_MESSAGE); openSettings(); }
     return;
   }
 
@@ -2745,7 +2760,7 @@ function stopRecording() {
     }
     // v0.24.39: 「要約・タイトル生成」はライブ整形（aiEnabled）と独立。以前はライブ整形をオフにすると
     // 要約も止まっていた（やっさん「ここに矛盾がある。独立させてほしい」）
-    if (tabOpt(recSessionId, 'autoSummary') && geminiKey()) {   // v0.24.143: タブごと
+    if (tabOpt(recSessionId, 'autoSummary') && postAiReady()) {   // v0.24.143: タブごと
       await generateSummary({ silent: true, sessionId: recSessionId });
       await autoGenerateTitle({ sessionId: recSessionId });
     }
@@ -4862,7 +4877,8 @@ function groqMayFallBackToGemini() {
  * キャンセルなら何も変えない。決定なら、変えたものだけ、この録音のあいだ（次の録音を始めるまで）効かせる
  */
 function groqFailurePrompt() {
-  if (state.groqFailAsked || state.settings.groqFallbackGemini === true) return;
+  // v0.24.156: 設定がオンでも Gemini が使えなければ聞く（前は設定の値だけを見ていて、Gemini を切ったあと Groq の失敗が黙って消えた）
+  if (state.groqFailAsked || groqMayFallBackToGemini()) return;
   const box = document.getElementById('groq-fail-dialog');
   if (!box) return;
   state.groqFailAsked = true;
@@ -5317,7 +5333,7 @@ function applyClaudeBridgeSetting() {
     claudeBridgeSetEnabled(!!state.settings.claudeCode && postEngineNow() === 'claude');
   }
   // v0.24.58: 失敗したら Gemini に回すか（オフなら Claude で3回試し直す）
-  if (typeof claudeBridgeSetFallback === 'function') claudeBridgeSetFallback(!!state.settings.claudeFallbackGemini);
+  if (typeof claudeBridgeSetFallback === 'function') claudeBridgeSetFallback(!!state.settings.claudeFallbackGemini && !!geminiKey());   // v0.24.156: Gemini が使えないなら回さない（空のキーで送って「Gemini で処理」と嘘を出し、3 回の試し直しも消えていた）
 }
 
 /**
@@ -7374,7 +7390,7 @@ function doUndo() { doPaneUndo(state.activePane || 'pane-transcript'); }
 function doRedo() { doPaneRedo(state.activePane || 'pane-transcript'); }
 
 function toggleAi() {
-  if (!geminiKey()) { openSettings(); return; }
+  if (!postAiReady()) { openSettings(); return; }
   // v0.24.143: このタブだけ切り替える（設定は新しいタブの初めの値）
   const session = getActiveSession();
   setTabOpt(session, 'liveRefine', !tabOpt(session, 'liveRefine'));
@@ -7789,8 +7805,8 @@ function resizeChatInput() {
 async function sendChatMessageFrom(inputEl, sendBtn) {
   const text = inputEl.value.trim();
   if (!text) return;
-  if (!geminiKey()) {
-    alert('Gemini API キーが未設定です。設定から登録してください。');
+  if (!postAiReady()) {
+    alert(NO_POST_AI_MESSAGE);
     openSettings();
     return;
   }
@@ -7873,8 +7889,8 @@ async function autoGenerateTitle({ silent = true, force = false, sessionId = nul
   let session = state.sessions.find(s => s.id === targetId);
   if (!session) return;
   if (!force && session.titleIsManual) return;
-  if (!geminiKey()) {
-    if (!silent) { alert('Gemini API キーが未設定です。設定から登録してください。'); openSettings(); }
+  if (!postAiReady()) {
+    if (!silent) { alert(NO_POST_AI_MESSAGE); openSettings(); }
     return;
   }
   // v0.24.39: ここでライブ整形（aiEnabled）を見るのをやめた。呼ぶかどうかは呼び出し側が決める
@@ -7947,8 +7963,8 @@ async function generateSummary({ silent = false, sessionId = null } = {}) {
     if (!silent) alert('文字起こしが空です。要約を生成できません。');
     return;
   }
-  if (!geminiKey()) {
-    if (!silent) { alert('Gemini API キーが未設定です。設定から登録してください。'); openSettings(); }
+  if (!postAiReady()) {
+    if (!silent) { alert(NO_POST_AI_MESSAGE); openSettings(); }
     return;
   }
   // 要約は既存内容を置き換える破壊的操作。Undoスタックに退避（対象セッションがアクティブな時のみ）
@@ -9037,7 +9053,6 @@ function saveSettingsFromForm() {
   if (els.inputClaudeFallback) state.settings.claudeFallbackGemini = els.inputClaudeFallback.checked;   // v0.24.58
   if (els.inputGroqFallback) state.settings.groqFallbackGemini = els.inputGroqFallback.checked;   // v0.24.152
   if (els.inputLiveSummaryMin) state.settings.liveSummaryMin = clampLiveSummaryMinutes(els.inputLiveSummaryMin.value);
-  applyLiveSummaryTab();   // v0.24.25: オン/オフでタブを出し入れする
   state.settings.aiEnabled = els.inputAiEnabled.checked;
   if (els.inputRefineWithWs) state.settings.refineWithWebSpeech = els.inputRefineWithWs.checked;   // v0.24.144
   state.settings.autoStopEnabled = els.inputAutoStop.checked;
@@ -9131,7 +9146,10 @@ function saveSettingsFromForm() {
   applyAiButtonState();
   applyDisplaySettings();
   applyPaneOrder();
-  renderInnerTabs();
+  // v0.24.25: ライブ要約のオン/オフでタブを出し入れする。
+  // v0.24.156: 全部の設定を書き込んでから（前は Claude Code・使用するAI を書き込む前に呼んでいて、Claude Code を切って保存すると、
+  // タブは消えるのにライブ要約の画面が残った）。applyLiveSummaryTab は中で renderInnerTabs も呼ぶ
+  applyLiveSummaryTab();
   els.settingsModal.classList.add('hidden');
 }
 
@@ -12297,7 +12315,7 @@ els.memo.addEventListener('paste', (e) => {
 });
 
 els.confirmed.addEventListener('paste', () => {
-  if (!tabOpt(state.activeId, 'liveRefine') || !geminiKey()) return;   // v0.24.143: タブごと
+  if (!tabOpt(state.activeId, 'liveRefine') || !postAiReady()) return;   // v0.24.143: タブごと
   setTimeout(() => { refineUnstructuredInTranscript({ showFeedback: false }); }, 150);
 });
 
@@ -12311,7 +12329,7 @@ if (els.btnRefineTranscript) {
     } else {
       // 本体クリック: トグルON/OFFに関わらず、全体を上から下までまとめて文脈込みで
       // 再整形＋見出し付け。既に整形済みのテキストも一度に整う。
-      if (!geminiKey()) { openSettings(); return; }
+      if (!postAiReady()) { openSettings(); return; }
       // v0.24.27: 印はタブごと（別のタブに移ったら消え、戻ったらまた付く）
       const sid = state.activeId;
       markBusy('refine', sid, true);
@@ -13017,8 +13035,8 @@ bindPaneTypingUndo();
  * メモ内で範囲選択してボタンを押すと、Gemini に送って整形。
  * 訂正箇所は <mark class="mr-diff"> で一時的にハイライト（6秒後にフェード消去）。 */
 async function refineMemoSelection() {
-  if (!geminiKey()) {
-    alert('Gemini API キーが未設定です。設定から登録してください。');
+  if (!postAiReady()) {
+    alert(NO_POST_AI_MESSAGE);
     openSettings();
     return;
   }

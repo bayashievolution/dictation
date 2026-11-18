@@ -374,6 +374,17 @@ function claudeLoginHowTo() {
     : 'dictation フォルダの login.bat をダブルクリックしてサインインし、';
 }
 
+/**
+ * その働きを Claude に回せるか（body を作る前の見込み）(v0.24.156)
+ * 前は要約・タイトル・質問・メモの整形が、入口で「Gemini のキーが無い」と止めていた。
+ * Claude Code だけの人は、表では Claude なのに「Gemini API キーが設定されていません」になった（refineWithGemini と extractContext は前から見ていた）。
+ * 実際に回すかは _tryClaudeBridge が body まで見て決める（画像つきの質問などは Gemini に戻り、キーが無ければそこで失敗する）
+ */
+function _claudeCanTake(feature) {
+  return typeof claudeBridgeIsEnabled === 'function' && claudeBridgeIsEnabled()
+    && typeof claudeBridgeFeatureAllowed === 'function' && claudeBridgeFeatureAllowed(feature);
+}
+
 async function _tryClaudeBridge(body, feature) {
   if (typeof claudeBridgeShouldUse !== 'function') return null;   // 読み込まれていない
   if (!claudeBridgeShouldUse({ enabled: claudeBridgeIsEnabled(), feature, body })) return null;
@@ -776,7 +787,7 @@ function buildMemoRule() {
 // onEngine: 実際に答えるほう（'claude' / 'gemini'）が決まったら呼ぶ (v0.24.57)。
 // Claude が失敗して Gemini に戻ったとき、右上の「要約生成中（Claude）」を直すため
 async function summarizeWithGemini({ apiKey, transcript, memo, title, detail, onEngine = null }) {
-  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  if (!apiKey && !_claudeCanTake('summary')) throw new Error('Gemini API キーが設定されていません');   // v0.24.156: Claude に回るならキーは要らない
   if (!transcript || !transcript.trim()) throw new Error('要約対象のテキストがありません');
 
   // メモが空のときは何も添えない。v0.24.2 までと完全に同じプロンプトにして、
@@ -834,7 +845,7 @@ async function summarizeWithGemini({ apiKey, transcript, memo, title, detail, on
  * @returns {Promise<string>} 5〜20文字程度のタイトル
  */
 async function generateTitleWithGemini({ apiKey, summary, transcript }) {
-  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  if (!apiKey && !_claudeCanTake('title')) throw new Error('Gemini API キーが設定されていません');   // v0.24.156: Claude に回るならキーは要らない
   const source = (summary && summary.trim()) || (transcript && transcript.trim()) || '';
   if (!source) throw new Error('タイトル生成の素材がありません');
 
@@ -933,7 +944,7 @@ async function generateTitleWithGemini({ apiKey, summary, transcript }) {
  * 「分からない」の条件を**関連する発言が1つも無いとき**まで引き上げた。
  */
 async function chatWithGemini({ apiKey, contextSources, history, question, onEngine = null }) {
-  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  if (!apiKey && !_claudeCanTake('chat')) throw new Error('Gemini API キーが設定されていません');   // v0.24.156: Claude に回るならキーは要らない
   if (!question || !question.trim()) throw new Error('質問が空です');
 
   const ctx = contextSources || {};
@@ -1149,7 +1160,7 @@ async function formatForOSDWithGemini({ apiKey, text, lineLength = 30, continuat
  * 包んだ HTML を返すよう Gemini に指示。
  */
 async function refineMemoSelectionWithGemini({ apiKey, text }) {
-  if (!apiKey) throw new Error('Gemini API キーが設定されていません');
+  if (!apiKey && !_claudeCanTake('memo-refine')) throw new Error('Gemini API キーが設定されていません');   // v0.24.156: Claude に回るならキーは要らない
   if (!text || !text.trim()) return '';
 
   const instruction = [

@@ -73,7 +73,8 @@ const summarize = (page, chars) => page.evaluate(async (n) => {
     await page.waitForTimeout(600);
     eq('連携をオンにするとその場で出る', await vis(), true);
     eq('文言', (await page.textContent('#claude-fallback-row')).trim(), 'Claude Codeでの処理に失敗したらGemini APIで処理する');
-    eq('ライブ整形のすぐ上', await page.evaluate(() => document.getElementById('claude-fallback-row').nextElementSibling.contains(document.getElementById('input-ai-enabled'))), true);
+    // v0.24.152 から、あいだに「Groq に失敗したら Gemini」の行が入る
+    eq('ライブ整形の上（Groq の行をはさむ）', await page.evaluate(() => { const c = document.getElementById('claude-fallback-row'), g = c.nextElementSibling; return g.id === 'groq-fallback-row' && g.nextElementSibling.contains(document.getElementById('input-ai-enabled')); }), true);
     eq('既定はオフ（料金を増やさないほう）', await page.evaluate(() => document.getElementById('input-claude-fallback').checked), false);
     await page.click('#input-claude-fallback');
     await page.evaluate(() => saveSettingsFromForm());
