@@ -45,6 +45,10 @@ const diagLog = {
     // 未処理エラーもキャプチャ（try/catchを通らないクラッシュ用）
     window.addEventListener('error', (e) => {
       try {
+        // v0.24.150: 「ResizeObserver loop completed with undelivered notifications」は、ブラウザが出す害の無いお知らせ
+        // （大きさを見張る部品が、1 コマのうちに配りきれなかったと言っているだけで、何も壊れていない）。
+        // 実機のログで数秒おきに出て、ほかの行が読めなくなっていた（やっさんのログ 2026-11-19）ので記録しない
+        if (/ResizeObserver loop/.test(e.message || '')) return;
         diagLog.entries.push({
           ts: Date.now(), level: 'error',
           msg: `[uncaught] ${e.message || ''} @ ${e.filename || '?'}:${e.lineno || '?'}`
