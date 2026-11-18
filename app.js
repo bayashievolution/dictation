@@ -140,6 +140,7 @@ const DEFAULT_SETTINGS = {
   liveSummaryMin: 10,
   // v0.24.58: Claude で失敗したら Gemini に回すか。既定はオフ（料金を増やさないほう。オフなら Claude で3回試し直す）
   claudeFallbackGemini: false,
+  groqFallbackGemini: true,   // v0.24.152: Groq に失敗したかたまりを Gemini で文字にする（前からの動き。オフにすると失敗の小窓で聞く）
   summaryDetail: 'medium',
   appZoom: 100,
   // v0.24.26: ライブ要約は既定で要約の左（やっさんの指定）
@@ -653,6 +654,8 @@ const els = {
   inputLiveSummary: document.getElementById('input-live-summary'),           // v0.24.22
   inputClaudeFallback: document.getElementById('input-claude-fallback'),     // v0.24.58
   claudeFallbackRow: document.getElementById('claude-fallback-row'),         // v0.24.58
+  inputGroqFallback: document.getElementById('input-groq-fallback'),         // v0.24.152
+  groqFallbackRow: document.getElementById('groq-fallback-row'),
   inputLiveSummaryMin: document.getElementById('input-live-summary-min'),    // v0.24.22
   liveSummaryNote: document.getElementById('live-summary-note'),             // v0.24.22
   audioUsageText: document.getElementById('audio-usage-text'),
@@ -2618,6 +2621,10 @@ function stopContextExtractTimer() {
 async function startRecording() {
   // v0.24.55: この録音のあいだに Gemini をどれだけ使ったかを数え直す（止めたときに診断ログへ）
   if (typeof geminiUsageReset === 'function') geminiUsageReset();
+  // v0.24.152: Groq に失敗したときの「この録音のあいだだけ」の切り替えは、次の録音で設定どおりに戻す。
+  // 止めたときではなく始めたときに戻すのは、止めたあとに送る最後のかたまりにも、選んだ切り替えを効かせるため
+  state.groqOverride = null;
+  state.groqFailAsked = false;
   if (state.settings.inputMode === 'gemini-audio') {
     return startGeminiAudioRecording();
   }
@@ -4198,6 +4205,20 @@ function formatSpeakerTurn(turn) {
  *
  * 検出器が無い場合 hadSpeech は undefined なので (a) は成立せず、(b) だけで判断する。
  */
+/**
+ * はっきり無音だったかたまりか (v0.24.152)
+ *
+ * やっさんの実機（2026-11-17）: 止めたときの最後のかたまりは発話なし・−98〜−86dB。Groq の「ご視聴ありがとうございました」は正しく落としたが、
+ * Web Speech の字（前のかたまりで話していた分が遅れて届いたもの）が「[Groq は聞き取れず・Web Speech の結果です]」として残り、同じ内容が 2 度出た。
+ * 音が −70dB に届かず、発話らしい音も無かったかたまりで Web Speech が字を出しているなら、それはこのかたまりの音ではない。
+ * −70dB は、静かな部屋でマイクが拾う床の音（−90dB 前後）より十分上で、3m 離れた小さな声（−60dB 前後）より下にとった。
+ * 検出器が無い・測れていない（−99 のまま）ときは判断しない（無音とは言わない）
+ */
+function isClearlySilentChunk(edges) {
+  if (!edges || edges.hadSpeech !== false) return false;
+  return Number.isFinite(edges.maxDb) && edges.maxDb > -99 && edges.maxDb < -70;
+}
+
 function shouldDropEmptyChunk(provisionalText, edges) {
   if (provisionalText) return false;
   if (!edges) return false;
@@ -4380,6 +4401,7 @@ async function startGeminiAudioRecording() {
       endsAtSilence: !!endedAtSilence,
       // 検出器が無いときは undefined のまま（＝判断材料なし）にしておく
       hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
+      maxDb: state.silenceDetector ? state.silenceDetector.chunkRangeDb()[1] : undefined,   // v0.24.152: isClearlySilentChunk
       durationMs: Date.now() - state.chunkStartedAt,
       diag: silenceDiag(source),
     };
@@ -4427,6 +4449,7 @@ function stopGeminiAudioRecording() {
     startsAtSilence: !!state.chunkStartedAtSilence,
     endsAtSilence: stopSig.ms >= SILENCE_HOLD_LATE_MS,
     hadSpeech: state.silenceDetector ? state.silenceDetector.sawSpeechInChunk() : undefined,
+    maxDb: state.silenceDetector ? state.silenceDetector.chunkRangeDb()[1] : undefined,   // v0.24.152: isClearlySilentChunk
     durationMs: state.chunkStartedAt ? Date.now() - state.chunkStartedAt : 0,
     diag: silenceDiag(stopSig.source),
   };
@@ -4607,8 +4630,14 @@ function maybeWarnLiveSilent() {
   });
 }
 
+/** Web Speech を並走させるか。Groq に失敗したときの小窓で、この録音のあいだだけ切り替えられる (v0.24.152) */
+function liveDisplayWanted() {
+  if (state.groqOverride && typeof state.groqOverride.webSpeech === 'boolean') return state.groqOverride.webSpeech;
+  return state.settings.geminiLiveDisplay !== false;
+}
+
 function startLiveDisplay() {
-  if (state.settings.geminiLiveDisplay === false) return;
+  if (!liveDisplayWanted()) return;
   stopLiveDisplay();
   state.liveFinals = '';
   state.liveGotAny = false;
@@ -4739,6 +4768,11 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
       maybeWarnLiveSilent();   // v0.24.19
       // 遅延ミドル整形をチェック
       maybeConsolidateShortChunks();
+    } else if (provisionalText && isClearlySilentChunk(edges)) {
+      // v0.24.152: 無音のかたまりに付いた Web Speech の字は、前のかたまりの分が遅れて届いたもの（判断根拠は isClearlySilentChunk）
+      diagLog.info(`無音のかたまり（最大 ${Math.round(edges.maxDb)}dB）に付いた Web Speech の字は前の分の遅れとみて表示しない（${provisionalText.slice(0, 20)}）`);
+      transcriptMorph(() => targetEl.remove(), { removing: [targetEl] });
+      persist();
     } else if (shouldDropEmptyChunk(provisionalText, edges)) {
       // 沈黙だけのチャンク。従来はこれが「（音声不明瞭・再試行可）」として
       // 画面に残っていた（判断根拠は shouldDropEmptyChunk のコメント）
@@ -4805,34 +4839,99 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
  * 料金はかかるが、失敗はまれな前提。どちらで文字にしたかは診断ログと断り書きに出す。
  * @returns {Promise<{text: string, engine: 'Groq'|'Gemini'}>}
  */
+/**
+ * Groq に失敗したかたまりを Gemini で文字にしてよいか (v0.24.152)
+ * 設定「Groq での処理に失敗したら Gemini API で処理する」（既定オン）。オフでも、失敗の小窓でこの録音だけ Gemini をオンにできる
+ */
+function groqMayFallBackToGemini() {
+  if (!geminiKey()) return false;
+  if (state.groqOverride && typeof state.groqOverride.gemini === 'boolean') return state.groqOverride.gemini;
+  return state.settings.groqFallbackGemini !== false;
+}
+
+/**
+ * Groq に失敗したことを知らせ、この録音のあいだだけ切り替えるか聞く (v0.24.152・見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ )
+ * 出すのは、設定で Gemini に回さないことにしていて、その録音で最初に失敗したとき 1 回だけ（何度も出ると録音のじゃまになる）。
+ * トグルの初めの値は、いまの動き（Web Speech の並走は設定か前の切り替え・Gemini はオフ）。
+ * キャンセルなら何も変えない。決定なら、変えたものだけ、この録音のあいだ（次の録音を始めるまで）効かせる
+ */
+function groqFailurePrompt() {
+  if (state.groqFailAsked || state.settings.groqFallbackGemini !== false) return;
+  const box = document.getElementById('groq-fail-dialog');
+  if (!box) return;
+  state.groqFailAsked = true;
+  const ws = document.getElementById('groq-fail-webspeech');
+  const gm = document.getElementById('groq-fail-gemini');
+  const wsBefore = liveDisplayWanted();
+  ws.checked = wsBefore;
+  gm.checked = groqMayFallBackToGemini();
+  gm.disabled = !geminiKey();   // キーが無ければ選べない（できないことをできると見せない）
+  const finish = (ok) => {
+    box.classList.add('hidden');
+    box.removeEventListener('click', onClick);
+    document.removeEventListener('keydown', onKey, true);
+    if (!ok) { diagLog.info('Groq の失敗の小窓: キャンセル（切り替えない）'); return; }
+    state.groqOverride = { webSpeech: ws.checked, gemini: gm.checked && !gm.disabled };
+    diagLog.info(`Groq の失敗の小窓: この録音のあいだ Web Speech=${ws.checked ? 'オン' : 'オフ'}・Gemini=${state.groqOverride.gemini ? 'オン' : 'オフ'}`);
+    if (state.isRecording && state.settings.inputMode === 'gemini-audio' && ws.checked !== wsBefore) {
+      if (ws.checked) startLiveDisplay(); else stopLiveDisplay();
+    }
+  };
+  const onClick = (e) => {
+    const a = e.target.closest('[data-groq-fail]');
+    if (a) finish(a.dataset.groqFail === 'ok');
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); finish(false); }
+  };
+  box.addEventListener('click', onClick);
+  document.addEventListener('keydown', onKey, true);
+  box.classList.remove('hidden');
+}
+
 async function transcribeChunkWithGroq(blob, targetEl, edges, provisionalText = '') {
   const sessionContext = getSessionContextForAi();
   // v0.24.127: 無音だったらしいか。音の大きさの検出が「大きい音なし」と言ったか、Web Speech を並走させていて何も聞き取らなかったか。
   // そのときは Whisper の決まり文句（「ご視聴ありがとうございました」など）を落とす（groq.js の groqPickText）。
   // 送るのはやめない: 3m 離れた声のように、検出器が拾わない小さな声でも Groq は聞き取れる（比較ページの実機）
   const quiet = (edges && edges.hadSpeech === false)
-    || (state.settings.geminiLiveDisplay !== false && !!state.liveRecognition && !String(provisionalText || '').trim());
+    || (liveDisplayWanted() && !!state.liveRecognition && !String(provisionalText || '').trim());
+  const askGroq = () => transcribeAudioWithGroq({
+    apiKey: state.settings.groqApiKey,
+    audioBlob: blob,
+    sessionContext,
+    contextHint: getContextForGemini(300),
+    durationSec: edges && edges.durationMs ? edges.durationMs / 1000 : undefined,   // v0.24.104: 無料枠の残りを数える
+    quiet,
+  });
+  const viaGemini = () => transcribeAudioWithGemini({
+    apiKey: geminiKey(),
+    sessionContext,
+    audioBlob: blob,
+    contextHint: getContextForGemini(300),
+    edges,
+  });
   let raw;
   try {
-    raw = await transcribeAudioWithGroq({
-      apiKey: state.settings.groqApiKey,
-      audioBlob: blob,
-      sessionContext,
-      contextHint: getContextForGemini(300),
-      durationSec: edges && edges.durationMs ? edges.durationMs / 1000 : undefined,   // v0.24.104: 無料枠の残りを数える
-      quiet,
-    });
+    raw = await askGroq();
+    // v0.24.152: 声があったのに Groq が空で返したら、もう一度だけ Groq に送る（やっさんの指定）。
+    // 「声があった」は、検出器が発話なしと言っていない、かつ Web Speech が 10 字以上聞き取っていること。
+    // Web Speech の字が短い・無いときは、相づちや物音を Groq が正しく空にしたのとみて送り直さない（無料枠を減らさない）
+    if ((!raw || !raw.trim()) && !(edges && edges.hadSpeech === false) && String(provisionalText || '').trim().length >= 10) {
+      diagLog.info('声があったのに Groq が空で返したので、もう一度 Groq に送ります');
+      raw = await askGroq();
+      if (!raw || !raw.trim()) throw new Error('2 回とも空でした');
+    }
   } catch (e) {
-    if (!geminiKey()) throw e;
-    diagLog.info(`Groq で文字にできなかったので Gemini で文字にします: ${(e.message || e).toString().slice(0, 120)}`);
-    const text = await transcribeAudioWithGemini({
-      apiKey: geminiKey(),
-      sessionContext,
-      audioBlob: blob,
-      contextHint: getContextForGemini(300),
-      edges,
-    });
-    return { text, engine: 'Gemini' };
+    const why = (e.message || e).toString().slice(0, 120);
+    if (!groqMayFallBackToGemini()) {
+      // v0.24.152: Gemini に回さない設定。Web Speech の字は呼び出し元で残る。録音中に一度だけ、切り替えるか聞く（groqFailurePrompt）
+      diagLog.info(`Groq で文字にできませんでした（Gemini に回さない設定）: ${why}`);
+      groqFailurePrompt();
+      throw e;
+    }
+    diagLog.info(`Groq で文字にできなかったので Gemini で文字にします: ${why}`);
+    return { text: await viaGemini(), engine: 'Gemini' };
   }
   if (!raw || !raw.trim() || !liveRefineReady()) return { text: raw || '', engine: 'Groq' };
   // 整形のあいだも、聞き取れた文字は見えているようにする（Web Speech の仮の文字より Groq のほうが確か）
@@ -4898,6 +4997,8 @@ function applyAiSettingsVisibility(animated = true) {
   const on = (box) => !!(box && box.checked);
   revealSettingRow(document.getElementById('gemini-key-fields'), on(els.inputGeminiEnabled), animated);
   revealSettingRow(document.getElementById('groq-key-fields'), on(els.inputGroqEnabled), animated);
+  // v0.24.152: 「Groq での処理に失敗したら Gemini API で処理する」は、Groq も Gemini も使うときだけ意味がある
+  revealSettingRow(els.groqFallbackRow, on(els.inputGroqEnabled) && on(els.inputGeminiEnabled), animated, true);
   revealSettingRow(document.getElementById('claude-code-fields'), on(els.inputClaudeCode), animated);
   // v0.24.132: 要約・タイトル生成がオフなら「要約の詳しさ」を隠す（やっさんの指定）
   revealSettingRow(document.getElementById('summary-detail-field'), on(els.inputAutoSummarize), animated);
@@ -8840,6 +8941,7 @@ function openSettings() {
   if (els.inputMidConsolidateSec) els.inputMidConsolidateSec.value = midConsolidateMs() / 1000;   // v0.24.51
   if (els.inputLiveSummary) els.inputLiveSummary.checked = !!state.settings.liveSummary;
   if (els.inputClaudeFallback) els.inputClaudeFallback.checked = !!state.settings.claudeFallbackGemini;   // v0.24.58
+  if (els.inputGroqFallback) els.inputGroqFallback.checked = state.settings.groqFallbackGemini !== false;   // v0.24.152
   if (els.inputLiveSummaryMin) els.inputLiveSummaryMin.value = clampLiveSummaryMinutes(state.settings.liveSummaryMin);
   els.inputAiEnabled.checked = state.settings.aiEnabled;
   if (els.inputRefineWithWs) els.inputRefineWithWs.checked = !!state.settings.refineWithWebSpeech;   // v0.24.144
@@ -8953,6 +9055,7 @@ function saveSettingsFromForm() {
   // v0.24.39: 「Claude Code」がオフで押せないときは、前の値を残す（オンに戻したら元どおり）
   if (els.inputLiveSummary && !els.inputLiveSummary.disabled) state.settings.liveSummary = els.inputLiveSummary.checked;
   if (els.inputClaudeFallback) state.settings.claudeFallbackGemini = els.inputClaudeFallback.checked;   // v0.24.58
+  if (els.inputGroqFallback) state.settings.groqFallbackGemini = els.inputGroqFallback.checked;   // v0.24.152
   if (els.inputLiveSummaryMin) state.settings.liveSummaryMin = clampLiveSummaryMinutes(els.inputLiveSummaryMin.value);
   applyLiveSummaryTab();   // v0.24.25: オン/オフでタブを出し入れする
   state.settings.aiEnabled = els.inputAiEnabled.checked;
@@ -12706,6 +12809,7 @@ if (els.inputClaudeCode) {
   const on = (id, fn) => { const b = document.getElementById(id); if (b) b.addEventListener('click', fn); };
   on('btn-ai-defaults', () => {
     setChk(els.inputClaudeFallback, d.claudeFallbackGemini);
+    setChk(els.inputGroqFallback, d.groqFallbackGemini);
     setChk(els.inputAiEnabled, d.aiEnabled);
     setVal(els.inputSilenceSec, d.silenceSec);
     setVal(els.inputMidConsolidateSec, d.midConsolidateSec);
