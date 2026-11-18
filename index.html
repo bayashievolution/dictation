@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.152" />
+  <link rel="stylesheet" href="style.css?v=0.24.153" />
 </head>
 <body>
   <div id="app">
@@ -579,7 +579,7 @@
               <input id="input-claude-fallback" type="checkbox" />
               <span>Claude Codeでの処理に失敗したらGemini APIで処理する</span>
             </label>
-            <!-- v0.24.152: やっさんの指定（見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ ）。既定オン（前からの動き）。オフなら、失敗したときに小窓で聞く -->
+            <!-- v0.24.153: やっさんの指定（見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ ）。既定オン（前からの動き）。オフなら、失敗したときに小窓で聞く -->
             <label class="field field-row" id="groq-fallback-row" hidden>
               <input id="input-groq-fallback" type="checkbox" />
               <span>Groq での処理に失敗したら Gemini API で処理する</span>
@@ -956,8 +956,8 @@
 
       </div>
       <div class="modal-footer">
-        <button id="btn-settings-save" class="btn btn-primary">保存</button>
         <button class="btn btn-ghost" data-dismiss>キャンセル</button>
+        <button id="btn-settings-save" class="btn btn-primary">保存</button>
       </div>
     </div>
   </div>
@@ -1133,8 +1133,8 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button id="btn-context-save" class="btn btn-primary">保存</button>
         <button class="btn btn-ghost" data-dismiss>キャンセル</button>
+        <button id="btn-context-save" class="btn btn-primary">保存</button>
       </div>
     </div>
   </div>
@@ -1171,8 +1171,8 @@
         <p id="notion-picker-error" class="field-hint notion-test-result"></p>
       </div>
       <div class="modal-footer">
-        <button id="btn-notion-picker-ok" class="btn btn-primary">保存</button>
         <button class="btn btn-ghost" data-dismiss>キャンセル</button>
+        <button id="btn-notion-picker-ok" class="btn btn-primary">保存</button>
       </div>
     </div>
   </div>
@@ -1194,8 +1194,8 @@
     </div>
     <div class="notion-float-footer" id="notion-progress-footer">
       <button id="btn-notion-cancel" class="btn btn-ghost btn-sm">中止</button>
-      <button id="btn-notion-close-tabs" class="btn btn-primary btn-sm" hidden>閉じる</button>
       <button id="btn-notion-keep-tabs" class="btn btn-ghost btn-sm" hidden>残す</button>
+      <button id="btn-notion-close-tabs" class="btn btn-primary btn-sm" hidden>閉じる</button>
     </div>
   </div>
 
@@ -1208,8 +1208,8 @@
         <p class="confirm-message"><span id="silence-countdown"></span></p>
       </div>
       <div class="modal-footer">
-        <button id="btn-silence-stop" class="btn btn-primary">停止する</button>
         <button id="btn-silence-continue" class="btn btn-ghost">続ける</button>
+        <button id="btn-silence-stop" class="btn btn-primary">停止する</button>
       </div>
     </div>
   </div>
@@ -1236,7 +1236,7 @@
     </div>
   </div>
 
-  <!-- v0.24.152: Groq での文字起こしに失敗したときの小窓（見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ でやっさんが OK）。
+  <!-- v0.24.153: Groq での文字起こしに失敗したときの小窓（見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ でやっさんが OK）。
        設定で Gemini に回さないことにしているときだけ、録音ごとに 1 回。中身は groqFailurePrompt（app.js） -->
   <div id="groq-fail-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="groq-fail-title">
     <div class="modal-backdrop"></div>
@@ -1262,21 +1262,21 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.152"></script>
-  <script src="motion.js?v=0.24.152"></script>
-  <script src="confirm-fx.js?v=0.24.152"></script>
-  <script src="usage.js?v=0.24.152"></script>
-  <script src="claude-watch.js?v=0.24.152"></script>
-  <script src="gemini.js?v=0.24.152"></script>
-  <script src="groq.js?v=0.24.152"></script>
-  <script src="notion.js?v=0.24.152"></script>
-  <script src="audio-store.js?v=0.24.152"></script>
-  <script src="claude-bridge.js?v=0.24.152"></script>
-  <script src="claude-installer.js?v=0.24.152"></script>
-  <script src="live-summary.js?v=0.24.152"></script>
-  <script src="image-store.js?v=0.24.152"></script>
-  <script src="gemini-files.js?v=0.24.152"></script>
-  <script src="term-dicts.js?v=0.24.152"></script>
-  <script src="app.js?v=0.24.152"></script>
+  <script src="icons.js?v=0.24.153"></script>
+  <script src="motion.js?v=0.24.153"></script>
+  <script src="confirm-fx.js?v=0.24.153"></script>
+  <script src="usage.js?v=0.24.153"></script>
+  <script src="claude-watch.js?v=0.24.153"></script>
+  <script src="gemini.js?v=0.24.153"></script>
+  <script src="groq.js?v=0.24.153"></script>
+  <script src="notion.js?v=0.24.153"></script>
+  <script src="audio-store.js?v=0.24.153"></script>
+  <script src="claude-bridge.js?v=0.24.153"></script>
+  <script src="claude-installer.js?v=0.24.153"></script>
+  <script src="live-summary.js?v=0.24.153"></script>
+  <script src="image-store.js?v=0.24.153"></script>
+  <script src="gemini-files.js?v=0.24.153"></script>
+  <script src="term-dicts.js?v=0.24.153"></script>
+  <script src="app.js?v=0.24.153"></script>
 </body>
 </html>

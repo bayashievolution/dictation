@@ -75,6 +75,7 @@
 | 確認の小窓 | `confirmDialog({ title, message, ok, destructive })`。見出しは太字、その下に小さな字。消すものは赤いボタンで、うっかり Enter で消さないよう「キャンセル」に指を置く。**ブラウザの `confirm()` は使わない**（v0.24.117 で本体からは無くした。`tests/t-no-native-confirm.js` が見張る） |
 | 無音の確認 | 確認の小窓と同じ形（`.confirm-card`・`.confirm-title`・`.confirm-message`） |
 | 出入り | 少し大きいところから縮んで、少し行き過ぎて収まる（`installModalMotion`。SUMADO の仕様書 2.2） |
+| ボタンの並び | **やめるほう（キャンセル・続ける・残す）は左、決めるほう（保存・決定・停止する・閉じる）は右**。どの小窓も同じ（v0.24.153 やっさんの指定。見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ ） |
 
 ---
 
