@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&family=M+PLUS+1p:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;600&family=Kosugi+Maru&family=Sawarabi+Gothic&family=Shippori+Mincho:wght@400;600&family=Kaisei+Opti:wght@400;500&family=Klee+One:wght@400;600&family=Yomogi&family=Source+Code+Pro:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=0.24.156" />
+  <link rel="stylesheet" href="style.css?v=0.24.157" />
 </head>
 <body>
   <div id="app">
@@ -377,13 +377,17 @@
              切ってもキーは消さない（geminiKey() が無いものとして扱う）。Claude Code のトグルは前からある「連携」（キー claudeCode）そのもの -->
         <div class="field-group settings-section" id="ai-settings-group">
           <h3 class="field-group-title"><span class="section-icon" data-icon="sm-sparkle" data-icon-size="18"></span>AI 設定</h3>
-          <div class="field settings-lead"><small class="field-hint">API キーや連携を設定すると、AI 機能を使えます。</small></div>
+          <div class="field settings-lead"><small class="field-hint">API キーや連携を設定すると、AI 機能を使用できます。</small></div>
           <div class="settings-box">
           <div class="settings-item">
-          <label class="field field-row toggle-right">
-            <input id="input-gemini-enabled" type="checkbox" />
-            <span>Gemini API<small class="field-hint" style="display:block">すべての AI 機能に対応。使用量に応じて料金がかかります。</small></span>
-          </label>
+          <!-- v0.24.157: Claude Code と同じく、キーを確かめた結果をトグルの下に出す（見本 https://claude.ai/artifact/7AbnKFE8SDoSgXVLb2cVFv でやっさんが OK） -->
+          <div class="field toggle-with-status">
+            <label class="field-row toggle-right">
+              <input id="input-gemini-enabled" type="checkbox" />
+              <span>Gemini API<small class="field-hint" style="display:block">すべての AI 機能に対応。使用量に応じて料金がかかります。</small></span>
+            </label>
+            <span id="gemini-key-status" class="field-hint key-status"></span>
+          </div>
           <div class="field-conditional" id="gemini-key-fields" hidden>
             <div class="field-conditional-inner">
               <label class="field">
@@ -397,10 +401,13 @@
           </div>
           </div>
           <div class="settings-item">
-          <label class="field field-row toggle-right">
-            <input id="input-groq-enabled" type="checkbox" />
-            <span>Groq Whisper<small class="field-hint" style="display:block">AI 文字起こしを担当。1日8時間ぶんまでなら無料で使えます。</small></span>
-          </label>
+          <div class="field toggle-with-status">
+            <label class="field-row toggle-right">
+              <input id="input-groq-enabled" type="checkbox" />
+              <span>Groq Whisper<small class="field-hint" style="display:block">AI 文字起こしに対応。1日あたり8時間まで無料で使用できます。</small></span>
+            </label>
+            <span id="groq-key-status" class="field-hint key-status"></span>
+          </div>
           <div class="field-conditional" id="groq-key-fields" hidden>
             <div class="field-conditional-inner">
               <label class="field">
@@ -419,9 +426,9 @@
           <div class="field toggle-with-status">
             <label class="field-row toggle-right">
               <input id="input-claude-code" type="checkbox" />
-              <span>Claude Code<small class="field-hint" style="display:block">文字起こし・話者判別以外の AI 機能に対応。Claude のサブスクリプションの範囲で使えます。</small></span>
+              <span>Claude Code<small class="field-hint" style="display:block">文字起こし・話者判別以外の AI 機能に対応。Claude のサブスクリプションの範囲で使用できます。</small></span>
             </label>
-            <span id="claude-bridge-status" class="field-hint"></span>
+            <span id="claude-bridge-status" class="field-hint key-status"></span>
           </div>
           <div class="field-conditional" id="claude-code-fields" hidden>
             <div class="field-conditional-inner">
@@ -575,14 +582,16 @@
             <!-- v0.24.49: ライブ整形はここ（AI機能）。Web Speech モードでは文字起こしを、Gemini Audio モードでは
                  文字起こしの結果を Gemini に送り直してまとめ直す（見出しを付ける）。タイミングは「黙ってから」ではなく「◯秒ごと」 -->
             <!-- v0.24.58: やっさんの指定。Claude Code 連携がオンのときだけ出す。オフなら Gemini に回さず Claude で3回試し直す -->
-            <label class="field field-row" id="claude-fallback-row" hidden>
+            <!-- v0.24.157: Gemini が使えないとき（オフ・キーなし・キーが違う）は押せなくして赤い字（見本 https://claude.ai/artifact/7AbnKFE8SDoSgXVLb2cVFv ）。中身は applyFallbackAvailability -->
+            <label class="field field-row fallback-row" id="claude-fallback-row" hidden>
               <input id="input-claude-fallback" type="checkbox" />
-              <span>Claude Codeでの処理に失敗したらGemini APIで処理する</span>
+              <span>Claude Codeでの処理に失敗したらGemini APIで処理する<small class="field-hint fallback-ng" style="display:block" hidden>Gemini API が登録されていないか、有効になっていません</small></span>
             </label>
-            <!-- v0.24.156: やっさんの指定（見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ ）。既定オン（前からの動き）。オフなら、失敗したときに小窓で聞く -->
-            <label class="field field-row" id="groq-fallback-row" hidden>
+            <!-- v0.24.152: やっさんの指定（見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ ）。v0.24.155 から既定オフ。オフなら、失敗したときに小窓で聞く。
+                 v0.24.157: Groq がオンなら出す。Gemini が使えないときは押せなくして赤い字 -->
+            <label class="field field-row fallback-row" id="groq-fallback-row" hidden>
               <input id="input-groq-fallback" type="checkbox" />
-              <span>Groq での処理に失敗したら Gemini API で処理する</span>
+              <span>Groq での処理に失敗したら Gemini API で処理する<small class="field-hint fallback-ng" style="display:block" hidden>Gemini API が登録されていないか、有効になっていません</small></span>
             </label>
             <label class="field field-row">
               <input id="input-ai-enabled" type="checkbox" />
@@ -847,7 +856,7 @@
               <small class="field-hint">アップロード時はこの保存先が最初から選ばれた状態で確認ダイアログが出ます。</small>
             </div>
             <!-- v0.24.142: 録音を止めたら Notion に自動で保存（やっさんの指定 2026-11-13・見せた形で OK をもらった） -->
-            <!-- v0.24.156: 閉じる・録音を残すは、手で保存するときにも効く（保存の小窓のトグルの初めの値）ので、自動保存の下から出した -->
+            <!-- v0.24.154: 閉じる・録音を残すは、手で保存するときにも効く（保存の小窓のトグルの初めの値）ので、自動保存の下から出した -->
             <label class="field field-row">
               <input id="input-notion-auto-close" type="checkbox" />
               <span>保存したらタブを閉じる</span>
@@ -1187,7 +1196,7 @@
     </div>
     <div class="notion-float-body">
       <p id="notion-progress-body" class="notion-float-text"></p>
-      <!-- v0.24.156: 手で保存するときも自動保存も、この 2 つ（見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ でやっさんが OK）。
+      <!-- v0.24.154: 手で保存するときも自動保存も、この 2 つ（見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ でやっさんが OK）。
            初めの値は設定（Notion 連携の「保存したらタブを閉じる」「保存したら録音を残す」）。ここで変えても設定は変わらず、この保存のときだけ効く -->
       <div id="notion-session-opts">
         <p class="notion-float-sec">このセッションのみ</p>
@@ -1246,7 +1255,7 @@
     </div>
   </div>
 
-  <!-- v0.24.156: Groq での文字起こしに失敗したときの小窓（見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ でやっさんが OK）。
+  <!-- v0.24.152: Groq での文字起こしに失敗したときの小窓（見本 https://claude.ai/artifact/LBz2EQPCNyVKkm895BnzxJ でやっさんが OK）。
        設定で Gemini に回さないことにしているときだけ、録音ごとに 1 回。中身は groqFailurePrompt（app.js） -->
   <div id="groq-fail-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="groq-fail-title">
     <div class="modal-backdrop"></div>
@@ -1272,21 +1281,21 @@
 
   <!-- ?v= はブラウザのキャッシュ避け。**更新のたびに manifest.json の version に合わせること**
        （v0.17.4 のまま止まっていて、HTML版で古い JS が使われうる状態だった） -->
-  <script src="icons.js?v=0.24.156"></script>
-  <script src="motion.js?v=0.24.156"></script>
-  <script src="confirm-fx.js?v=0.24.156"></script>
-  <script src="usage.js?v=0.24.156"></script>
-  <script src="claude-watch.js?v=0.24.156"></script>
-  <script src="gemini.js?v=0.24.156"></script>
-  <script src="groq.js?v=0.24.156"></script>
-  <script src="notion.js?v=0.24.156"></script>
-  <script src="audio-store.js?v=0.24.156"></script>
-  <script src="claude-bridge.js?v=0.24.156"></script>
-  <script src="claude-installer.js?v=0.24.156"></script>
-  <script src="live-summary.js?v=0.24.156"></script>
-  <script src="image-store.js?v=0.24.156"></script>
-  <script src="gemini-files.js?v=0.24.156"></script>
-  <script src="term-dicts.js?v=0.24.156"></script>
-  <script src="app.js?v=0.24.156"></script>
+  <script src="icons.js?v=0.24.157"></script>
+  <script src="motion.js?v=0.24.157"></script>
+  <script src="confirm-fx.js?v=0.24.157"></script>
+  <script src="usage.js?v=0.24.157"></script>
+  <script src="claude-watch.js?v=0.24.157"></script>
+  <script src="gemini.js?v=0.24.157"></script>
+  <script src="groq.js?v=0.24.157"></script>
+  <script src="notion.js?v=0.24.157"></script>
+  <script src="audio-store.js?v=0.24.157"></script>
+  <script src="claude-bridge.js?v=0.24.157"></script>
+  <script src="claude-installer.js?v=0.24.157"></script>
+  <script src="live-summary.js?v=0.24.157"></script>
+  <script src="image-store.js?v=0.24.157"></script>
+  <script src="gemini-files.js?v=0.24.157"></script>
+  <script src="term-dicts.js?v=0.24.157"></script>
+  <script src="app.js?v=0.24.157"></script>
 </body>
 </html>

@@ -22,6 +22,7 @@ const eq = (label, got, want) => {
   const ctx = await browser.newContext({ acceptDownloads: true });
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
+  await page.route(/generativelanguage\.googleapis\.com|api\.groq\.com/, r => r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }));   // v0.24.157: キーの確かめを外に出さない
   await page.goto(URL);
   await page.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({ inputMode: 'gemini-audio', apiKey: 'A', audioKeepRecording: true, audioRetention: 'close' })));
   await page.reload();

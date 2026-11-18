@@ -24,13 +24,13 @@ const eq = (label, got, want) => {
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   // Groq の返事は順に取り出す（空・字・エラー）
   let groqQueue = [], groqCalls = 0, geminiTranscribe = 0;
-  await page.route('**/api.groq.com/**', r => {
+  await page.route('**/api.groq.com/**', r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     groqCalls++;
     const next = groqQueue.shift() ?? '';
     if (next === 'ERR') return r.fulfill({ status: 400, body: 'bad' });
     r.fulfill({ contentType: 'application/json', body: JSON.stringify({ text: next, segments: next ? [{ text: next, no_speech_prob: 0.05, avg_logprob: -0.3 }] : [] }) });
   });
-  await page.route('**/generativelanguage.googleapis.com/**', r => {
+  await page.route('**/generativelanguage.googleapis.com/**', r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     const body = JSON.parse(r.request().postData());
     const parts = body.contents[0].parts;
     if (parts.some((p) => p.inlineData || p.inline_data)) {

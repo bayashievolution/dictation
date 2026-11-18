@@ -32,7 +32,7 @@ async function open(browser, settings) {
     sessionStorage.setItem('seeded', '1');
     localStorage.setItem('dictation:settings', JSON.stringify(s));
   }, settings);
-  await page.route('**/generativelanguage.googleapis.com/**', r => {
+  await page.route('**/generativelanguage.googleapis.com/**', r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     const body = JSON.parse(r.request().postData() || '{}');
     seen.gemini.push(JSON.stringify(body).slice(0, 4000));
     r.fulfill({ contentType: 'application/json',
@@ -112,7 +112,7 @@ const clickCode = async (page) => { await page.click('#input-claude-code'); awai
     eq('オンにすると押せて、前の値（オン）に戻る', await form(page), {
       code: { checked: true, disabled: false }, live: { checked: true, disabled: false }, liveNote: false,
     });
-    eq('オンにしたその場で接続を確かめて横に出す', (await page.textContent('#claude-bridge-status')).includes('使えます'), true);
+    eq('オンにしたその場で接続を確かめて横に出す', (await page.textContent('#claude-bridge-status')).includes('使用できます'), true);
     await page.evaluate(() => saveSettingsFromForm());
     await page.waitForTimeout(200);
     eq('保存すると、要約なども Claude に回る（連携と同時に有効）', await page.evaluate(() => [claudeBridgeIsEnabled(), state.settings.useClaudeBridge]), [true, true]);
@@ -123,7 +123,7 @@ const clickCode = async (page) => { await page.click('#input-claude-code'); awai
   {
     const { ctx, page } = await open(browser, { apiKey: 'AIza-test', claudeCode: true });
     await page.waitForTimeout(500);
-    eq('設定を開かなくても、横に状態が出ている', (await page.textContent('#claude-bridge-status')).includes('使えます'), true);
+    eq('設定を開かなくても、横に状態が出ている', (await page.textContent('#claude-bridge-status')).includes('使用できます'), true);
     eq('要約なども Claude に回る', await page.evaluate(() => claudeBridgeIsEnabled()), true);
     await openSettings(page);
     await clickCode(page);   // オフに

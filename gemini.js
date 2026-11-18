@@ -1575,3 +1575,27 @@ function mergeSpeakerRosters(rosters) {
   }
   return out;
 }
+
+/**
+ * Gemini の API キーを確かめる (v0.24.157)
+ *
+ * 「使えるモデルの一覧」をもらうだけ（models.list）。文字起こしや整形はしないので、トークンを使わず料金もかからない。
+ * そのため、保存したときだけでなく、立ち上げたとき・オンにしたとき・キーを入れ直したときにも確かめる（やっさんの指定
+ * 「もしチェックにトークンを消費しないなら他のタイミングに合わせて使えるかチェックしてほしい」）。
+ * 分かるのはキーが正しいかとつながるかまで。支払いの設定や使える量の上限に当たっているかは分からない（画面は「キーは有効です」と書く）
+ * @returns {Promise<{kind: 'ok'|'badkey'|'net', detail?: string}>}
+ */
+async function geminiCheckKey(apiKey) {
+  if (!apiKey) return { kind: 'badkey', detail: 'キーが空です' };
+  let res;
+  try {
+    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${encodeURIComponent(apiKey)}`);
+  } catch (e) {
+    return { kind: 'net', detail: String(e && e.message || e) };
+  }
+  if (res.ok) return { kind: 'ok' };
+  const body = await res.text().catch(() => '');
+  // キーが違うと 400（API_KEY_INVALID）、止められたキー・使えない場所だと 403。ほか（429・5xx）は Google 側の都合とみる
+  if (res.status === 400 || res.status === 401 || res.status === 403) return { kind: 'badkey', detail: `${res.status} ${body.slice(0, 160)}` };
+  return { kind: 'net', detail: `${res.status} ${body.slice(0, 160)}` };
+}

@@ -511,7 +511,7 @@ function claudeBridgeHealthMessage(health) {
         ? '。連携が古い版です。ライブ整形・ライブ要約を速くするため、「連携アプリをダウンロード」から入れ直してください'
         : '。サーバーが古い版です。ライブ整形・ライブ要約を速くするため、start.bat を起動し直してください';
     return { ok: true, needsLogin: false, unknown: false, stale,
-             text: `使えます（ログイン済み${parts.length ? ' / ' + parts.join(' / ') : ''}）${fix}` };
+             text: `使用できます（ログイン済み${parts.length ? ' / ' + parts.join(' / ') : ''}）${fix}` };
   }
   if (a.ok && a.loggedIn === false) {
     return { ok: false, needsLogin: true, unknown: false,

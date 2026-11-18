@@ -26,7 +26,7 @@ const eq = (label, got, want) => {
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   const bodies = [];
   let delayConsolidate = 0;
-  await page.route('**/generativelanguage.googleapis.com/**', async r => {
+  await page.route('**/generativelanguage.googleapis.com/**', async r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     const body = JSON.parse(r.request().postData() || '{}');
     const isAudio = JSON.stringify(body).includes('inline_data');
     bodies.push({ isAudio, maxOut: body.generationConfig && body.generationConfig.maxOutputTokens });

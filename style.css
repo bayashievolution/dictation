@@ -3563,7 +3563,14 @@ body.chat-active .dict-menu { bottom: 114px; }
 .field-row.toggle-right input[type="checkbox"] { width: 44px; height: 26px; min-width: 44px; flex: 0 0 44px; border-radius: 999px; }
 .field-row.toggle-right input[type="checkbox"]::before { width: 20px; height: 20px; top: 2px; left: 2px; }
 .field-row.toggle-right input[type="checkbox"]:checked::before { transform: translateX(18px); }
-.toggle-with-status > #claude-bridge-status:not(:empty) { display: block; margin-top: 6px; }
+.toggle-with-status > .key-status:not(:empty) { display: block; margin-top: 6px; }
+/* v0.24.157: 状態の字は Gemini・Groq・Claude Code で同じ。使えるは緑、使えないは赤、確かめ中は薄い字（見本 https://claude.ai/artifact/7AbnKFE8SDoSgXVLb2cVFv ）。
+   前は Claude Code の字が、使えるときも使えないときも薄い灰色だった */
+.key-status.is-ok { color: var(--accent); }
+.key-status.is-ng { color: var(--danger); }
+/* v0.24.157: 「失敗したら Gemini で処理する」は、Gemini が使えないと押せない。名前を薄く、その下に赤い字 */
+.fallback-row .fallback-ng { color: var(--danger); }
+.fallback-row:has(> input:disabled) > span { color: var(--text-muted); }
 
 /* 文字起こしのモード: 絵の付いたカード（ラジオは見えないところに置いて、カードで選ぶ） */
 .mode-cards { display: grid; gap: 8px; padding: 12px 0; }

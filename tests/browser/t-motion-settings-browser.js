@@ -26,6 +26,7 @@ const eq = (label, got, want) => {
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   await page.route('**/api/claude/health', r => r.fulfill({ contentType: 'application/json',
     body: JSON.stringify({ ok: true, invocation: 'claude', version: '0.24.77', features: ['effort', 'timeout', 'session'], auth: { ok: true, loggedIn: true } }) }));
+  await page.route(/generativelanguage\.googleapis\.com|api\.groq\.com/, r => r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }));   // v0.24.157: キーの確かめを外に出さない
   await page.goto(URL);
   await page.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({ apiKey: 'AIza-test', geminiEnabled: false, claudeCode: false })));
   await page.reload();
@@ -38,7 +39,9 @@ const eq = (label, got, want) => {
   // 連携のトグルを押したあと、出る行・消える断り書き・その下の行の位置を毎フレーム取る
   const flip = () => page.evaluate(async () => {
     const row = document.getElementById('claude-fallback-row');
-    const note = document.getElementById('live-summary-note');
+    // v0.24.132 から、断り書きは入れ物（.field）ごと出し入れする（字だけ測ると、ずっと同じ高さに見える）
+    const noteEl = document.getElementById('live-summary-note');
+    const note = noteEl.parentElement.classList.contains('field') && noteEl.parentElement.children.length === 1 ? noteEl.parentElement : noteEl;
     const below = document.getElementById('input-ai-enabled').closest('label');
     // v0.24.88: 連携をオンにすると、上の「AI 設定」でも連携のボタンがばねで出る。この行の動きだけを見るため、同じまとまりの見出しからの距離で測る
     const head = below.closest('.field-group').querySelector('.field-group-title');
@@ -59,7 +62,9 @@ const eq = (label, got, want) => {
     eq('「失敗したら Gemini で処理する」の行は、途中の高さを通って出る（一瞬で出ない）', [rows[0] < end, rows.some(x => x > 1 && x < end - 1)], [true, true]);
     eq('濃さも途中を通る', r.f.some(x => x.ro > 0.05 && x.ro < 0.95), true);
     const steps = r.f.slice(1).map((x, i) => Math.abs(x.below - r.f[i].below));
-    eq('下の「ライブ整形」の行もすっと動き、どこかで大きく跳ばない（余白の分も含めて）', [Math.max(...steps) <= 12, steps.slice(-15).every(d => d <= 2)], [true, true]);
+    // v0.24.157: 行に赤い字（Gemini が使えないとき）が入って高くなったので、1 コマの動きは動く距離に対する割合で見る（前は 12px 決め打ち）
+    const dist = Math.abs(r.f[r.f.length - 1].below - r.f[0].below);
+    eq('下の「ライブ整形」の行もすっと動き、どこかで大きく跳ばない（余白の分も含めて）', [Math.max(...steps) <= Math.max(12, dist * 0.4), steps.slice(-15).every(d => d <= 2)], [true, true]);
     eq('出きったら style に値を残さない', [r.rowHidden, r.style.replace(/\s/g, '')], [false, '']);
   }
 
@@ -95,7 +100,7 @@ const eq = (label, got, want) => {
       st.textContent = '確認中…';
       await new Promise(r => setTimeout(r, 700));
       const h0 = row.offsetHeight;
-      st.textContent = '使えます（ログイン済み / claude / 連携 0.24.77）。連携が古い版です。ライブ整形・ライブ要約を速くするため、「連携アプリをダウンロード」から入れ直してください';
+      st.textContent = '使用できます（ログイン済み / claude / 連携 0.24.77）。連携が古い版です。ライブ整形・ライブ要約を速くするため、「連携アプリをダウンロード」から入れ直してください';
       await new Promise(r => requestAnimationFrame(r)); await new Promise(r => requestAnimationFrame(r));
       const mid = row.offsetHeight;
       await new Promise(r => setTimeout(r, 900));

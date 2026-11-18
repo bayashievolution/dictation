@@ -103,7 +103,7 @@ function load({ native, http }) {
   {
     const { ctx } = load({ native: { reply: { ok: true, version: '0.24.23', invocation: 'wsl', via: 'native', features: ['effort', 'timeout', 'session'], auth: { ok: true, loggedIn: true } } }, http: 'down' });
     const h = await ctx.claudeBridgeHealth();
-    eq('インストール式で使える', ctx.claudeBridgeHealthMessage(h).text, '使えます（ログイン済み / wsl / 連携 0.24.23）');
+    eq('インストール式で使える', ctx.claudeBridgeHealthMessage(h).text, '使用できます（ログイン済み / wsl / 連携 0.24.23）');
   }
   {
     // v0.24.21〜22 で入れた補助プログラムは調整（effort / timeout）を知らない

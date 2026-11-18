@@ -24,7 +24,7 @@ async function open(browser, settings, claudeError = '') {
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   const seen = { gemini: 0, claude: [] };
-  await page.route('**/generativelanguage.googleapis.com/**', r => {
+  await page.route('**/generativelanguage.googleapis.com/**', r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     seen.gemini++;
     r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '## 概要\n- Gemini の要約' }] }, finishReason: 'STOP' }] }) });
   });
@@ -72,7 +72,7 @@ const summarize = (page, chars) => page.evaluate(async (n) => {
     await page.click('#input-claude-code');
     await page.waitForTimeout(600);
     eq('連携をオンにするとその場で出る', await vis(), true);
-    eq('文言', (await page.textContent('#claude-fallback-row')).trim(), 'Claude Codeでの処理に失敗したらGemini APIで処理する');
+    eq('文言', await page.evaluate(() => document.querySelector('#claude-fallback-row > span').firstChild.textContent.trim()), 'Claude Codeでの処理に失敗したらGemini APIで処理する');   // v0.24.157: 下に、Gemini が使えないときの赤い字がある
     // v0.24.152 から、あいだに「Groq に失敗したら Gemini」の行が入る
     eq('ライブ整形の上（Groq の行をはさむ）', await page.evaluate(() => { const c = document.getElementById('claude-fallback-row'), g = c.nextElementSibling; return g.id === 'groq-fallback-row' && g.nextElementSibling.contains(document.getElementById('input-ai-enabled')); }), true);
     eq('既定はオフ（料金を増やさないほう）', await page.evaluate(() => document.getElementById('input-claude-fallback').checked), false);

@@ -41,8 +41,11 @@ async function open(browser, { useClaudeBridge = false, blockHealth = false, cla
   await page.evaluate(([k, v]) => localStorage.setItem(k, JSON.stringify(v)),
                       // v0.24.58: このファイルは「Gemini に戻したとき」を見るので、「失敗したら Gemini で処理する」をオンにしておく
                       // （オフのとき＝戻さずに試し直すほうは t-claude-fallback-browser.js）
-                      [SETTINGS_KEY, { useClaudeBridge, claudeFallbackGemini: true, ...(claudeCode !== undefined ? { claudeCode } : {}) }]);
+                      [SETTINGS_KEY, { useClaudeBridge, claudeFallbackGemini: true, apiKey: 'AIza-test', geminiEnabled: true,   // v0.24.156: Gemini のキーが無いと回さないので、回る道を見るためにキーを入れる
+                      ...(claudeCode !== undefined ? { claudeCode } : {}) }]);
   if (blockHealth) await page.route('**/api/claude/health', r => r.abort());
+  // v0.24.157: キーの確かめ（モデルの一覧）は通す。外の Google には出さない
+  await page.route('**/generativelanguage.googleapis.com/**', r => r.fulfill({ contentType: 'application/json', body: '{"models":[]}' }));
   await page.reload();
   await page.waitForTimeout(900);
   return { ctx, page };
@@ -68,7 +71,7 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
     const t = await status(page);
     // v0.24.9: 中継が生きているだけでは「使えます」と言わない。
     // ログインしていることまで確かめてから言う
-    eq('使えると出る', /使えます/.test(t), true);
+    eq('使えると出る', /使用できます/.test(t), true);
     eq('ログイン済みだと言う', /ログイン済み/.test(t), true);
     eq('色が付く（is-ok）',
        await page.evaluate(() => document.getElementById('claude-bridge-status').className.includes('is-ok')), true);
@@ -192,7 +195,7 @@ const status = (page) => page.evaluate(() => document.getElementById('claude-bri
     ['ログインしていない（戻す）', { ok: true, invocation: 'claude', auth: { ok: true, loggedIn: false } },
      false, 'login.bat'],
     ['ログイン済み', { ok: true, invocation: 'claude', auth: { ok: true, loggedIn: true } },
-     true, '使えます'],
+     true, '使用できます'],
     ['古い serve.js（戻さない）', { ok: true, invocation: 'claude' },
      true, 'start.bat を一度閉じて'],
     ['claude を確かめられない（戻さない）', { ok: true, auth: { ok: false, error: 'spawn claude ENOENT' } },

@@ -658,6 +658,8 @@ const els = {
   inputClaudeFallback: document.getElementById('input-claude-fallback'),     // v0.24.58
   claudeFallbackRow: document.getElementById('claude-fallback-row'),         // v0.24.58
   inputGroqFallback: document.getElementById('input-groq-fallback'),         // v0.24.152
+  geminiKeyStatus: document.getElementById('gemini-key-status'),             // v0.24.157
+  groqKeyStatus: document.getElementById('groq-key-status'),
   groqFallbackRow: document.getElementById('groq-fallback-row'),
   inputLiveSummaryMin: document.getElementById('input-live-summary-min'),    // v0.24.22
   liveSummaryNote: document.getElementById('live-summary-note'),             // v0.24.22
@@ -4860,12 +4862,113 @@ async function sendAudioChunkToGemini(blob, provisionalText = '', edges = null) 
  * 料金はかかるが、失敗はまれな前提。どちらで文字にしたかは診断ログと断り書きに出す。
  * @returns {Promise<{text: string, engine: 'Groq'|'Gemini'}>}
  */
+/* ───────── API キーの確かめ（Gemini・Groq）(v0.24.157) ─────────
+ *
+ * やっさんの指定（2026-11-19）: Claude Code には確かめがあるのに Gemini には無い。キーを入れて保存したときに確かめる。
+ * トークンを使わないなら、ほかと同じタイミングでも。→ どちらも「使えるモデルの一覧」をもらうだけ（geminiCheckKey・groqCheckKey）で、
+ * 料金も Groq の無料枠も減らないので、Claude Code・Notion と同じところで確かめる:
+ *   立ち上げたとき（オンでキーがあるとき）／トグルをオンにしたとき／キーを入れ直したとき（欄から出たとき）／保存したとき／
+ *   前に確かめられなかったときは、設定を開いたときとネットがつながり直したとき
+ * 結果はトグルの下に出すだけで、設定は変えない（立ち上げた瞬間だけつながらないこともあるため。Claude Code と同じ考え）。
+ * ただし「キーが違う」と分かった Gemini には、Groq・Claude の失敗を回さない（geminiUsableNow）
+ */
+/** 設定を開いたとき・ネットがつながり直したときに。まだ確かめていない、または確かめられなかったものだけ確かめる */
+function refreshKeyChecks({ onlyNet = false } = {}) {
+  for (const w of ['gemini', 'groq']) {
+    const { on, key } = keyCheckInput(w);
+    const r = keyCheck[w];
+    const stale = !r || r.key !== key || r.kind === 'net' || (!onlyNet && r.kind === 'badkey');
+    if (on && key && stale && !(onlyNet && (!r || r.kind !== 'net'))) checkAiKey(w);
+    else paintKeyStatus(w);
+  }
+  applyFallbackAvailability(false);
+}
+const keyCheck = { gemini: null, groq: null };   // { kind: 'checking'|'ok'|'badkey'|'net', key }
+const keyCheckSeq = { gemini: 0, groq: 0 };
+const KEY_CHECK_TEXT = {
+  checking: ['', '確認中…'],
+  ok: ['is-ok', 'キーは有効です'],   // 支払いや上限までは分からないので「使用できます」とは言わない
+  badkey: ['is-ng', 'API キーが正しくありません'],
+};
+function keyCheckNetText(which) {
+  return `確認できませんでした（ネットにつながっていないか、${which === 'gemini' ? 'Google' : 'Groq'} 側の不具合）`;
+}
+/** いまの値（設定が開いていれば欄、閉じていれば保存した値） */
+function keyCheckInput(which) {
+  const open = els.settingsModal && !els.settingsModal.classList.contains('hidden');
+  if (which === 'gemini') {
+    return open ? { on: !!(els.inputGeminiEnabled && els.inputGeminiEnabled.checked), key: (els.inputApiKey.value || '').trim() }
+      : { on: state.settings.geminiEnabled !== false, key: state.settings.apiKey || '' };
+  }
+  return open ? { on: !!(els.inputGroqEnabled && els.inputGroqEnabled.checked), key: (els.inputGroqKey.value || '').trim() }
+    : { on: !!state.settings.groqEnabled, key: state.settings.groqApiKey || '' };
+}
+function paintKeyStatus(which) {
+  const el = which === 'gemini' ? els.geminiKeyStatus : els.groqKeyStatus;
+  if (!el) return;
+  const { on, key } = keyCheckInput(which);
+  const r = keyCheck[which];
+  const show = on && key && r && r.key === key;
+  const [cls, text] = !show ? ['', ''] : r.kind === 'net' ? ['is-ng', keyCheckNetText(which)] : KEY_CHECK_TEXT[r.kind];
+  el.className = 'field-hint key-status' + (cls ? ' ' + cls : '');
+  el.textContent = text;
+}
+async function checkAiKey(which) {
+  const { on, key } = keyCheckInput(which);
+  const seq = ++keyCheckSeq[which];
+  if (!on || !key) { keyCheck[which] = null; paintKeyStatus(which); applyFallbackAvailability(); return null; }
+  keyCheck[which] = { kind: 'checking', key };
+  paintKeyStatus(which);
+  const fn = which === 'gemini' ? (typeof geminiCheckKey === 'function' && geminiCheckKey) : (typeof groqCheckKey === 'function' && groqCheckKey);
+  const r = fn ? await fn(key) : { kind: 'net', detail: '読み込まれていません' };
+  if (seq !== keyCheckSeq[which]) return null;   // そのあいだに入れ直された（古い結果は捨てる）
+  keyCheck[which] = { kind: r.kind, key };
+  if (r.kind !== 'ok') diagLog.info(`${which === 'gemini' ? 'Gemini' : 'Groq'} のキーを確かめました: ${r.kind}${r.detail ? ' ' + r.detail : ''}`);
+  paintKeyStatus(which);
+  applyFallbackAvailability();
+  applyClaudeBridgeSetting();   // 「Claude に失敗したら Gemini」の旗を、確かめた結果に合わせる
+  return r.kind;
+}
+/** 保存した設定で、Gemini に回してよいか（キーがあり、確かめて「違う」と分かっていない） */
+function geminiUsableNow() {
+  const key = geminiKey();
+  if (!key) return false;
+  const r = keyCheck.gemini;
+  return !(r && r.key === key && r.kind === 'badkey');
+}
+/** 設定の欄で、Gemini が使えるか（オン・キーあり・キーが違うと分かっていない） */
+function geminiUsableInForm() {
+  if (typeof formAiAvail !== 'function' || !formAiAvail().gemini) return false;
+  const r = keyCheck.gemini;
+  const key = (els.inputApiKey.value || '').trim();
+  return !(r && r.key === key && r.kind === 'badkey');
+}
+/**
+ * 「失敗したら Gemini で処理する」の 2 つ。Gemini が使えないときは押せなくして赤い字 (v0.24.157)
+ * 押せないあいだはチェックを外して見せ、使えるようになったら覚えている値に戻す（ライブ要約と同じ）
+ */
+function applyFallbackAvailability(animated = true) {
+  const ok = geminiUsableInForm();
+  for (const [box, key] of [[els.inputClaudeFallback, 'claudeFallbackGemini'], [els.inputGroqFallback, 'groqFallbackGemini']]) {
+    if (!box) continue;
+    if (ok && box.disabled) box.checked = !!state.settings[key];
+    box.disabled = !ok;
+    if (!ok) box.checked = false;
+    const row = box.closest('label');
+    const ng = row && row.querySelector('.fallback-ng');
+    // 行そのものが隠れている（これから出る）ときは、赤い字はその場で決める。
+    // 行が出るばねの中で字までばねで伸びると、行の高さが最後に変わって下の行が跳ぶ（t-motion-settings-browser.js）
+    const rowShown = row && !row.hidden && row.offsetHeight > 0 && !(window.Motion && Motion.current && row.style.height);
+    if (ng) revealSettingRow(ng, !ok, animated && rowShown);
+  }
+}
+
 /**
  * Groq に失敗したかたまりを Gemini で文字にしてよいか (v0.24.152)
  * 設定「Groq での処理に失敗したら Gemini API で処理する」（既定オン）。オフでも、失敗の小窓でこの録音だけ Gemini をオンにできる
  */
 function groqMayFallBackToGemini() {
-  if (!geminiKey()) return false;
+  if (!geminiUsableNow()) return false;
   if (state.groqOverride && typeof state.groqOverride.gemini === 'boolean') return state.groqOverride.gemini;
   return state.settings.groqFallbackGemini === true;
 }
@@ -5019,8 +5122,11 @@ function applyAiSettingsVisibility(animated = true) {
   const on = (box) => !!(box && box.checked);
   revealSettingRow(document.getElementById('gemini-key-fields'), on(els.inputGeminiEnabled), animated);
   revealSettingRow(document.getElementById('groq-key-fields'), on(els.inputGroqEnabled), animated);
-  // v0.24.152: 「Groq での処理に失敗したら Gemini API で処理する」は、Groq も Gemini も使うときだけ意味がある
-  revealSettingRow(els.groqFallbackRow, on(els.inputGroqEnabled) && on(els.inputGeminiEnabled), animated, true);
+  // v0.24.152: 「Groq での処理に失敗したら Gemini API で処理する」。
+  // v0.24.157: Groq がオンなら出す（Gemini が使えないときは押せなくして赤い字。applyFallbackAvailability）。
+  // 前は Gemini のトグルもオンのときだけ出していたので、キーが空でも出て、使えないのにオンにできた
+  revealSettingRow(els.groqFallbackRow, on(els.inputGroqEnabled), animated, true);
+  applyFallbackAvailability(animated);
   revealSettingRow(document.getElementById('claude-code-fields'), on(els.inputClaudeCode), animated);
   // v0.24.132: 要約・タイトル生成がオフなら「要約の詳しさ」を隠す（やっさんの指定）
   revealSettingRow(document.getElementById('summary-detail-field'), on(els.inputAutoSummarize), animated);
@@ -5333,7 +5439,7 @@ function applyClaudeBridgeSetting() {
     claudeBridgeSetEnabled(!!state.settings.claudeCode && postEngineNow() === 'claude');
   }
   // v0.24.58: 失敗したら Gemini に回すか（オフなら Claude で3回試し直す）
-  if (typeof claudeBridgeSetFallback === 'function') claudeBridgeSetFallback(!!state.settings.claudeFallbackGemini && !!geminiKey());   // v0.24.156: Gemini が使えないなら回さない（空のキーで送って「Gemini で処理」と嘘を出し、3 回の試し直しも消えていた）
+  if (typeof claudeBridgeSetFallback === 'function') claudeBridgeSetFallback(!!state.settings.claudeFallbackGemini && geminiUsableNow());   // v0.24.156: Gemini が使えないなら回さない（空のキーで送って「Gemini で処理」と嘘を出し、3 回の試し直しも消えていた）
 }
 
 /**
@@ -5354,11 +5460,11 @@ function applyClaudeBridgeSetting() {
 async function testClaudeBridge() {
   const el = els.claudeBridgeStatus;
   if (!el) return { ok: false, needsLogin: false };
-  el.className = 'field-hint';
+  el.className = 'field-hint key-status';
   el.textContent = '確認中…';
   const health = await claudeBridgeHealth();
   const r = claudeBridgeHealthMessage(health);
-  el.className = 'field-hint ' + (r.ok ? 'is-ok' : 'is-ng');
+  el.className = 'field-hint key-status ' + (r.ok ? 'is-ok' : 'is-ng');
   el.textContent = r.text;
   // 通ったら「もう駄目」の覚えを消す。直した直後に使えないと困る
   if (r.ok && typeof claudeBridgeClearBroken === 'function') claudeBridgeClearBroken();
@@ -5392,7 +5498,7 @@ async function saveBridgeFiles() {
   const btn = els.btnSaveBridgeFiles;
   const say = (msg, ng) => {
     if (!els.claudeBridgeStatus) return;
-    els.claudeBridgeStatus.className = 'field-hint' + (ng ? ' is-ng' : '');
+    els.claudeBridgeStatus.className = 'field-hint key-status' + (ng ? ' is-ng' : '');
     els.claudeBridgeStatus.textContent = msg;
   };
   if (btn) btn.disabled = true;
@@ -5440,7 +5546,7 @@ async function saveClaudeInstaller() {
   const btn = els.btnClaudeInstall;
   const say = (msg, ng) => {
     if (!els.claudeBridgeStatus) return;
-    els.claudeBridgeStatus.className = 'field-hint' + (ng ? ' is-ng' : '');
+    els.claudeBridgeStatus.className = 'field-hint key-status' + (ng ? ' is-ng' : '');
     els.claudeBridgeStatus.textContent = msg;
   };
   if (btn) btn.disabled = true;
@@ -9013,6 +9119,7 @@ function openSettings() {
   applyWebSpeechOnlyVisibility(/* animated */ false);
   applyAiSettingsVisibility(/* animated */ false);
   renderAiTable();   // v0.24.92
+  refreshKeyChecks();   // v0.24.157: 前の結果を出す。確かめていない・確かめられなかったものは、ここで確かめ直す
   renderUsageCard();   // v0.24.104
   els.fontTranscript.value = state.settings.transcriptFont;
   els.sizeTranscript.value = state.settings.transcriptSize;
@@ -9050,8 +9157,9 @@ function saveSettingsFromForm() {
   }
   // v0.24.39: 「Claude Code」がオフで押せないときは、前の値を残す（オンに戻したら元どおり）
   if (els.inputLiveSummary && !els.inputLiveSummary.disabled) state.settings.liveSummary = els.inputLiveSummary.checked;
-  if (els.inputClaudeFallback) state.settings.claudeFallbackGemini = els.inputClaudeFallback.checked;   // v0.24.58
-  if (els.inputGroqFallback) state.settings.groqFallbackGemini = els.inputGroqFallback.checked;   // v0.24.152
+  // v0.24.157: Gemini が使えなくて押せないあいだは、チェックが外れて見えるだけ。覚えている値を残す（Gemini を戻したら元どおり）
+  if (els.inputClaudeFallback && !els.inputClaudeFallback.disabled) state.settings.claudeFallbackGemini = els.inputClaudeFallback.checked;   // v0.24.58
+  if (els.inputGroqFallback && !els.inputGroqFallback.disabled) state.settings.groqFallbackGemini = els.inputGroqFallback.checked;   // v0.24.152
   if (els.inputLiveSummaryMin) state.settings.liveSummaryMin = clampLiveSummaryMinutes(els.inputLiveSummaryMin.value);
   state.settings.aiEnabled = els.inputAiEnabled.checked;
   if (els.inputRefineWithWs) state.settings.refineWithWebSpeech = els.inputRefineWithWs.checked;   // v0.24.144
@@ -9151,6 +9259,12 @@ function saveSettingsFromForm() {
   // タブは消えるのにライブ要約の画面が残った）。applyLiveSummaryTab は中で renderInnerTabs も呼ぶ
   applyLiveSummaryTab();
   els.settingsModal.classList.add('hidden');
+  // v0.24.157: 保存したら、変わったキー・確かめられていないキーを確かめる（同じキーで「有効」と分かっていれば、もう一度はしない）
+  for (const w of ['gemini', 'groq']) {
+    const { on, key } = keyCheckInput(w);
+    const r = keyCheck[w];
+    if (on && key && (!r || r.key !== key || r.kind === 'net')) checkAiKey(w);
+  }
 }
 
 /* ───────── Inner pane switch ───────── */
@@ -11481,7 +11595,11 @@ for (const box of [els.inputGeminiEnabled, els.inputGroqEnabled, els.inputClaude
   if (box) box.addEventListener('change', () => { applyAiSettingsVisibility(true); renderAiTable(); applyLiveSummaryAvailability(); });
 }
 // v0.24.92: キーを入れた・消した、モードを変えたら、表と注意書きも描き直す
-for (const el of [els.inputApiKey, els.inputGroqKey]) if (el) el.addEventListener('input', () => { renderAiTable(); applyLiveSummaryAvailability(); });
+for (const el of [els.inputApiKey, els.inputGroqKey]) if (el) el.addEventListener('input', () => { renderAiTable(); applyLiveSummaryAvailability(); paintKeyStatus(el === els.inputApiKey ? 'gemini' : 'groq'); applyFallbackAvailability(); });
+// v0.24.157: トグルをオンにしたとき・キーを入れ直したとき（欄から出たとき）に確かめる。オフにしたら状態の字を消す
+for (const [box, w] of [[els.inputGeminiEnabled, 'gemini'], [els.inputGroqEnabled, 'groq'], [els.inputApiKey, 'gemini'], [els.inputGroqKey, 'groq']]) {
+  if (box) box.addEventListener('change', () => { checkAiKey(w); });
+}
 for (const el of [els.modeGemini, els.modeWebSpeech]) if (el) el.addEventListener('change', renderAiTable);
 if (els.aiTableBody) {
   els.aiTableBody.addEventListener('click', (e) => {
@@ -12764,6 +12882,9 @@ applyClaudeBridgeSetting();
 // （「接続を確認」ボタンは外した。やっさんの指定）。ここでは結果を出すだけで、設定は変えない
 // （立ち上げた瞬間だけ繋がらないこともあるので、オフに戻したりはしない）
 if (state.settings.claudeCode) testClaudeBridge();
+// v0.24.157: Gemini・Groq のキーも、オンでキーがあれば立ち上げたときに確かめる（モデルの一覧をもらうだけ。料金・無料枠は減らない）
+if (state.settings.geminiEnabled !== false && state.settings.apiKey) checkAiKey('gemini');
+if (state.settings.groqEnabled && state.settings.groqApiKey) checkAiKey('groq');
 // v0.24.50: Notion 連携も同じく、オンなら立ち上げたときに確かめて横に出す（結果を出すだけで設定は変えない）。
 // **loadSettings() より後でないといけない**（最初はその前に書いてしまい、設定が空のまま判断していた）
 if (state.settings.notionEnabled && state.settings.notionToken && notionIsAvailable()) {
@@ -12779,7 +12900,7 @@ if (els.inputClaudeCode) {
     // オフにしたら、横の状態の表示も消す（オフなのに「使えます」と出ていると紛らわしい）
     if (!els.inputClaudeCode.checked && els.claudeBridgeStatus) {
       els.claudeBridgeStatus.textContent = '';
-      els.claudeBridgeStatus.className = 'field-hint';
+      els.claudeBridgeStatus.className = 'field-hint key-status';
     }
     verifyClaudeBridgeToggle();
     applyLiveSummaryAvailability();
@@ -13012,7 +13133,10 @@ if (els.btnNotionAutoPick) els.btnNotionAutoPick.addEventListener('click', async
   renderNotionAutoTargetOptions('fixed');
 });
 // v0.24.148: ネットがつながり直したら、Notion の失敗の表示を確かめ直す（起動時の登録。tests/browser/t-notion-settings-browser.js）
-window.addEventListener('online', () => { if (typeof refreshNotionStatusAfterSuccess === 'function') refreshNotionStatusAfterSuccess(); });
+window.addEventListener('online', () => {
+  if (typeof refreshNotionStatusAfterSuccess === 'function') refreshNotionStatusAfterSuccess();
+  refreshKeyChecks({ onlyNet: true });   // v0.24.157: つながらなくて確かめられなかったキーを確かめ直す
+});
 if (els.btnSaveBridgeFiles) {
   els.btnSaveBridgeFiles.addEventListener('click', () => { saveBridgeFiles(); });
 }

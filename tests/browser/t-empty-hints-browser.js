@@ -24,6 +24,7 @@ async function open(browser, settings) {
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   await page.route('**/api/claude/**', r => r.abort());
   await page.route('**/api/claude', r => r.abort());
+  await page.route(/generativelanguage\.googleapis\.com|api\.groq\.com/, r => r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }));   // v0.24.157: キーの確かめを外に出さない
   await page.goto(URL);
   await page.evaluate(s => localStorage.setItem('dictation:settings', JSON.stringify(s)), settings);
   await page.reload();

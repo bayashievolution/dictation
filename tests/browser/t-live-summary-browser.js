@@ -37,7 +37,7 @@ async function open(browser, { settings = {}, claude = 'ok' } = {}) {
     window.SpeechRecognition = FakeRec;
     window.webkitSpeechRecognition = FakeRec;
   });
-  await page.route('**/generativelanguage.googleapis.com/**', r => {
+  await page.route('**/generativelanguage.googleapis.com/**', r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     seen.gemini++;
     r.fulfill({ contentType: 'application/json',
       body: JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Gemini の要約' }] }, finishReason: 'STOP' }] }) });

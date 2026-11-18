@@ -20,6 +20,7 @@ const eq = (label, got, want) => {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 520, height: 900 } });
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
+  await page.route(/generativelanguage\.googleapis\.com|api\.groq\.com/, r => r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }));   // v0.24.157: キーの確かめを外に出さない
   await page.goto(URL);
   // 既定値から外した設定で始める
   await page.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({

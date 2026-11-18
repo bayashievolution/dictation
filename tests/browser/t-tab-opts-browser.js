@@ -21,7 +21,7 @@ const eq = (label, got, want) => {
   const page = await browser.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   let gemini = 0;
-  await page.route('**/generativelanguage.googleapis.com/**', (r) => { gemini++; r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '## 概要\n- 要約' }] }, finishReason: 'STOP' }] }) }); });
+  await page.route('**/generativelanguage.googleapis.com/**', (r) => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */ gemini++; r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '## 概要\n- 要約' }] }, finishReason: 'STOP' }] }) }); });
   await page.goto(URL);
   await page.evaluate(() => { localStorage.clear(); localStorage.setItem('dictation:settings', JSON.stringify({ apiKey: 'A', aiEnabled: true, autoSummarize: false, liveSummary: true, claudeCode: false })); });
   await page.reload();

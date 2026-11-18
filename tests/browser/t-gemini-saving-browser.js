@@ -23,7 +23,7 @@ async function open(browser, settings) {
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   const seen = { audio: [], text: [], claude: [] };
-  await page.route('**/generativelanguage.googleapis.com/**', r => {
+  await page.route('**/generativelanguage.googleapis.com/**', r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     const body = JSON.parse(r.request().postData() || '{}');
     const parts = (body.contents || []).flatMap(c => c.parts || []);
     const isAudio = parts.some(p => p.inline_data);

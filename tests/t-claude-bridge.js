@@ -239,16 +239,16 @@ console.log('\n■ 「接続を確認」の文言（ログインまで見る）'
      { ok: false, needsLogin: false, unknown: false, text: '中継に繋がりません。start.bat でサーバーを起動してください' });
   const F = ['effort', 'timeout', 'session'];   // v0.24.23 / v0.24.53 からのサーバーが返す印
   is('ログイン済み', h({ ok: true, invocation: 'claude', features: F, auth: { ok: true, loggedIn: true } }),
-     { ok: true, needsLogin: false, unknown: false, stale: false, text: '使えます（ログイン済み / claude）' });
+     { ok: true, needsLogin: false, unknown: false, stale: false, text: '使用できます（ログイン済み / claude）' });
   is('版も返ってきたとき',
      h({ ok: true, invocation: 'claude', version: '0.24.23', features: F, auth: { ok: true, loggedIn: true } }),
      { ok: true, needsLogin: false, unknown: false, stale: false,
-       text: '使えます（ログイン済み / claude / サーバー 0.24.23）' });
+       text: '使用できます（ログイン済み / claude / サーバー 0.24.23）' });
   // v0.24.23: 調整（effort / timeout）を知らない古いサーバー。使えるが、入れ直しを促す
   is('古いサーバー（start.bat）→ 起動し直してと言う',
      h({ ok: true, invocation: 'claude', version: '0.24.11', auth: { ok: true, loggedIn: true } }),
      { ok: true, needsLogin: false, unknown: false, stale: true,
-       text: '使えます（ログイン済み / claude / サーバー 0.24.11）。サーバーが古い版です。ライブ整形・ライブ要約を速くするため、start.bat を起動し直してください' });
+       text: '使用できます（ログイン済み / claude / サーバー 0.24.11）。サーバーが古い版です。ライブ整形・ライブ要約を速くするため、start.bat を起動し直してください' });
   // v0.24.53: effort は分かるが session を知らない（v0.24.23〜52）も古い。ライブ整形が毎回 claude を起動し直す
   is('session を知らないサーバー → 起動し直してと言う',
      h({ ok: true, invocation: 'claude', version: '0.24.52', features: ['effort', 'timeout'], auth: { ok: true, loggedIn: true } }).stale, true);

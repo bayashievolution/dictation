@@ -44,14 +44,14 @@ async function runOnce(browser, { preprocess }) {
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   const gem = [], groq = [];
   let groq429 = preprocess === 'none' ? 1 : 0;   // 1 回目だけ「回数の上限」を返す
-  await page.route('**/generativelanguage.googleapis.com/**', async r => {
+  await page.route('**/generativelanguage.googleapis.com/**', async r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     gem.push(JSON.parse(r.request().postData()));
     await r.fulfill({ contentType: 'application/json', body: JSON.stringify({
       candidates: [{ content: { parts: [{ text: `ジェミニ${gem.length}` }] }, finishReason: 'STOP' }],
       usageMetadata: { promptTokenCount: 1000, promptTokensDetails: [{ modality: 'AUDIO', tokenCount: 480 }] },
     }) });
   });
-  await page.route('**/api.groq.com/**', async r => {
+  await page.route('**/api.groq.com/**', async r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     const req = r.request();
     if (groq429-- > 0) {
       await r.fulfill({ status: 429, headers: { 'retry-after': '1' }, body: 'rate limited' });
@@ -154,7 +154,7 @@ async function muse(browser) {
       : { sessionId: 's2', transcript: `ミューズ${sent.length}`, audioDurationMs: 14000 }) });
   });
   // Gemini: 話者判別は ファイルを上げる → 待つ → 話者付きで頼む → 消す（本体の diarizeSegmentWithGemini と同じ道）
-  await page.route('**/generativelanguage.googleapis.com/**', async r => {
+  await page.route('**/generativelanguage.googleapis.com/**', async r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     const url = r.request().url(), method = r.request().method();
     if (/upload\//.test(url)) return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ file: { name: 'files/abc', uri: 'https://x/files/abc', mimeType: 'audio/wav', state: 'ACTIVE' } }) });
     if (method === 'GET' && /files\/abc/.test(url)) return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ name: 'files/abc', state: 'ACTIVE' }) });

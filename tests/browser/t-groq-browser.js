@@ -9,7 +9,7 @@
 // 見ること:
 //   - Groq を選ぶと音声は Groq だけに行き、Gemini には音声を送らない（料金を減らすのが目的なので、ここが崩れると意味がない）
 //   - 句読点の無い Groq の文字をライブ整形に通す（Gemini に行くのは文字だけ）
-//   - Groq で失敗したら Gemini で文字にする／Gemini のキーも無ければ失敗と正直に出す
+//   - Groq で失敗したら（「失敗したら Gemini」がオンなら）Gemini で文字にする／Gemini のキーも無ければ失敗と正直に出す（v0.24.155 から既定はオフ）
 //   - 設定画面で選べて、保存され、右上の印が (Groq) になる（登録が関数の中に入っていないか ── CLAUDE.md「誰がいつ呼ぶか」）
 //   - 比較ページで入れた Groq のキーを引き継ぐ
 const { chromium } = require('playwright');
@@ -27,7 +27,7 @@ async function open(browser, settings, { groq, extraStorage } = {}) {
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   const calls = { gemini: [], groq: 0 };
-  await page.route('**/generativelanguage.googleapis.com/**', async r => {
+  await page.route('**/generativelanguage.googleapis.com/**', async r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     const body = JSON.parse(r.request().postData());
     const audio = body.contents[0].parts.some(p => p.inline_data);
     calls.gemini.push(audio ? 'audio' : 'text');
@@ -35,7 +35,7 @@ async function open(browser, settings, { groq, extraStorage } = {}) {
       candidates: [{ content: { parts: [{ text: audio ? 'ジェミニが聞いた文。' : '整形した文です。今日はよろしくお願いします。' }] }, finishReason: 'STOP' }],
     }) });
   });
-  await page.route('**/api.groq.com/**', async r => {
+  await page.route('**/api.groq.com/**', async r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     calls.groq++;
     const g = groq || { status: 200, body: { text: '整形前の文です今日はよろしくお願いします', segments: [
       { text: '整形前の文です今日はよろしくお願いします', no_speech_prob: 0.01, avg_logprob: -0.2 },
@@ -87,9 +87,9 @@ async function sendOne(page) {
 
   console.log('\n■ Groq で失敗したら');
   {
-    const { ctx, page, calls } = await open(browser, { ...base, aiEnabled: false }, { groq: { status: 500, body: { error: 'down' } } });
+    const { ctx, page, calls } = await open(browser, { ...base, aiEnabled: false, groqFallbackGemini: true, groqFallbackV: 2 }, { groq: { status: 500, body: { error: 'down' } } });
     const paras = await sendOne(page);
-    eq('Gemini のキーがあれば Gemini で文字にする', paras.map(p => p.text), ['ジェミニが聞いた文。']);
+    eq('「失敗したら Gemini」がオンで Gemini のキーがあれば、Gemini で文字にする', paras.map(p => p.text), ['ジェミニが聞いた文。']);
     eq('Gemini に音声を 1 回', calls.gemini, ['audio']);
     await ctx.close();
   }
@@ -209,7 +209,7 @@ async function sendOne(page) {
   for (const on of [true, false]) {
     const { ctx, page } = await open(browser, { ...base, aiEnabled: true, refineWithWebSpeech: on });
     const sent = [];
-    await page.route('**/generativelanguage.googleapis.com/**', async (r) => { sent.push(r.request().postData() || ''); await r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '整形した文です。' }] }, finishReason: 'STOP' }] }) }); });
+    await page.route('**/generativelanguage.googleapis.com/**', async (r) => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */ sent.push(r.request().postData() || ''); await r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '整形した文です。' }] }, finishReason: 'STOP' }] }) }); });
     await page.evaluate(() => state.sessions.forEach((x) => { delete x.opts; }));
     await page.evaluate(() => sendAudioChunkToGemini(new Blob(['x'.repeat(2000)], { type: 'audio/webm' }), 'ウェブスピーチが聞いた文です今日は', { startsAtSilence: true, endsAtSilence: true, durationMs: 15000 }));
     await page.waitForTimeout(300);

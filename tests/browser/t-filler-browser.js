@@ -25,7 +25,7 @@ const eq = (label, got, want) => {
   const segs = ['はい、どうぞ。', 'はい。', 'はい。', 'はい。'].map((text) => ({ text, no_speech_prob: 0.05, avg_logprob: -0.3 }));
   await page.route('**/api.groq.com/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ text: segs.map((x) => x.text).join(''), segments: segs }) }));
   // 整形は、もらった字を空白で行に分けて返す（実機で 4 行になったのと同じ）
-  await page.route('**/generativelanguage.googleapis.com/**', r => {
+  await page.route('**/generativelanguage.googleapis.com/**', r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     const m = JSON.parse(r.request().postData()).contents[0].parts[0].text.match(/【新しい生チャンク（整形対象）】\n([\s\S]*)$/);
     r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: m ? m[1].replace(/ /g, '\n') : '' }] }, finishReason: 'STOP' }] }) });
   });

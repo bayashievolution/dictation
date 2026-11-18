@@ -25,7 +25,7 @@ const wait = (page, ms) => page.waitForTimeout(ms);
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   let reply = '';
   let delay = 0;
-  await page.route('**/generativelanguage.googleapis.com/**', async r => {
+  await page.route('**/generativelanguage.googleapis.com/**', async r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     if (delay) await new Promise(res => setTimeout(res, delay));
     r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: reply }] }, finishReason: reply ? 'STOP' : '' }] }) });
   });

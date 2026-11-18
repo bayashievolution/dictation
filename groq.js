@@ -157,3 +157,23 @@ async function transcribeAudioWithGroq({ apiKey, audioBlob, sessionContext, cont
 }
 
 window.transcribeAudioWithGroq = transcribeAudioWithGroq;
+
+/**
+ * Groq の API キーを確かめる (v0.24.157)
+ * 「使えるモデルの一覧」をもらうだけ。文字起こしはしないので、無料枠（音声の時間・回数）は減らない。
+ * 前は確かめておらず、使ってみるまでキーが正しいか分からなかった
+ * @returns {Promise<{kind: 'ok'|'badkey'|'net', detail?: string}>}
+ */
+async function groqCheckKey(apiKey) {
+  if (!apiKey) return { kind: 'badkey', detail: 'キーが空です' };
+  let res;
+  try {
+    res = await fetch('https://api.groq.com/openai/v1/models', { headers: { Authorization: `Bearer ${apiKey}` } });
+  } catch (e) {
+    return { kind: 'net', detail: String(e && e.message || e) };
+  }
+  if (res.ok) return { kind: 'ok' };
+  const body = await res.text().catch(() => '');
+  if (res.status === 401 || res.status === 403) return { kind: 'badkey', detail: `${res.status} ${body.slice(0, 160)}` };
+  return { kind: 'net', detail: `${res.status} ${body.slice(0, 160)}` };
+}

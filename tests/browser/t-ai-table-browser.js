@@ -69,7 +69,7 @@ const disabled = (page, k, a) => page.$eval(`.ai-pick[data-k="${k}"][data-a="${a
     const page = await ctx.newPage();
     page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
     const seen = { gemini: [], claude: 0 };
-    await page.route('**/generativelanguage.googleapis.com/**', r => {
+    await page.route('**/generativelanguage.googleapis.com/**', r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
       seen.gemini.push(JSON.parse(r.request().postData()).contents[0].parts[0].text);
       r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '## 目次\n1. 評価の観点\n\n## 評価の観点\n- 三つある' }] }, finishReason: 'STOP' }] }) });
     });
