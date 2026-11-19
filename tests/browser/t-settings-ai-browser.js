@@ -32,7 +32,7 @@ async function open(browser, settings) {
     sessionStorage.setItem('seeded', '1');
     localStorage.setItem('dictation:settings', JSON.stringify(s));
   }, settings);
-  await page.route('**/generativelanguage.googleapis.com/**', r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
+  await page.route('**/generativelanguage.googleapis.com/**', r => { if (r.request().method() === 'GET' && /\/models(\?|$)/.test(r.request().url())) return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     const body = JSON.parse(r.request().postData() || '{}');
     seen.gemini.push(JSON.stringify(body).slice(0, 4000));
     r.fulfill({ contentType: 'application/json',

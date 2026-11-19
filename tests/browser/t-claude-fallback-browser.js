@@ -24,7 +24,7 @@ async function open(browser, settings, claudeError = '') {
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   const seen = { gemini: 0, claude: [] };
-  await page.route('**/generativelanguage.googleapis.com/**', r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
+  await page.route('**/generativelanguage.googleapis.com/**', r => { if (r.request().method() === 'GET' && /\/models(\?|$)/.test(r.request().url())) return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     seen.gemini++;
     r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '## 概要\n- Gemini の要約' }] }, finishReason: 'STOP' }] }) });
   });

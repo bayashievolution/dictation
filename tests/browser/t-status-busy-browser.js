@@ -93,7 +93,7 @@ const LIVE_MD = '## 目次\n1. 評価の観点\n\n## 1. 評価の観点\n- 観�
     const ctx2 = await browser.newContext();
     const pg = await ctx2.newPage();
     pg.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
-    await pg.route('**/generativelanguage.googleapis.com/**', async r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
+    await pg.route('**/generativelanguage.googleapis.com/**', async r => { if (r.request().method() === 'GET' && /\/models(\?|$)/.test(r.request().url())) return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
       await new Promise(res => setTimeout(res, 9000));   // Gemini の要約にも時間がかかる
       r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '## 概要\n- Gemini の要約' }] }, finishReason: 'STOP' }] }) });
     });

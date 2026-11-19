@@ -225,6 +225,15 @@ function sttResultText(meta, rows) {
       lines.push('');
     }
   }
+  // v0.24.161: Muse のリアルタイム（話者付き）
+  const rt = meta.museRt;
+  if (rt) {
+    lines.push(`# Muse リアルタイム（話者付き）（${rt.range || ''}）`);
+    if (rt.error) lines.push('（エラー）' + rt.error);
+    lines.push(`確定までの遅れ: 平均 ${fmtSec(rt.lagAvgMs)} 最大 ${fmtSec(rt.lagMaxMs)} / 途中の字が出るまで: 平均 ${fmtSec(rt.firstPartialAvgMs)} / 話者 ${rt.speakers || 0}人`);
+    for (const t of rt.turns || []) lines.push(`${t.speaker ? t.speaker + ': ' : ''}${t.transcript || ''}　[${sttFmtTime((t.startMs || 0) / 1000)}・遅れ ${fmtSec(t.lagMs)}]`);
+    lines.push('');
+  }
   return lines.join('\n');
   function fmtSec(ms) { return Number.isFinite(ms) ? (ms / 1000).toFixed(1) + '秒' : '—'; }
 }
@@ -245,5 +254,76 @@ function sttSummarize(rows) {
     groq: Object.assign(stat(q), {
       billedSec: Math.round(rows.filter(r => r.groq && !r.groq.error).reduce((s, r) => s + sttGroqBilledSec(r.end - r.start), 0)),
     }),
+  };
+}
+
+
+/* ───────── Muse のリアルタイム（話者付き）(v0.24.161) ─────────
+ * やっさん（2026-11-19）: ショート動画で、Muse でラジオの話者付きリアルタイム文字起こしが Groq 並みに速かった。
+ * ファイルで送る口（v0.24.147）は区切りを読み終わってから返すので 4〜6 秒かかる。リアルタイムの口（wss://api.meta.ai/v1/asr/realtime）は、
+ * 流しながら途中の字（transcript・final:false）と、1 回の発言の確定（speechComplete）・話者（speaker）を返す。
+ * 作法は Meta の公式の説明書（dev.meta.ai/docs/speech-to-text・api-reference/voice/realtime・schemas）のとおり:
+ *   - 最初の文字の通信（10 秒以内）が設定: authorization.accessToken・audioEncoding（PCM_16KHZ / PCM_24KHZ）・model・mode（DIARIZATION）・partialMode・languageBias・keywords
+ *   - 返ってくる最初の通信（type が無く sessionId がある）が受け付けの印。そのあと 16bit の生の音を、実際の速さくらいで送る（速すぎると 1008 で切られる）
+ *   - 途中の字（transcript）には turnId が無い。いちばん新しい speechStart の発言のもの。speaker も同じ（1 回の発言に 1 つ）。発言は重なることがあるので turnId で持つ
+ *   - 終わりは {"type":"endStream"} を送り、1000 で閉じるまで読む
+ * この関数は、届いた通信を 1 つずつ受けて、発言の一覧を組み立てる（ネットはさわらない。テストで実物のまま回す）
+ * @param {object} st  { turns: Map, current: turnId|null, live: string, error: string }
+ * @param {object} ev  届いた通信（JSON）
+ * @param {number} sentMs  その通信が届いたときまでに送った音の長さ（ms）。確定までの遅れ＝ sentMs − audioProcessedMs
+ */
+function sttMuseRtReduce(st, ev, sentMs) {
+  if (!st.turns) st.turns = new Map();
+  if (!ev || typeof ev !== 'object') return st;
+  const turn = (id) => { if (!st.turns.has(id)) st.turns.set(id, { turnId: id, speaker: '', transcript: '', partial: '', startMs: NaN, endMs: NaN, lagMs: NaN, firstPartialLagMs: NaN }); return st.turns.get(id); };
+  switch (ev.type) {
+    case undefined:
+      if (ev.sessionId) st.sessionId = ev.sessionId;
+      break;
+    case 'speechStart': {
+      const t = turn(ev.turnId);
+      t.startMs = ev.audioProcessedMs;
+      st.current = ev.turnId;
+      break;
+    }
+    case 'transcript': {
+      st.live = ev.transcript || '';
+      if (st.current != null) {
+        const t = turn(st.current);
+        t.partial = ev.transcript || '';
+        if (!Number.isFinite(t.firstPartialLagMs) && Number.isFinite(sentMs) && Number.isFinite(t.startMs)) t.firstPartialLagMs = Math.max(0, sentMs - ev.audioProcessedMs);
+      }
+      break;
+    }
+    case 'speaker':
+      if (st.current != null) turn(st.current).speaker = ev.label || '';
+      break;
+    case 'speechComplete': {
+      const t = turn(ev.turnId);
+      t.transcript = ev.transcript || t.partial || '';
+      t.endMs = ev.audioProcessedMs;
+      if (Number.isFinite(sentMs) && Number.isFinite(ev.audioProcessedMs)) t.lagMs = Math.max(0, sentMs - ev.audioProcessedMs);
+      t.done = true;
+      if (st.current === ev.turnId) st.live = '';
+      break;
+    }
+    case 'error':
+      st.error = ev.message || 'エラー';
+      break;
+  }
+  return st;
+}
+
+/** 確定した発言の一覧と、遅れのまとめ */
+function sttMuseRtSummary(st) {
+  const turns = [...(st.turns ? st.turns.values() : [])].filter((t) => t.done).sort((a, b) => (a.startMs || 0) - (b.startMs || 0));
+  const lags = turns.map((t) => t.lagMs).filter(Number.isFinite);
+  const firsts = turns.map((t) => t.firstPartialLagMs).filter(Number.isFinite);
+  const avg = (xs) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN;
+  return {
+    turns,
+    speakers: new Set(turns.map((t) => t.speaker).filter(Boolean)).size,
+    lagAvgMs: avg(lags), lagMaxMs: lags.length ? Math.max(...lags) : NaN,
+    firstPartialAvgMs: avg(firsts),
   };
 }

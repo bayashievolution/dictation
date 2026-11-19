@@ -28,7 +28,7 @@ async function open(browser, reply) {
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   // v0.24.117: 全体整形の確認は自前の小窓になった（ブラウザの confirm ではない）。押す側で「整形し直す」を押す
-  await page.route('**/generativelanguage.googleapis.com/**', async r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
+  await page.route('**/generativelanguage.googleapis.com/**', async r => { if (r.request().method() === 'GET' && /\/models(\?|$)/.test(r.request().url())) return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     await new Promise(res => setTimeout(res, 1500));
     r.fulfill({ contentType: 'application/json',
       body: JSON.stringify({ candidates: [{ content: { parts: [{ text: reply }] }, finishReason: 'STOP' }] }) });

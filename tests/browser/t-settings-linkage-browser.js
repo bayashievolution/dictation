@@ -32,7 +32,7 @@ const eq = (label, got, want) => {
       sessionStorage.setItem('seeded', '1');
       localStorage.setItem('dictation:settings', JSON.stringify(s));
     }, settings);
-    await page.route('**/generativelanguage.googleapis.com/**', (r) => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */ seen.gemini++; r.fulfill({ status: 400, contentType: 'application/json', body: '{"error":{"message":"API key not valid"}}' }); });
+    await page.route('**/generativelanguage.googleapis.com/**', (r) => { if (r.request().method() === 'GET' && /\/models(\?|$)/.test(r.request().url())) return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */ seen.gemini++; r.fulfill({ status: 400, contentType: 'application/json', body: '{"error":{"message":"API key not valid"}}' }); });
     await page.route('**/api/claude/health', r => r.fulfill({ contentType: 'application/json',
       body: JSON.stringify({ ok: true, invocation: 'claude', features: ['effort', 'timeout', 'session'], auth: { ok: true, loggedIn: true } }) }));
     await page.route('**/api/claude', (r) => { seen.claude++; r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, text: 'Claude の答え', seconds: 1 }) }); });

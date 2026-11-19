@@ -140,6 +140,11 @@
   <div class="row">
     <label><input type="checkbox" id="use-diarize"> 話者付きでも比べる（選んだ範囲をまとめて Muse と Gemini（いまの話者判別）に送る。10 分まで）</label>
   </div>
+  <!-- v0.24.161: Muse のリアルタイムの口（流しながら字と話者が返る）。音は実際の速さで流すので、1 分の範囲に 1 分かかる -->
+  <div class="row">
+    <label><input type="checkbox" id="use-muse-rt"> Muse のリアルタイム（話者付き）でも比べる（選んだ範囲を実際の速さで流すので、範囲の長さだけ時間がかかります）</label>
+    <label><input type="checkbox" id="muse-rt-play" checked> 流している音を聞く</label>
+  </div>
   <div class="row">
     <button id="btn-run" disabled>比較する</button>
     <button id="btn-abort" class="ghost" disabled>止める</button>
@@ -160,6 +165,14 @@
 <div id="diarize" class="card" hidden>
   <h2>話者付きの比較</h2>
   <div class="cols" id="diarize-cols"></div>
+</div>
+
+<!-- v0.24.161: Muse のリアルタイム（話者付き） -->
+<div id="muse-rt" class="card" hidden>
+  <h2>Muse リアルタイム（話者付き）</h2>
+  <div id="muse-rt-stat" class="muted"></div>
+  <div id="muse-rt-turns" class="text" style="white-space:pre-wrap;margin-top:8px"></div>
+  <div id="muse-rt-live" class="muted" style="white-space:pre-wrap;margin-top:6px"></div>
 </div>
 
 <div id="chunks"></div>

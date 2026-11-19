@@ -33,11 +33,15 @@
 
   /* ───────── 保存 ───────── */
 
-  const PREF_IDS = ['groq-key', 'groq-model', 'muse-key', 'preprocess', 'min-sec', 'max-sec', 'from-min', 'len-min', 'ctx-field', 'ctx-terms', 'use-gemini', 'use-groq', 'use-muse', 'use-diarize'];
+  const PREF_IDS = ['groq-key', 'groq-model', 'muse-key', 'preprocess', 'min-sec', 'max-sec', 'from-min', 'len-min', 'ctx-field', 'ctx-terms', 'use-gemini', 'use-groq', 'use-muse', 'use-diarize', 'use-muse-rt', 'muse-rt-play'];
   // v0.24.147: Muse Voice Transcribe（Meta）。ファイルで送る口。1 回に 10 分か 32MB まで（Meta の見本 meta-model-cookbook の utils.py）
   const MUSE_URL = 'https://api.meta.ai/v1/asr/transcribe';
   const MUSE_MODEL = 'muse-voice-transcribe-1.0';
   const MUSE_MAX_SEC = 600;
+  // v0.24.161: リアルタイムの口（Meta の公式の説明書 dev.meta.ai/docs/api-reference/voice/realtime）。1 回の接続は 60 分まで
+  const MUSE_RT_URL = 'wss://api.meta.ai/v1/asr/realtime';
+  const MUSE_RT_MAX_SEC = 55 * 60;
+  const MUSE_RT_FRAME_MS = 80;   // 公式の例と同じ 80ms ずつ、実際の速さで送る（速すぎると 1008 で切られる）
   function loadPrefs() {
     let p = {};
     try { p = JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {}; } catch (_) {}
@@ -346,6 +350,98 @@
     }
   }
 
+  /**
+   * Muse のリアルタイムの口に、選んだ範囲を実際の速さで流す (v0.24.161)
+   * 作法は公式の説明書のとおり（stt-compare-core.js の sttMuseRtReduce の冒頭）。モードは DIARIZATION（話者付き）、日本語に寄せ、よく出る語を keywords に。
+   * 「流している音を聞く」なら、同じ音を同じ時刻からスピーカーにも流す（誰が話しているかを耳で確かめながら見られるように）
+   */
+  function runMuseRealtime(seg, fromSec, termsV) {
+    const res = state.museRt = { range: `${sttFmtTime(fromSec)}–${sttFmtTime(fromSec + seg.length / SR)}`, pending: true };
+    const st = {};
+    let sentMs = 0, started = false, finished = false, timer = 0, player = null, raf = 0;
+    const paint = () => { raf = 0; Object.assign(res, sttMuseRtSummary(st), { live: st.live || '', error: st.error || res.error || '' }); renderMuseRt(res); };
+    const later = () => { if (!raf) raf = requestAnimationFrame(paint); };
+    renderMuseRt(res);
+    return new Promise((resolve) => {
+      const finish = (err) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        try { if (player) player.stop(); } catch (_) { /* 止まっていればよい */ }
+        if (err && !st.error) res.error = err;
+        res.pending = false;
+        paint();
+        resolve();
+      };
+      let ws;
+      try { ws = new WebSocket(`${MUSE_RT_URL}?sessionId=cmp-${Date.now()}`); }
+      catch (e) { finish('つなげませんでした: ' + (e.message || e)); return; }
+      ws.binaryType = 'arraybuffer';
+      const terms = termsV.split(/[、,，\n]/).map((t) => t.trim()).filter(Boolean).slice(0, 50);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          authorization: { accessToken: 'Bearer ' + el('muse-key').value.trim() },
+          audioEncoding: 'PCM_16KHZ',   // このページは 16kHz で持っている（Meta の側で 24kHz にする）
+          model: MUSE_MODEL,
+          mode: 'DIARIZATION',
+          partialMode: 'CUMULATIVE',
+          emitAudioProgress: false,
+          languageBias: ['Japanese'],
+          ...(terms.length ? { keywords: terms } : {}),
+        }));
+      };
+      ws.onmessage = (m) => {
+        if (typeof m.data !== 'string') return;
+        let ev; try { ev = JSON.parse(m.data); } catch (_) { return; }
+        sttMuseRtReduce(st, ev, sentMs);
+        if (ev.type === undefined && ev.sessionId && !started) startStreaming();
+        if (ev.type === 'error') res.error = ev.message || 'エラー';
+        later();
+      };
+      ws.onclose = (e) => finish(e.code === 1000 ? '' : `接続が閉じられました（${e.code}${e.reason ? ' ' + e.reason : ''}）`);
+      ws.onerror = () => { /* 理由は onclose で出す */ };
+      function startStreaming() {
+        started = true;
+        const frame = SR * MUSE_RT_FRAME_MS / 1000;
+        if (el('muse-rt-play').checked) {
+          try {
+            const ac = new AudioContext();
+            const buf = ac.createBuffer(1, seg.length, SR);
+            buf.copyToChannel(seg, 0);
+            player = ac.createBufferSource(); player.buffer = buf; player.connect(ac.destination); player.start();
+          } catch (_) { player = null; }
+        }
+        const t0 = performance.now();
+        let i = 0;
+        const tick = () => {
+          if (state.abort) { try { ws.close(); } catch (_) {} finish('止めました'); return; }
+          const due = Math.floor((performance.now() - t0) / MUSE_RT_FRAME_MS) + 1;
+          while (i < due && i * frame < seg.length) {
+            const part = seg.subarray(i * frame, Math.min(seg.length, (i + 1) * frame));
+            const pcm = new Int16Array(part.length);
+            for (let k = 0; k < part.length; k++) pcm[k] = Math.max(-1, Math.min(1, part[k])) * 0x7fff;
+            if (ws.readyState === 1) ws.send(pcm.buffer);
+            i++;
+            sentMs = Math.min(seg.length, i * frame) / SR * 1000;
+          }
+          if (i * frame >= seg.length) { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'endStream' })); later(); return; }
+          if (!(i % 12)) later();   // 1 秒ほどごとに遅れの表示も更新
+          timer = setTimeout(tick, MUSE_RT_FRAME_MS / 2);
+        };
+        tick();
+      }
+    });
+  }
+  function renderMuseRt(res) {
+    el('muse-rt').hidden = false;
+    const sec = (ms) => Number.isFinite(ms) ? (ms / 1000).toFixed(1) + '秒' : '—';
+    el('muse-rt-stat').textContent = (res.pending ? '流しています… ' : '終わりました ') + `（${res.range}）`
+      + ` / 確定までの遅れ 平均 ${sec(res.lagAvgMs)} 最大 ${sec(res.lagMaxMs)} / 途中の字が出るまで 平均 ${sec(res.firstPartialAvgMs)} / 話者 ${res.speakers || 0}人`
+      + (res.error ? ` / ${res.error}` : '');
+    el('muse-rt-turns').textContent = (res.turns || []).map((t) => `${t.speaker ? t.speaker + ': ' : ''}${t.transcript}　[${sttFmtTime((t.startMs || 0) / 1000)}・遅れ ${sec(t.lagMs)}]`).join('\n');
+    el('muse-rt-live').textContent = res.live ? '… ' + res.live : '';
+  }
+
   function renderDiarize(res) {
     const box = el('diarize'), cols = el('diarize-cols');
     box.hidden = false;
@@ -482,10 +578,10 @@
     if (!p || !p.chunks.length) return;
     const want = { gemini: el('use-gemini').checked, groq: el('use-groq').checked, muse: el('use-muse').checked };
     const wantDiarize = el('use-diarize').checked;
-    if (!want.gemini && !want.groq && !want.muse && !wantDiarize) { alert('どれかには送ってください'); return; }
+    if (!want.gemini && !want.groq && !want.muse && !wantDiarize && !el('use-muse-rt').checked) { alert('どれかには送ってください'); return; }
     if ((want.gemini || wantDiarize) && !geminiKey()) { alert('Gemini の API キーが本体の設定にありません'); return; }
     if (want.groq && !el('groq-key').value.trim()) { alert('Groq の API キーを入れてください'); return; }
-    if ((want.muse || wantDiarize) && !el('muse-key').value.trim()) { alert('Meta Model API のキー（Muse）を入れてください'); return; }
+    if ((want.muse || wantDiarize || el('use-muse-rt').checked) && !el('muse-key').value.trim()) { alert('Meta Model API のキー（Muse）を入れてください'); return; }
     savePrefs();
 
     state.running = true; state.abort = false;
@@ -526,6 +622,17 @@
       ]);
     }
 
+    // v0.24.161: Muse のリアルタイム（話者付き）。区切りごとの比較と同時に、選んだ範囲を実際の速さで流す
+    el('muse-rt').hidden = true;
+    state.museRt = null;
+    let rtDone = Promise.resolve();
+    if (el('use-muse-rt').checked) {
+      const from = p.chunks[0].start, to = Math.min(p.chunks[p.chunks.length - 1].end, from + MUSE_RT_MAX_SEC);
+      let seg = audio.subarray(Math.round(from * SR), Math.round(to * SR));
+      if (mode === 'comp-norm') seg = sttNormalizePeak(seg).samples;
+      rtDone = runMuseRealtime(seg, from, termsV);
+    }
+
     for (const c of p.chunks) {
       if (state.abort) break;
       let samples = audio.subarray(Math.round(c.start * SR), Math.round(c.end * SR));
@@ -551,7 +658,9 @@
     }
 
     await diarizeDone;
+    await rtDone;
     state.meta.diarize = state.diarize;
+    if (state.museRt) { const { live, pending, ...keep } = state.museRt; state.meta.museRt = keep; }
     state.running = false;
     el('btn-abort').disabled = true;
     el('btn-copy').disabled = !state.rows.length;

@@ -26,7 +26,7 @@ const eq = (label, got, want) => {
   page.on('pageerror', e => { console.log('✕ ページで例外: ' + e.message); fail++; });
   await page.route('**/api.groq.com/**', r => r.fulfill({ contentType: 'application/json',
     body: JSON.stringify({ text: '今日は家庭科室で火事が起きたらどうなるか考えてみます', segments: [{ text: '今日は家庭科室で火事が起きたらどうなるか考えてみます', no_speech_prob: 0, avg_logprob: -0.1 }] }) }));
-  await page.route('**/generativelanguage.googleapis.com/**', async r => { if (r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
+  await page.route('**/generativelanguage.googleapis.com/**', async r => { if (r.request().method() === 'GET' && /\/models(\?|$)/.test(r.request().url())) return r.fulfill({ contentType: 'application/json', body: '{"models":[],"data":[]}' }); /* v0.24.157: キーの確かめ（モデルの一覧） */
     await new Promise(res => setTimeout(res, 900));   // 整形は少しあとに返る（Groq の字の演出が見えるように）
     r.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '今日は、家庭科室で火事が起きたらどうなるかを考えてみます。' }] }, finishReason: 'STOP' }] }) });
   });

@@ -3864,3 +3864,16 @@ API コストをかけない方向で字幕体験を Gemini Audio に近づけ�
   - 閉じる確認の一言: 残すなら「閉じてから1週間は「閉じたタブを復元」で戻せます。」（前の「このタブの内容は削除されます。」は嘘になる）。ボタンは赤くしない。「残さない」なら前のまま
   - メモの画像は、閉じたタブ（復元できる）から参照されているものも掃除しない（戻したら画像が消えている、を防ぐ）。中身の無い空のタブは保管庫に入れない
   - テスト: `tests/browser/t-restore-tabs-browser.js`（v0.24.159 に当てると、ボタンが無くて止まる）・`tests/t-closed-tabs.js`（期限切れの判断）
+- 2026-11-19 (v0.24.161): **比較ページに「Muse のリアルタイム（話者付き）」**（やっさん: ショート動画で、Muse でラジオの話者付きリアルタイム文字起こしが Groq 並みに速かった。「検証を続けよう」）
+  - v0.24.147 の Muse はファイルで送る口（区切りを読み終わってから返す）で、1 回 4〜6 秒かかっていた。Muse にはリアルタイムの口（wss://api.meta.ai/v1/asr/realtime）があり、
+    流しながら途中の字（transcript）と、発言ごとの確定（speechComplete）・話者（speaker）を返す。うまくいけば「Web Speech の下書き → Groq で確定」と「あとで Gemini の話者判別」を Muse ひとつにできる
+    （やっさん「若干の聞き間違いは許容。Claude での整形や要約で直ることもある」）
+  - 作法は Meta の公式の説明書（dev.meta.ai/docs/speech-to-text・api-reference/voice/realtime・schemas。この環境では dev.meta.ai を通してある）のとおり:
+    最初の文字の通信が設定（authorization.accessToken・audioEncoding PCM_16KHZ・model・mode DIARIZATION・partialMode・languageBias Japanese・keywords＝よく出る語）。
+    受け付けの印（sessionId）のあと、16bit の生の音を 80ms ずつ実際の速さで送る（速すぎると 1008 で切られる）。最後に endStream、1000 で閉じるまで読む。キーは最初の通信に入れる（ヘッダーは読まない）ので、ブラウザから直接つなげる
+  - 選んだ範囲を流し、「流している音を聞く」（既定オン）なら同じ音をスピーカーにも流す。確定までの遅れ（送った長さ − 処理した位置）・途中の字が出るまでの遅れ・話者の数を出し、結果の写しにも入れる
+  - 届いた通信の組み立ては純関数（stt-compare-core.js の `sttMuseRtReduce`）。途中の字と話者には turnId が無いので、いちばん新しい speechStart の発言に付ける。発言は重なることがある
+  - 拡張の CSP に wss://api.meta.ai を足した
+  - テスト: `tests/t-muse-realtime.js`（公式の説明書の例の通信を流す）・`tests/browser/t-muse-rt-browser.js`（偽の WebSocket で、設定・80ms ずつ・実際の速さ・endStream・結果）
+  - あわせて: v0.24.157 でテストの Gemini の偽物に足した「GET はモデルの一覧として答える」が、比較ページの話者判別のファイルの確かめ（GET files/…）まで答えてしまい、`t-stt-compare-browser.js` が止まっていた。モデルの一覧の住所だけに絞った
+    （全部まとめて走らせるときに比較ページのテストを外していたので気づかなかった。これからは外さない）
