@@ -3877,3 +3877,32 @@ p.settings-lead { margin: -2px 0 8px; }
 .status.caution .status-text { font-variant-numeric: tabular-nums; }
 .status.cw-wait { --cw-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3.5h10M7 20.5h10M8 3.5c0 4 8 5 8 8.5s-8 4.5-8 8.5M16 3.5c0 4-8 5-8 8.5s8 4.5 8 8.5'/%3E%3C/svg%3E"); }
 .status.cw-retry { --cw-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4l9 15.5H3z'/%3E%3Cpath d='M12 10v4.5M12 17h.01'/%3E%3C/svg%3E"); }
+
+
+/* ───────── 閉じたタブを復元 (v0.24.160) ─────────
+ * 見本 https://claude.ai/artifact/QW2nLZGryaiJ5jMCJ4BNQs でやっさんが OK した形（区切り線なし）。そのまま写した */
+.restore-lead { margin: 0 0 10px; font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+.restore-box { padding: 0 14px; max-height: 340px; overflow-y: auto; }
+.restore-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; cursor: pointer; }
+.restore-all { padding-top: 12px; }
+.restore-all .restore-name { font-weight: 600; }
+.restore-day { font-size: 11.5px; color: var(--text-muted); padding: 14px 0 4px; }
+.restore-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.restore-name { color: var(--text); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.restore-sub { color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; display: flex; flex-wrap: wrap; gap: 0 10px; align-items: center; }
+.restore-sub svg { width: 13px; height: 13px; vertical-align: -2px; }
+.restore-sub .restore-cloud { color: var(--heading); display: inline-flex; align-items: center; gap: 3px; }
+.restore-sub .restore-audio { color: var(--accent); display: inline-flex; align-items: center; gap: 3px; }
+/* 選ぶ丸（チェックすると緑に ✓） */
+.restore-check { appearance: none; -webkit-appearance: none; flex: none; width: 22px; height: 22px; margin: 0; border-radius: 50%; border: 1.8px solid var(--text-faint); background: transparent; position: relative; cursor: pointer; transition: none; }
+.restore-check::after { content: ''; position: absolute; left: 6.5px; top: 3px; width: 5px; height: 10px; border: solid #0f1916; border-width: 0 2px 2px 0; transform: rotate(45deg) scale(0); }
+.restore-check:checked { background: var(--accent); border-color: var(--accent); }
+.restore-check:checked::after { transform: rotate(45deg) scale(1); }
+.restore-check:indeterminate { background: var(--accent); border-color: var(--accent); }
+.restore-check:indeterminate::after { left: 5px; top: 9px; width: 9px; height: 0; border-width: 0 0 2px 0; transform: none; }
+.restore-check:focus-visible { outline: 2px solid var(--heading); outline-offset: 2px; }
+.restore-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 0 22px; color: var(--text-muted); font-size: 13px; }
+.restore-empty-icon { color: var(--heading); }
+/* 保持するデータの取り扱い: 音声ファイルの入れ物の上の線を 1 本に（話者判別のトグルと同じ） */
+.settings-acc-box .settings-acc-body #keep-audio-fields { padding-top: 0; }
+.settings-acc-box .settings-acc-body #keep-audio-fields .field-conditional-inner > .field:first-child { border-top: none; }

@@ -74,10 +74,11 @@ const traceReveal = (page, sel, action) => page.evaluate(async ([sel, action]) =
       return { h0, k0, opened, f, hidden: [g.hidden, keep.hidden], style: (g.getAttribute('style') || '') + (keep.getAttribute('style') || '') };
     });
     eq('Gemini モードで開いたときは、どちらも出ている（開いた直後は動かさない）', [r.opened.g, r.opened.keep, r.opened.gStyle], [true, true, '']);
-    eq('Web Speech に切り替えると、途中の高さを通ってしまう', [r.f.some(x => x.g > 2 && x.g < r.h0 - 2), r.f.some(x => x.k > 2 && x.k < r.k0 - 2)], [true, true]);
+    // v0.24.160: 「保持するデータの取り扱い」は閉じたタブの期間があるので、Web Speech でもしまわない（音声ファイルの部分だけ中でしまう）
+    eq('Web Speech に切り替えると、途中の高さを通ってしまう（保持するデータの取り扱いは出たまま）', [r.f.some(x => x.g > 2 && x.g < r.h0 - 2), r.f.every(x => Math.abs(x.k - r.k0) <= 1)], [true, true]);
     const steps = r.f.slice(1).map((x, i) => Math.abs(x.b - r.f[i].b));
     eq('下の行も途中を通って寄る（最後に余白の分だけ跳ばない）', [r.f.some((x, i) => i > 0 && x.b !== r.f[0].b && x.b !== r.f[r.f.length - 1].b), steps.slice(-15).every(d => d <= 3)], [true, true]);
-    eq('しまいきったら隠れて、style に値を残さない', [r.hidden, r.style.replace(/\s/g, '')], [[true, true], '']);
+    eq('しまいきったら隠れて、style に値を残さない', [r.hidden, r.style.replace(/\s/g, '')], [[true, false], '']);
     eq('grid の ease の transition は使っていない', await page.evaluate(() => getComputedStyle(document.getElementById('webspeech-only-fields')).transitionDuration.split(',').every(d => parseFloat(d) === 0)), true);
   }
 

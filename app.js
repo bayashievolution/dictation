@@ -189,6 +189,7 @@ const DEFAULT_SETTINGS = {
   // 「できるだけ早く消す」という方針は close でも満たせる。
   // 値 'repass' はすでに保存されている設定を読めなくしないため据え置き
   audioRetention: 'close',   // close / repass / 1d / 7d / manual
+  closedTabKeepDays: 7,      // v0.24.160: 閉じたタブを残す日数（0 = 残さない）。既定 1 週間（やっさんの指定）
   // v0.24.103: 「残す」にした録音（検証用など）。{ sessionId: { title, savedAt } }。どの設定でも、タブを閉じても消さない。
   // 名前を覚えておくのは、タブを閉じたあとも一覧で何の録音か分かるようにするため
   audioPinned: {},
@@ -647,6 +648,8 @@ const els = {
   inputKeepRecording: document.getElementById('input-keep-recording'),
   inputSumadoMeter: document.getElementById('input-sumado-meter'),
   inputAudioRetention: document.getElementById('input-audio-retention'),
+  inputClosedTabDays: document.getElementById('input-closed-tab-days'),   // v0.24.160
+  btnRestoreTabs: document.getElementById('btn-restore-tabs'),
   inputClaudeBridge: document.getElementById('input-claude-bridge'),          // v0.24.0（v0.24.39 から「一部を Claude Code で処理する」）
   inputClaudeCode: document.getElementById('input-claude-code'),              // v0.24.39: 連携を使う
   claudeRouteNote: document.getElementById('claude-route-note'),              // v0.24.39
@@ -5244,7 +5247,9 @@ function applyGeminiOnlyVisibility(animated = true) {
   // v0.24.48: 「録音の保持」（話者判別）も Gemini モードのときだけ出す（やっさんの指定）
   // v0.24.74: これも一瞬で出し入れしていたので、同じくばねで
   // 「録音の保持」は区切り線のあるまとまり（下の余白 22px）。余白も一緒に縮める（中に移すと区切り線の位置が変わる）
-  revealSettingRow(document.getElementById('keep-recording-group'), isGemini, animated, true);
+  // v0.24.160: まとまり（保持するデータの取り扱い）は、閉じたタブの期間があるのでどのモードでも出す。音声ファイルの部分だけ AI で聞き取るとき
+  revealSettingRow(document.getElementById('keep-recording-group'), true, animated, true);
+  revealSettingRow(document.getElementById('keep-audio-fields'), isGemini, animated);
   // v0.24.159: AI の動きへ移した「話者判別機能を有効にする」も、録音があるのは AI で聞き取るときだけなので同じく
   revealSettingRow(document.getElementById('keep-toggle-fields'), isGemini, animated);
   revealSettingRow(el, isGemini, animated);
@@ -9115,6 +9120,7 @@ function openSettings() {
   if (els.inputKeepRecording) els.inputKeepRecording.checked = !!state.settings.audioKeepRecording;
   if (els.inputSumadoMeter) els.inputSumadoMeter.checked = !!state.settings.sumadoIslandMeter;
   if (els.inputAudioRetention) els.inputAudioRetention.value = state.settings.audioRetention || 'close';
+  if (els.inputClosedTabDays) els.inputClosedTabDays.value = String(closedTabKeepDays());   // v0.24.160
   if (els.inputClaudeCode) els.inputClaudeCode.checked = !!state.settings.claudeCode;              // v0.24.39
   if (els.inputClaudeBridge) els.inputClaudeBridge.checked = !!state.settings.useClaudeBridge;   // v0.24.0
   // v0.24.22: Claude 連携のチェックを入れた**あと**で見る。先に見ると、連携オフと読み違えて
@@ -9239,6 +9245,7 @@ function saveSettingsFromForm() {
     }
   }
   if (els.inputAudioRetention) state.settings.audioRetention = els.inputAudioRetention.value || 'close';
+  if (els.inputClosedTabDays) state.settings.closedTabKeepDays = Number(els.inputClosedTabDays.value);   // v0.24.160
   if (els.inputSumadoMeter) state.settings.sumadoIslandMeter = els.inputSumadoMeter.checked;
   // v0.24.0: Claude Code 連携。gemini.js 側はこの値を claude-bridge.js 経由で見る
   if (els.inputClaudeCode) {
@@ -9899,6 +9906,11 @@ async function sweepStoredImages() {
     for (const s of state.sessions) {
       for (const id of collectImageIds(s.memo || '')) used.add(id);
     }
+    // v0.24.160: 閉じたタブ（復元できる）のメモの画像も消さない。読めなければ掃除しない（戻したタブの画像が消えるよりよい）
+    if (typeof closedTabsList === 'function') {
+      const closed = await closedTabsList();
+      for (const r of closed) for (const id of collectImageIds((r.session && r.session.memo) || '')) used.add(id);
+    }
     const n = await imageStoreSweep(used);
     if (n > 0) diagLog.info(`使われていない画像を掃除: ${n}件`);
   } catch (e) {
@@ -10466,16 +10478,42 @@ function confirmDialog({ title, message = '', ok = 'OK', cancel = 'キャンセ�
   });
 }
 
+/* ───────── 閉じたタブを復元 (v0.24.160) ─────────
+ * やっさんの指定（見本 https://claude.ai/artifact/QW2nLZGryaiJ5jMCJ4BNQs ）。閉じたタブは closed-tabs.js の保管庫（IndexedDB）に、
+ * 設定の日数（既定 1 週間）のあいだ残し、雲の右のボタンから選んで戻す。録音（音声）は今までどおり閉じたら消す（「残す」にした録音だけ付く）
+ */
+function closedTabKeepDays() {
+  const d = Number(state.settings.closedTabKeepDays);
+  return Number.isFinite(d) && d >= 0 ? d : 7;
+}
+function closedTabDaysLabel(d = closedTabKeepDays()) {
+  return { 1: '1日', 3: '3日', 7: '1週間', 14: '2週間', 30: '1か月' }[d] || `${d}日`;
+}
+/** 閉じる確認の小窓の一言。残すなら「戻せます」、残さないなら今までどおり「削除されます」（できないことをできると言わない） */
+function closeTabMessage(many) {
+  const d = closedTabKeepDays();
+  if (!d) return many ? '内容はすべて削除されます。' : 'このタブの内容は削除されます。';
+  return `閉じてから${closedTabDaysLabel(d)}は「閉じたタブを復元」で戻せます。`;
+}
+/** 閉じるタブを保管庫へ入れる。中身の無い（空の）タブは入れない */
+function archiveClosedSessions(sessions) {
+  if (!closedTabKeepDays() || typeof closedTabsPut !== 'function') return;
+  const keep = sessions.filter((s) => s && (s.transcript || s.memo || s.summary || s.liveSummary || (s.chat && s.chat.length)));
+  if (!keep.length) return;
+  closedTabsPut(keep).catch((e) => diagLog.info(`閉じたタブを残せませんでした: ${(e && e.message) || e}`));
+}
+
 async function closeSession(id) {
   const idx0 = state.sessions.findIndex(s => s.id === id);
   if (idx0 < 0) return;
   const session = state.sessions[idx0];
   const hasContent = session.transcript || session.memo || session.summary;
   // v0.24.94: ブラウザの confirm をやめ、自前の小窓に
+  // v0.24.160: 閉じたタブを残すなら、消えるのではなく「戻せます」と書く（前の「削除されます」は嘘になる）
   if (hasContent && !(await confirmDialog({
     title: `「${session.title}」を閉じますか？`,
-    message: 'このタブの内容は削除されます。',
-    ok: '閉じる', destructive: true,
+    message: closeTabMessage(false),
+    ok: '閉じる', destructive: !closedTabKeepDays(),
   }))) return;
   // 待っているあいだに並びが変わっているかもしれないので、場所は確認のあとで探し直す
   const idx = state.sessions.findIndex(s => s.id === id);
@@ -10487,6 +10525,8 @@ async function closeSession(id) {
   // v0.24.103: ただし「残す」にした録音は消さない（名前だけ今のものに更新しておく）
   if (isAudioPinned(id)) rememberPinnedTitle(session);
   else audioStoreDeleteSession(id).catch(() => {});
+  if (wasActive) snapshotActiveToSession();   // 画面に出ている最新の中身を写してから残す
+  archiveClosedSessions([session]);   // v0.24.160
   state.sessions.splice(idx, 1);
   if (state.sessions.length === 0) {
     createSession({ activate: true, skipSave: true });
@@ -10509,10 +10549,10 @@ async function closeMultipleSessions(ids, { skipConfirm = false } = {}) {
     // v0.24.94: 自前の確認の小窓に
     const ok = await confirmDialog({
       title: `${targets.length}個のタブを閉じますか？`,
-      message: withContent.length === targets.length
-        ? '内容はすべて削除されます。'
-        : `うち${withContent.length}個に内容があり、削除されます。`,
-      ok: '閉じる', destructive: true,
+      message: !closedTabKeepDays()
+        ? (withContent.length === targets.length ? '内容はすべて削除されます。' : `うち${withContent.length}個に内容があり、削除されます。`)
+        : closeTabMessage(true),   // v0.24.160
+      ok: '閉じる', destructive: !closedTabKeepDays(),
     });
     if (!ok) return;
   }
@@ -10527,6 +10567,8 @@ async function closeMultipleSessions(ids, { skipConfirm = false } = {}) {
     if (isAudioPinned(t.id)) rememberPinnedTitle(t);
     else audioStoreDeleteSession(t.id).catch(() => {});
   }
+  if (activeIsTarget) snapshotActiveToSession();
+  archiveClosedSessions(targets);   // v0.24.160
   state.sessions = state.sessions.filter(s => !idSet.has(s.id));
   if (state.sessions.length === 0) {
     createSession({ activate: true, skipSave: true });
@@ -12507,6 +12549,101 @@ if (els.btnRefineTranscript) {
 }
 
 /* v0.21.0: 話者判別。走っている間は同じボタンが「中止」になる */
+/* 閉じたタブを復元の小窓 (v0.24.160・見本 https://claude.ai/artifact/QW2nLZGryaiJ5jMCJ4BNQs ) */
+const restoreSel = new Set();
+let restoreItems = [];
+function restorePlainLen(s) {
+  const t = (html) => String(html || '').replace(/<[^>]*>/g, '').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, '');
+  return t(s.transcript).length + t(s.memo).length;
+}
+function renderRestoreList() {
+  const list = document.getElementById('restore-list');
+  const now = Date.now();
+  const dayKey = (t) => new Date(t).toDateString();
+  const label = (t) => dayKey(t) === dayKey(now) ? '今日' : dayKey(t) === dayKey(now - 864e5) ? '昨日' : `${new Date(t).getMonth() + 1}/${new Date(t).getDate()}`;
+  const hm = (t) => { const d = new Date(t); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const glyph = (name) => (typeof icon === 'function' ? icon(name, 13) : '');
+  let html = '', last = '';
+  for (const r of restoreItems) {
+    const s = r.session || {};
+    const k = dayKey(r.closedAt);
+    if (k !== last) { html += `<div class="restore-day">${label(r.closedAt)}</div>`; last = k; }
+    html += `<label class="restore-row" data-key="${escapeHtml(r.id)}">
+      <input type="checkbox" class="restore-check" data-id="${escapeHtml(r.id)}"${restoreSel.has(r.id) ? ' checked' : ''} aria-label="${escapeHtml(s.title || '')}">
+      <span class="restore-text"><span class="restore-name">${escapeHtml(s.title || '（無題）')}</span>
+      <span class="restore-sub"><span>${hm(r.closedAt)} に閉じた</span><span>${restorePlainLen(s).toLocaleString()} 字</span>${s.notionUploadedAt ? `<span class="restore-cloud">${glyph('sm-cloud')}保存済み</span>` : ''}${isAudioPinned(r.id) ? `<span class="restore-audio">${glyph('sm-mic')}録音あり</span>` : ''}</span></span>
+    </label>`;
+  }
+  list.innerHTML = html;
+  const empty = restoreItems.length === 0;
+  document.getElementById('restore-empty').hidden = !empty;
+  document.getElementById('restore-box').hidden = empty;
+  const lead = document.getElementById('restore-lead');
+  lead.hidden = empty;
+  lead.textContent = `閉じてから${closedTabDaysLabel()}たつと消えます。`;
+  paintRestoreCount();
+}
+function paintRestoreCount() {
+  const n = restoreSel.size, all = document.getElementById('restore-all'), ok = document.getElementById('restore-ok');
+  all.checked = n > 0 && n === restoreItems.length;
+  all.indeterminate = n > 0 && n < restoreItems.length;
+  ok.disabled = n === 0;
+  ok.textContent = n ? `戻す（${n}）` : '戻す';   // 幅の変化は Motion.smoothWidth がばねで（やっさん「唐突に動いてる」）
+}
+async function openRestoreDialog() {
+  restoreSel.clear();
+  try { restoreItems = typeof closedTabsList === 'function' ? await closedTabsList() : []; }
+  catch (e) { restoreItems = []; diagLog.info(`閉じたタブを読めませんでした: ${(e && e.message) || e}`); }
+  // 期間を過ぎたもの・いま開いているのと同じ id のものは出さない
+  const limit = closedTabKeepDays() * 864e5, now = Date.now();
+  const open = new Set(state.sessions.map((s) => s.id));
+  restoreItems = restoreItems.filter((r) => now - r.closedAt < limit && !open.has(r.id));
+  renderRestoreList();
+  document.getElementById('restore-dialog').classList.remove('hidden');   // 出入りのばねは installModalMotion
+}
+function closeRestoreDialog() { document.getElementById('restore-dialog').classList.add('hidden'); }
+async function restoreSelectedTabs() {
+  const ids = restoreItems.filter((r) => restoreSel.has(r.id)).map((r) => r.id);
+  closeRestoreDialog();
+  if (!ids.length || typeof closedTabsTake !== 'function') return;
+  const got = await closedTabsTake(ids);
+  const open = new Set(state.sessions.map((s) => s.id));
+  // 録音を始めた順（古いものが左）に、いまのタブの右へ並べ、いちばん後ろを開く
+  const back = got.map((r) => r.session).filter((s) => s && s.id && !open.has(s.id))
+    .sort((a, b) => (a.recordingStartedAt || a.createdAt || 0) - (b.recordingStartedAt || b.createdAt || 0));
+  if (!back.length) return;
+  snapshotActiveToSession();
+  state.sessions.push(...back);
+  state.activeId = back[back.length - 1].id;
+  loadActiveSessionIntoDOM();
+  persistSessions();
+  renderTabs();
+  diagLog.info(`閉じたタブを ${back.length} 件戻しました`);
+}
+if (els.btnRestoreTabs) els.btnRestoreTabs.addEventListener('click', () => { openRestoreDialog(); });
+{
+  const box = document.getElementById('restore-dialog');
+  if (box) {
+    box.addEventListener('click', (e) => {
+      const a = e.target.closest('[data-restore]');
+      if (a) { if (a.dataset.restore === 'ok') restoreSelectedTabs(); else closeRestoreDialog(); }
+    });
+    document.getElementById('restore-list').addEventListener('change', (e) => {
+      const c = e.target.closest('.restore-check'); if (!c) return;
+      if (c.checked) restoreSel.add(c.dataset.id); else restoreSel.delete(c.dataset.id);
+      paintRestoreCount();
+    });
+    document.getElementById('restore-all').addEventListener('change', (e) => {
+      restoreSel.clear();
+      if (e.target.checked) restoreItems.forEach((r) => restoreSel.add(r.id));
+      for (const c of document.querySelectorAll('#restore-list .restore-check')) c.checked = restoreSel.has(c.dataset.id);
+      paintRestoreCount();
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !box.classList.contains('hidden')) { e.stopPropagation(); closeRestoreDialog(); } }, true);
+    if (window.Motion && Motion.smoothWidth) Motion.smoothWidth(document.getElementById('restore-ok'));
+  }
+}
+
 if (els.btnDiarize) {
   els.btnDiarize.addEventListener('click', () => { runDiarization(); });
   updateDiarizeButton();
@@ -12919,7 +13056,10 @@ if (els.btnClearAudio) {
 initSessions();
 renderDictBar();   // v0.20.0
 // v0.22.0: どのメモからも参照されていない画像を片付ける
-sweepStoredImages();
+// v0.24.160: 先に、残す期間を過ぎた閉じたタブを消す（消したタブのメモの画像は、この掃除で一緒に片付く）
+(typeof closedTabsPrune === 'function' ? closedTabsPrune(closedTabKeepDays()).then((gone) => {
+  if (gone.length) diagLog.info(`残す期間を過ぎた閉じたタブを消しました: ${gone.length}件`);
+}).catch(() => {}) : Promise.resolve()).finally(() => sweepStoredImages());
 // v0.24.0: 保存されている Claude 連携の設定を claude-bridge.js に渡す。
 // **起動のたびに必ずやる。** claude-bridge.js 側の旗は false から始まるので、
 // ここを通さないと、設定画面で入れてあっても連携が切れたままになる

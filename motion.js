@@ -566,5 +566,45 @@
     });
   }
 
-  global.Motion = { SPRINGS, MOTION, zoom, animate, set, place, current, clear, onFrame, reveal, smoothHeight, flipList, popIn, popOut, popIsOpen, fadeShow, fadeHide, createMorph, stripMotionStyles, Spring1D };
+  /**
+   * 字が変わって幅が変わるものを、ばねで伸び縮みさせる（smoothHeight の横向き版・ディクテーション用に足した v0.24.160）
+   * やっさん（2026-11-19）「すべて選ぶを選んだときに戻すボタンの幅が変わる。唐突に動いてる」。
+   * 「戻す」→「戻す（5）」のように字の長さが変わったとき、新しい幅へいきなり跳ばず、アイランドが横に伸びるのと同じばね（MOTION.morph.wide）で伸びる。
+   * 隠れていたものが出てきたときは、伸ばさずにその幅から（小窓を開いたとき、0 から伸びないように）。
+   * ボタンの CSS の transition（all 0.15s）が幅に効くと、ばねに遅れて最後に跳ぶので、動かすあいだは止める
+   * @returns {() => void} 見張りをやめる
+   */
+  function smoothWidth(el) {
+    const driver = document.createElement('div');
+    let shown = el.offsetWidth, moving = false, target = -1;
+    let rendered = el.getClientRects().length > 0;
+    onFrame(driver, ({ x }) => { shown = x; el.style.width = `${x}px`; });
+    const natural = () => { const keep = el.style.width; el.style.width = ''; const w = el.offsetWidth; el.style.width = keep; return w; };
+    const check = () => {
+      if (!el.getClientRects().length) { rendered = false; return; }
+      if (!rendered) { rendered = true; shown = natural(); return; }
+      const from = moving ? current(driver).x : shown;
+      const to = natural();
+      if (moving && Math.abs(to - target) < 1) return;
+      if (Math.abs(to - from) < 1) { if (!moving) shown = to; return; }
+      if (!moving) set(driver, { x: from });
+      el.style.boxSizing = 'border-box';
+      el.style.width = `${from}px`;
+      el.style.overflow = 'hidden';
+      el.style.whiteSpace = 'nowrap';
+      el.style.transition = 'none';
+      moving = true; target = to;
+      animate(driver, { x: to }, { spring: MOTION.morph.wide }).then((done) => {
+        if (!done) return;
+        moving = false;
+        for (const k of ['width', 'overflow', 'whiteSpace', 'boxSizing', 'transition']) el.style[k] = '';
+        shown = el.offsetWidth;
+      });
+    };
+    const mo = new MutationObserver(check);
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => mo.disconnect();
+  }
+
+  global.Motion = { SPRINGS, MOTION, zoom, animate, set, place, current, clear, onFrame, reveal, smoothHeight, smoothWidth, flipList, popIn, popOut, popIsOpen, fadeShow, fadeHide, createMorph, stripMotionStyles, Spring1D };
 })(typeof window !== 'undefined' ? window : globalThis);

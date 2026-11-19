@@ -1,4 +1,5 @@
 // 設定の「録音の保持」（話者判別）が Gemini モードのときだけ出るかを、本物の Chromium で検査する (v0.24.48)。
+// v0.24.160 から: まとまりは「保持するデータの取り扱い」でどのモードでも出し、音声ファイルの部分（keep-audio-fields）を Gemini モードのときだけ出す。
 //
 // ■ これは `sh tests/run.sh` では走らない（tests/t-*.js の形にしていない）
 //
@@ -32,9 +33,10 @@ const eq = (label, got, want) => {
     await page.waitForTimeout(700);
     await page.evaluate(() => document.getElementById('btn-settings').click());
     await page.waitForTimeout(300);
+    // v0.24.160: まとまり（保持するデータの取り扱い）は閉じたタブの期間があるのでどのモードでも出す。出し入れするのは音声ファイルの部分
     const shown = () => page.evaluate(() => {
-      const g = document.getElementById('keep-recording-group');
-      return !!g && !g.hidden && g.offsetParent !== null;
+      const g = document.getElementById('keep-audio-fields');
+      return !!g && !g.hidden && !document.getElementById('keep-recording-group').hidden;
     });
     eq(`${mode} で開いたとき: ${want ? '出る' : '出ない'}`, await shown(), want);
     // もう一方のモードに切り替える

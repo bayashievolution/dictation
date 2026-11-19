@@ -71,7 +71,8 @@ const eq = (label, got, want) => {
   await popup.close();
   await page.check('#mode-webspeech');
   await page.waitForTimeout(800);
-  eq('Web Speech にすると「録音の保持」のまとまりは隠れる（今までどおり）', await page.evaluate(() => document.getElementById('keep-recording-group').hidden), true);
+  // v0.24.160: まとまり（保持するデータの取り扱い）は出したまま、音声ファイルの部分だけ隠す
+  eq('Web Speech にすると、保持するデータの取り扱いの音声ファイルの部分は隠れる', await page.evaluate(() => [document.getElementById('keep-recording-group').hidden, document.getElementById('keep-audio-fields').hidden]), [false, true]);
 
   await browser.close();
   console.log(fail ? `\n✕ ${fail} 件失敗` : '\nすべて通過');

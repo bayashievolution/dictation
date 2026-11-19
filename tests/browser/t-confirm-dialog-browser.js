@@ -26,7 +26,7 @@ const eq = (label, got, want) => {
   const native = [];
   page.on('dialog', d => { native.push(d.message()); d.dismiss(); });
   await page.goto(URL);
-  await page.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({ notionLastDataSourceId: 'ds1', notionLastDataSourceTitle: '講義ノート', notionEnabled: true, notionToken: 'ntn_x' })));
+  await page.evaluate(() => localStorage.setItem('dictation:settings', JSON.stringify({ notionLastDataSourceId: 'ds1', notionLastDataSourceTitle: '講義ノート', notionEnabled: true, notionToken: 'ntn_x', closedTabKeepDays: 0 /* v0.24.160: 閉じたタブを残すと消す確認ではなくなる（赤くしない）。ここは「残さない」＝取り消せない閉じ方を見る */ })));
   await page.reload();
   await page.waitForTimeout(700);
   const shown = () => page.evaluate(() => !document.getElementById('confirm-dialog').classList.contains('hidden'));
