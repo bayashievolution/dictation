@@ -857,7 +857,8 @@ async function formatOsdWithAi(rawText) {
       const raw = localStorage.getItem('dictation:settings');
       if (!raw) return '';
       const s = JSON.parse(raw);
-      return s.apiKey || '';
+      // v0.24.88: 設定の AI 設定で Gemini API を切っていたら使わない（app.js の geminiKey と同じ）
+      return s.geminiEnabled === false ? '' : (s.apiKey || '');
     } catch { return ''; }
   })();
   if (!apiKey) return rawText;

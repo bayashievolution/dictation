@@ -2,3 +2,6 @@ node_modules/
 *.log
 .DS_Store
 sessions/
+
+# Claude Code のローカル設定。端末ごとに違うので共有しない
+.claude/
