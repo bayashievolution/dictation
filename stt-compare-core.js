@@ -287,7 +287,7 @@ function sttMuseRtReduce(st, ev, sentMs) {
       break;
     }
     case 'transcript': {
-      st.live = ev.transcript || '';
+      st.live = String(ev.transcript || '').trim();
       if (st.current != null) {
         const t = turn(st.current);
         t.partial = ev.transcript || '';
@@ -300,7 +300,7 @@ function sttMuseRtReduce(st, ev, sentMs) {
       break;
     case 'speechComplete': {
       const t = turn(ev.turnId);
-      t.transcript = ev.transcript || t.partial || '';
+      t.transcript = String(ev.transcript || t.partial || '').trim();   // v0.24.162: 実機で頭に空白が付いて届いた（2026-11-19 やっさんの結果）
       t.endMs = ev.audioProcessedMs;
       if (Number.isFinite(sentMs) && Number.isFinite(ev.audioProcessedMs)) t.lagMs = Math.max(0, sentMs - ev.audioProcessedMs);
       t.done = true;

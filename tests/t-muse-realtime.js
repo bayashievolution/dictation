@@ -29,7 +29,7 @@ feed({ type: 'speechStart', turnId: 2, audioProcessedMs: 3800 }, 3900);
 feed({ type: 'speechComplete', turnId: 1, transcript: 'Thanks for calling. How can I help?', audioProcessedMs: 3600 }, 4500);
 feed({ type: 'transcript', transcript: 'こんにちは', final: false, audioProcessedMs: 4600 }, 4800);
 feed({ type: 'speaker', label: 'B', audioProcessedMs: 4700 }, 4900);
-feed({ type: 'speechComplete', turnId: 2, transcript: 'こんにちは。', audioProcessedMs: 5000 }, 5600);
+feed({ type: 'speechComplete', turnId: 2, transcript: ' こんにちは。 ', audioProcessedMs: 5000 }, 5600);   // 実機では頭に空白が付いて届いた
 const sum = ctx.sttMuseRtSummary(st);
 eq('確定した発言（話者つき・始まった順）', sum.turns.map((t) => [t.speaker, t.transcript]), [['A', 'Thanks for calling. How can I help?'], ['B', 'こんにちは。']]);
 eq('確定までの遅れ', sum.turns.map((t) => t.lagMs), [900, 600]);
