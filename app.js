@@ -5118,6 +5118,21 @@ function revealSettingRow(el, show, animated, withMargin = false) {
  * AI 設定のトグルの下（キーの欄・連携のボタン）は、オンのときだけ出す (v0.24.88)
  * v0.24.83〜87 は Groq のキーの欄を「聞き取る AI で Groq を選んだとき」に出していた。キーはトグルの下にまとめた（設定の見本の 2 段目）
  */
+/**
+ * 「Web Speech の字も整形に渡す」は、効くときだけ出す (v0.24.158・やっさんの指定)
+ * 読むのは Groq の聞き取りのあとの整形だけ（transcribeChunkWithGroq）。なので、ライブ整形がオン・AI で聞き取る・
+ * 聞き取りが Groq（表で選んだもの、選べなければ使えるほう）・リアルタイム表示（Web Speech の並走）がオン、のときだけ意味がある。
+ * 前はライブ整形がオンなら出していて、Web Speech モードでも出ていた（2026-11-19 の設定の連動の点検）
+ */
+function applyRefineWsVisibility(animated = true) {
+  const on = (box) => !!(box && box.checked);
+  const audio = on(els.modeGemini);
+  const stt = (typeof aiPickWorking !== 'undefined' && aiPickWorking && typeof formAiAvail === 'function')
+    ? pickAvailable(aiPickWorking.stt, formAiAvail(), ['groq', 'gemini']) : null;
+  const show = on(els.inputAiEnabled) && audio && stt === 'groq' && on(els.inputGeminiLiveDisplay);
+  revealSettingRow(document.getElementById('refine-with-ws-field'), show, animated);
+}
+
 function applyAiSettingsVisibility(animated = true) {
   const on = (box) => !!(box && box.checked);
   revealSettingRow(document.getElementById('gemini-key-fields'), on(els.inputGeminiEnabled), animated);
@@ -5133,7 +5148,7 @@ function applyAiSettingsVisibility(animated = true) {
   // v0.24.132: ライブ整形がオフなら「ライブ整形のタイミング」「見出し追加のタイミング」、ライブ要約がオフなら「ライブ要約の間隔」を隠す（やっさんの指定）
   revealSettingRow(document.getElementById('live-refine-sec-field'), on(els.inputAiEnabled), animated);
   revealSettingRow(document.getElementById('mid-consolidate-field'), on(els.inputAiEnabled), animated);
-  revealSettingRow(document.getElementById('refine-with-ws-field'), on(els.inputAiEnabled), animated);   // v0.24.144
+  applyRefineWsVisibility(animated);   // v0.24.144・v0.24.158
   revealSettingRow(document.getElementById('live-summary-min-field'), on(els.inputLiveSummary), animated);
 }
 
@@ -5167,9 +5182,10 @@ function formAiAvail() {
     claude: on(els.inputClaudeCode),
   };
 }
-function renderAiTable() {
+function renderAiTable({ animated = true } = {}) {
   const body = els.aiTableBody;
   if (!body || !aiPickWorking) return;
+  applyRefineWsVisibility(animated !== false);   // v0.24.158: 聞き取りの AI・モードで、出すかが変わる
   const avail = formAiAvail();
   const ws = !(els.modeGemini && els.modeGemini.checked);   // Web Speech なら文字起こしに AI は使わない
   const now = {
@@ -8962,6 +8978,8 @@ function syncNotionSettingsUi() {
   if (els.inputNotionAutoClose) els.inputNotionAutoClose.checked = !!state.settings.notionAutoCloseTab;
   if (els.inputNotionAutoKeepAudio) els.inputNotionAutoKeepAudio.checked = !!state.settings.notionAutoKeepAudio;
   revealSettingRow(document.getElementById('notion-auto-fields'), !!state.settings.notionAutoSave, false);
+  // v0.24.158: 「Notion 連携」がオフなら、下はまとめて隠す（やっさんの指定）
+  revealSettingRow(document.getElementById('notion-enabled-fields'), !!state.settings.notionEnabled, false);
 
   if (els.notionLastTarget) {
     const t = state.settings.notionLastDataSourceTitle;
@@ -9118,7 +9136,7 @@ function openSettings() {
   applyGeminiOnlyVisibility(/* animated */ false);
   applyWebSpeechOnlyVisibility(/* animated */ false);
   applyAiSettingsVisibility(/* animated */ false);
-  renderAiTable();   // v0.24.92
+  renderAiTable({ animated: false });   // v0.24.92（開いた直後は動かさない）
   refreshKeyChecks();   // v0.24.157: 前の結果を出す。確かめていない・確かめられなかったものは、ここで確かめ直す
   renderUsageCard();   // v0.24.104
   els.fontTranscript.value = state.settings.transcriptFont;
@@ -11050,6 +11068,7 @@ if (els.btnNotionTest) els.btnNotionTest.addEventListener('click', () => testNot
 // v0.24.50: 「Notion 連携」をオンにしたら、その場で確かめる。オフにしたら横の表示を消す
 if (els.inputNotionEnabled) {
   els.inputNotionEnabled.addEventListener('change', () => {
+    revealSettingRow(document.getElementById('notion-enabled-fields'), els.inputNotionEnabled.checked, true);   // v0.24.158
     if (els.inputNotionEnabled.checked) testNotionConnection();
     else {
       notionTestSeq++;   // 走りかけの確認を取り消す（あとから結果が届いても書かない）
@@ -11601,6 +11620,7 @@ for (const [box, w] of [[els.inputGeminiEnabled, 'gemini'], [els.inputGroqEnable
   if (box) box.addEventListener('change', () => { checkAiKey(w); });
 }
 for (const el of [els.modeGemini, els.modeWebSpeech]) if (el) el.addEventListener('change', renderAiTable);
+if (els.inputGeminiLiveDisplay) els.inputGeminiLiveDisplay.addEventListener('change', () => applyRefineWsVisibility());   // v0.24.158
 if (els.aiTableBody) {
   els.aiTableBody.addEventListener('click', (e) => {
     const b = e.target.closest('.ai-pick');
