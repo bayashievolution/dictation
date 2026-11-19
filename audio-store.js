@@ -242,20 +242,42 @@ async function audioStoreGetSegments(sessionId) {
  * @returns {Array<{seg:number, parts:*[], bytes:number, type:string}>}
  */
 function groupAudioSegments(rows) {
+  // v0.24.163: 同じ区間番号でも、別の録音のかけらが混ざっていることがある。
+  // v0.24.162 まで、録音を始めるたびに区間とかけらの番号を 0 から振り直していた（startArchiveRecorder）。
+  // 同じタブで録音を止めて、また始めると、2 回目のかけらも「区間 0 の 0 番・1 番…」として保管され、
+  // 番号の順に並べると 1 回目と 2 回目のかけらが交互に混ざって、始まりと終わりの会話が重なって聞こえた
+  // （やっさん 2026-11-19: 比較ページで流すと 2 重に聞こえ、Muse が 2 つの会話を A と B に分けて聞き取った）。
+  // かけらは保存した時刻（savedAt）の順に来るので、時刻の順に見て、番号が戻ったところを別の録音の始まりとみなして分ける。
+  // これで、もう保管してある混ざった録音も分け直せる
   const bySeg = new Map();
   for (const r of rows || []) {
     // seg を持たないレコード（v1 の残り）は 0 番として扱う
     const seg = Number.isFinite(r.seg) ? r.seg : 0;
-    const g = bySeg.get(seg) || { seg, rows: [], bytes: 0, type: r.type || 'audio/webm' };
-    g.rows.push(r);
-    g.bytes += r.bytes || 0;
-    bySeg.set(seg, g);
+    if (!bySeg.has(seg)) bySeg.set(seg, []);
+    bySeg.get(seg).push(r);
   }
-  return Array.from(bySeg.values())
-    .sort((a, b) => a.seg - b.seg)
-    .map(g => {
+  const groups = [];
+  for (const [seg, list] of bySeg) {
+    const timed = list.every((r) => Number.isFinite(r.savedAt));
+    // 時刻が無い古いレコードは、前と同じく番号の順だけで並べる
+    list.sort((a, b) => (timed ? a.savedAt - b.savedAt : 0) || a.seq - b.seq);
+    let cur = null;
+    for (const r of list) {
+      if (!cur || (timed && r.seq <= cur.lastSeq)) {
+        cur = { seg, rows: [], bytes: 0, type: r.type || 'audio/webm', firstAt: timed ? r.savedAt : 0, lastSeq: -1 };
+        groups.push(cur);
+      }
+      cur.rows.push(r);
+      cur.bytes += r.bytes || 0;
+      cur.lastSeq = r.seq;
+    }
+  }
+  return groups
+    .sort((a, b) => (a.firstAt - b.firstAt) || (a.seg - b.seg))
+    .map((g, i) => {
       g.rows.sort((a, b) => a.seq - b.seq);
-      return { seg: g.seg, parts: g.rows.map(r => r.blob), bytes: g.bytes, type: g.type };
+      // 区間番号は並べた順に振り直す（同じ番号が 2 つ出ないように。ファイル名などに使う）
+      return { seg: i, parts: g.rows.map(r => r.blob), bytes: g.bytes, type: g.type };
     });
 }
 
