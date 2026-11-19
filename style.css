@@ -3570,6 +3570,10 @@ body.chat-active .dict-menu { bottom: 114px; }
 .key-status.is-ng { color: var(--danger); }
 /* v0.24.157: 「失敗したら Gemini で処理する」は、Gemini が使えないと押せない。名前を薄く、その下に赤い字 */
 .fallback-row .fallback-ng { color: var(--danger); }
+/* v0.24.159: 話者判別を動かせる Gemini が無いときの一文（オレンジの注意。押せなくはしない。やっさんの指定の並び） */
+.keep-ai-ng { color: var(--caution); }
+/* v0.24.159: 話者判別のボタンも、AI が無いときはオレンジの ⚠（タブの「AI が無い」と同じ） */
+#btn-diarize.no-ai { color: var(--caution); }
 .fallback-row:has(> input:disabled) > span { color: var(--text-muted); }
 
 /* 文字起こしのモード: 絵の付いたカード（ラジオは見えないところに置いて、カードで選ぶ） */
@@ -3851,6 +3855,10 @@ p.settings-lead { margin: -2px 0 8px; }
 
 /* v0.24.142: 録音を止めたら Notion に保存する（の下の欄）。入れ物の上の線と、最初の行の上の線が重なって二重になるので、最初の行の線を外す */
 .settings-acc-box .settings-acc-body #notion-auto-fields .field-conditional-inner > .field:first-child { border-top: none; }
+/* v0.24.159: AI の動きへ移した「話者判別機能を有効にする」。入れ物の上の線を 1 本だけにし、下の断り書きは前と同じく線なしでトグルに寄せる */
+.settings-acc-box .settings-acc-body #keep-toggle-fields { padding-top: 0; }
+.settings-acc-box .settings-acc-body #keep-toggle-fields .field-conditional-inner > .field:first-child { border-top: none; }
+.settings-acc-box .settings-acc-body #keep-toggle-fields .field-conditional-inner > .field:has(> .field-hint.warn-hint:only-child) { border-top: none; padding-top: 0; margin-top: -4px; }
 
 /* v0.24.145: 右上の表示を、名前の上に重ねて伸ばせるように（見本 https://claude.ai/artifact/WiLp7kmj4F1n8V942Ss73a ・やっさん「ばっさんディクテーションの文字の上にまで伸ばしてもいい」）。
    右端から左へ伸び、マイクの絵の右まで。地は透けない色にする（下の名前が透けて見えないように。色はいつもの色を帯の色に混ぜたもの） */

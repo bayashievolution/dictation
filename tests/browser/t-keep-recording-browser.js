@@ -48,8 +48,9 @@ const eq = (label, got, want) => {
   await page.goto(URL);
   await page.waitForTimeout(600);
   eq('名前（やっさんの指定）', await page.evaluate(() => {
-    const t = document.getElementById('keep-recording-group').textContent;
-    return ['話者判別機能を有効にする', '音声ファイルの取り扱い', '話者判別処理が終わったら消す（24時間で自動失効）',
+    // v0.24.159: 「話者判別機能を有効にする」は AI の動きへ移した（keep-toggle-fields）。まとまりの名前は「保持するデータの取り扱い」
+    const t = document.getElementById('keep-recording-group').textContent + document.getElementById('keep-toggle-fields').textContent;
+    return ['保持するデータの取り扱い', '話者判別機能を有効にする', '音声ファイルの取り扱い', '話者判別処理が終わったら消す（24時間で自動失効）',
             '音声ファイルが残っていれば話者判別をやり直すことができます。'].every((w) => t.includes(w));
   }), true);
   await browser.close();

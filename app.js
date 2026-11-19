@@ -3842,6 +3842,13 @@ function updateDiarizeButton() {
   if (!els.btnDiarize) return;
   const r = diarizationState();
   els.btnDiarize.classList.toggle('firing', r.running);
+  // v0.24.159: 話者判別を動かせる Gemini が無いときは、オレンジの ⚠ にする（タブの「AI が無い」と同じ。見本 https://claude.ai/artifact/G4JsctL5SsohFH22ZCT8FD ）
+  const noAi = !r.running && !geminiUsableNow();
+  if (els.btnDiarize.classList.contains('no-ai') !== noAi || !els.btnDiarize.firstElementChild) {
+    els.btnDiarize.classList.toggle('no-ai', noAi);
+    els.btnDiarize.innerHTML = `<span data-icon="${noAi ? 'sm-warn' : 'users'}"></span>`;
+    if (typeof renderIcons === 'function') renderIcons(els.btnDiarize);
+  }
   // v0.21.2: 結果が残っていれば、音声が消えていても貼り直せる。
   // ボタンの説明もそれに合わせる（押す前に何が起きるか分かるように）
   const s = getActiveSession();
@@ -3871,7 +3878,15 @@ async function runDiarization() {
     return;
   }
 
-  if (!geminiKey()) { alert('Gemini API キーが未設定です'); openSettings(); return; }
+  // v0.24.159: ブラウザの「Gemini API キーが未設定です」をやめ、自前の小窓で知らせて AI 設定へ（見本 https://claude.ai/artifact/G4JsctL5SsohFH22ZCT8FD ）
+  if (!geminiUsableNow()) {
+    if (await confirmDialog({ title: '話者判別を使用できる AI がありません', message: '話者判別には Gemini API のキーが必要です。', ok: 'AI 設定を開く' })) {
+      openSettings();
+      const t = document.getElementById('input-gemini-enabled');
+      if (t) setTimeout(() => t.scrollIntoView({ block: 'center', behavior: 'smooth' }), 200);
+    }
+    return;
+  }
   if (state.isRecording && state.recordingSessionId === state.activeId) {
     alert('録音中は話者判別できません。先に録音を止めてください。');
     return;
@@ -4927,6 +4942,7 @@ async function checkAiKey(which) {
   paintKeyStatus(which);
   applyFallbackAvailability();
   applyClaudeBridgeSetting();   // 「Claude に失敗したら Gemini」の旗を、確かめた結果に合わせる
+  if (which === 'gemini') updateDiarizeButton();   // v0.24.159: キーが違うと分かったら話者判別のボタンを ⚠ に
   return r.kind;
 }
 /** 保存した設定で、Gemini に回してよいか（キーがあり、確かめて「違う」と分かっていない） */
@@ -4960,6 +4976,13 @@ function applyFallbackAvailability(animated = true) {
     // 行が出るばねの中で字までばねで伸びると、行の高さが最後に変わって下の行が跳ぶ（t-motion-settings-browser.js）
     const rowShown = row && !row.hidden && row.offsetHeight > 0 && !(window.Motion && Motion.current && row.style.height);
     if (ng) revealSettingRow(ng, !ok, animated && rowShown);
+  }
+  // v0.24.159: 話者判別を動かせるのも Gemini だけ。使えないときは、トグルの名前の下にオレンジの一文（押せなくはしない。やっさんの指定）
+  const keepNg = document.querySelector('#keep-toggle-fields .keep-ai-ng');
+  if (keepNg) {
+    const row = keepNg.closest('label');
+    const shown = row && row.offsetHeight > 0 && !document.getElementById('keep-toggle-fields').style.height;
+    revealSettingRow(keepNg, !ok, animated && shown);
   }
 }
 
@@ -5222,6 +5245,8 @@ function applyGeminiOnlyVisibility(animated = true) {
   // v0.24.74: これも一瞬で出し入れしていたので、同じくばねで
   // 「録音の保持」は区切り線のあるまとまり（下の余白 22px）。余白も一緒に縮める（中に移すと区切り線の位置が変わる）
   revealSettingRow(document.getElementById('keep-recording-group'), isGemini, animated, true);
+  // v0.24.159: AI の動きへ移した「話者判別機能を有効にする」も、録音があるのは AI で聞き取るときだけなので同じく
+  revealSettingRow(document.getElementById('keep-toggle-fields'), isGemini, animated);
   revealSettingRow(el, isGemini, animated);
   // v0.24.87: デバイス・リアルタイム表示・チャンクは下の「音声入力」へ移した。出し入れは同じく AI で聞き取るときだけ
   revealSettingRow(document.getElementById('gemini-only-input-fields'), isGemini, animated);
@@ -9276,6 +9301,7 @@ function saveSettingsFromForm() {
   // v0.24.156: 全部の設定を書き込んでから（前は Claude Code・使用するAI を書き込む前に呼んでいて、Claude Code を切って保存すると、
   // タブは消えるのにライブ要約の画面が残った）。applyLiveSummaryTab は中で renderInnerTabs も呼ぶ
   applyLiveSummaryTab();
+  updateDiarizeButton();   // v0.24.159: Gemini を切った・入れたで ⚠ が変わる
   els.settingsModal.classList.add('hidden');
   // v0.24.157: 保存したら、変わったキー・確かめられていないキーを確かめる（同じキーで「有効」と分かっていれば、もう一度はしない）
   for (const w of ['gemini', 'groq']) {

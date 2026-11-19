@@ -51,6 +51,8 @@ const ICON_DEFS = {
   // v0.24.89: SUMADO の線の絵（SUMADO の extension/js/line-icons.js から写した。線の太さ 1.8）。名前は sm- で始める
   // やっさんの指定「シンボル化やアイコンは SUMADO に収録しているものを使ってほしい」
   'sm-warn': '<path d="M12 4l9 15.5H3z"/><path d="M12 10v4.5M12 17h.01"/>',
+  // v0.24.159: 保持するデータの取り扱い（やっさんが A の盾を選んだ）。SUMADO の線の絵と同じ描きかた（SUMADO には無いので、あちらの line-icons.js にも足す）
+  'sm-shield': '<path d="M12 3.5l7 2.8v5.4c0 4.2-2.9 7.5-7 8.8-4.1-1.3-7-4.6-7-8.8V6.3z"/><path d="M9 12l2.2 2.2L15.2 10"/>',
   'sm-wave': '<path d="M4 12h1.5M7.5 8v8M11 5v14M14.5 9v6M18 7v10M20.5 12H20"/>',
   'sm-clock': '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   'sm-note': '<path d="M6 3.5h9l3.5 3.5V20a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z"/><path d="M8.5 10h7M8.5 13.5h7M8.5 17h4"/>',
